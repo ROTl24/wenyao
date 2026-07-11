@@ -1,4 +1,4 @@
-const { app, BrowserWindow, ipcMain, safeStorage } = require('electron');
+const { app, BrowserWindow, ipcMain, net, protocol, safeStorage } = require('electron');
 const fs = require('node:fs');
 const path = require('node:path');
 const crypto = require('node:crypto');
@@ -7,6 +7,17 @@ const { analyzeCloud, createLocalReport, followUpCloud } = require('./services/a
 const { createAlibabaClient } = require('./services/alibaba.cjs');
 const { LocalVectorIndex } = require('./services/vector-index.cjs');
 const { hybridSearch } = require('./services/retrieval.cjs');
+const {
+  APP_PROTOCOL_ENTRY_URL,
+  APP_PROTOCOL_PRIVILEGES,
+  APP_PROTOCOL_SCHEME,
+  createAppProtocolHandler,
+} = require('./services/app-protocol.cjs');
+
+protocol.registerSchemesAsPrivileged([{
+  scheme: APP_PROTOCOL_SCHEME,
+  privileges: APP_PROTOCOL_PRIVILEGES,
+}]);
 
 const oneTimeSetupKey = process.argv.includes('--configure-api-key-env') ? String(process.env.WENYAO_SETUP_KEY || '') : '';
 delete process.env.WENYAO_SETUP_KEY;
@@ -25,6 +36,13 @@ function resourcePath(name) {
 
 function dataPath() {
   return path.join(app.getPath('userData'), 'app-data.json');
+}
+
+function registerAppProtocol() {
+  protocol.handle(APP_PROTOCOL_SCHEME, createAppProtocolHandler({
+    distRoot: path.join(app.getAppPath(), 'dist'),
+    fetchFile: (url, options) => net.fetch(url, options),
+  }));
 }
 
 function loadCorpus() {
@@ -98,7 +116,7 @@ function createWindow() {
   mainWindow.setMenuBarVisibility(false);
   mainWindow.webContents.setWindowOpenHandler(() => ({ action: 'deny' }));
   mainWindow.once('ready-to-show', () => mainWindow.show());
-  if (app.isPackaged) mainWindow.loadFile(path.join(app.getAppPath(), 'dist', 'index.html'));
+  if (app.isPackaged) mainWindow.loadURL(APP_PROTOCOL_ENTRY_URL);
   else mainWindow.loadURL('http://127.0.0.1:5173');
 }
 
@@ -259,6 +277,7 @@ function registerIpc() {
 }
 
 app.whenReady().then(() => {
+  registerAppProtocol();
   store = new JsonStore(dataPath());
   corpus = loadCorpus();
   corpusHash = hashCorpus(corpus);
