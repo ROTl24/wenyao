@@ -67,11 +67,12 @@ function ensureString(value, label) {
   return value.trim();
 }
 
-function validatePlateReferences(report, plate) {
+function validatePlateReferences(report, plate, evidence) {
   const factText = [report.summary, report.focus, report.relations, report.moving, report.synthesis].join('\n');
   const allowedGanZhi = new Set([
     plate.dayGanZhi, plate.monthGanZhi,
     ...plate.lines.flatMap((line) => [line.ganZhi, line.changedGanZhi]),
+    ...evidence.flatMap((entry) => String(entry.text || '').match(/[甲乙丙丁戊己庚辛壬癸][子丑寅卯辰巳午未申酉戌亥]/g) || []),
   ].filter(Boolean));
   const mentionedGanZhi = factText.match(/[甲乙丙丁戊己庚辛壬癸][子丑寅卯辰巳午未申酉戌亥]/g) || [];
   if (mentionedGanZhi.some((value) => !allowedGanZhi.has(value))) throw new Error('AI 报告包含排盘中不存在的干支事实');
@@ -99,7 +100,7 @@ function validateCloudReport(input, plate, evidence, retrievalDiagnostics) {
     };
   }) : [];
   if (evidence.length > 0 && claims.length === 0) throw new Error('AI 报告没有为古籍判断提供可校验引用');
-  validatePlateReferences({ ...input, summary }, plate);
+  validatePlateReferences({ ...input, summary }, plate, evidence);
   return {
     mode: 'cloud',
     summary,

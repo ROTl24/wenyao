@@ -52,6 +52,15 @@ test('cloud report rejects invented stem-branch facts and moving lines', () => {
   assert.throws(() => validateCloudReport(invalid, plate, evidence), /干支|动爻/);
 });
 
+test('cloud report may compare a stem-branch explicitly present in cited evidence', () => {
+  const sourcedEvidence = [{ ...evidence[0], text: '甲子日占事业，以官鬼为用。' }];
+  const valid = {
+    summary: '本卦天风姤，变卦乾为天。', focus: '官鬼为用神。', relations: '古例记载甲子日，但本卦仍以实际日辰为准。', moving: '初爻发动。', synthesis: '谨慎。',
+    uncertainties: [], guidance: ['观察变化。'], claims: [{ text: '事业以官鬼为用。', evidenceIds: ['E1'], confidence: '中' }],
+  };
+  assert.doesNotThrow(() => validateCloudReport(valid, plate, sourcedEvidence));
+});
+
 test('chat requests enforce a strict JSON schema instead of best-effort JSON mode', async () => {
   let body;
   const originalFetch = global.fetch;
