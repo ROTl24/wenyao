@@ -54,3 +54,13 @@ npm.cmd run test:unit -- src/features/ritual/coinTrajectory.test.ts src/features
 结果：7 files、58 tests 全部通过。
 
 整合后的全量 unit：21 files、125 tests 全部通过。显式 `npm.cmd run typecheck` 退出码 0；`npm.cmd run build:renderer` 转换 1,819 modules 并成功产出。构建仅保留既有的大 chunk 非阻断 warning。最终提交后由主线程在合并 HEAD 再跑一次全矩阵。
+
+## Motion Review 追修：墨幕顶部安全区
+
+- 复验基线：`8c3efdc`。
+- 根因：`.ink-hands-runtime__cover` 原先用 `inset: -8%` 覆盖整座舞台，中心径向墨色在约 `51%` 范围内接近不透明；复摇切手峰值因此会把顶部爻题与说明一并压黑。
+- 修复：墨幕改为 `top: 26%`、左右与底部保留 `-8%` 的手部交换覆盖范围，并用从透明到实黑的纵向 mask 羽化上缘。墨幕不再进入标题安全区，手部交换区在切帧时仍保持完全遮挡；未增加背景垫片、计时器或第二套动效时钟。
+- 时间轴保持原有冻结标签：复摇 `inkCover=.44`，闭手/开手仍只在墨幕完全不透明后原子交换。
+- TDD 红灯：CSS 契约先要求取消全屏 `inset`、声明 `top: 26%` 安全区及羽化 mask；旧实现因仍为 `inset: -8%` 精确失败。时间轴快照同时锁定换手前墨幕 opacity 大于 `0.99`。
+- TDD 绿灯：`RitualScreen.styles`、`createRitualTimeline`、`InkHands`、`RitualScreen` 共 4 files、28 tests 全部通过；`npm run typecheck` 退出码 0。
+- 真实 Chrome 以 `1280×720` 复验墨幕峰值：cover opacity 约 `0.95`，标题/说明安全区底边为 `139px`，cover 顶边约 `208px`，留有约 `69px` 的纸面过渡。画面中标题与说明保持清晰，手部区被墨幕覆盖，铜钱不越入标题区。

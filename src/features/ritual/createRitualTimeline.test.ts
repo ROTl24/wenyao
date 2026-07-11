@@ -104,6 +104,7 @@ describe('唯一 GSAP 摇卦时间轴', () => {
     controller.seek(coverAt - 0.001);
     expect(targets.closedHands.style.opacity).toBe('1');
     expect(targets.openHands.style.opacity).toBe('0');
+    expect(Number(targets.inkCover.style.opacity)).toBeGreaterThan(0.99);
 
     controller.seek('inkCover');
     expect(targets.inkCover.style.opacity).toBe('1');
