@@ -98,6 +98,21 @@ export function confirmCurrentToss(session: DivinationSession): DivinationSessio
   };
 }
 
+export function advanceCurrentToss(
+  session: DivinationSession,
+  expectedTossId: string,
+  nextToss?: Toss,
+  nextVisualSeed?: string,
+): DivinationSession {
+  if (session.currentToss?.id !== expectedTossId) return session;
+  if ((nextToss === undefined) !== (nextVisualSeed === undefined)) return session;
+
+  const confirmed = confirmCurrentToss(session);
+  if (confirmed.status === 'complete' || nextToss === undefined || nextVisualSeed === undefined) return confirmed;
+
+  return prepareToss(confirmed, nextToss, nextVisualSeed);
+}
+
 export function withAnalysis(session: DivinationSession, analysis: AnalysisReport): DivinationSession {
   return { ...session, analysis, updatedAt: new Date().toISOString() };
 }
