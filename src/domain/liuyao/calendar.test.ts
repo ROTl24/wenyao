@@ -59,6 +59,24 @@ describe('buildCalendarSnapshot', () => {
     });
   });
 
+  it.each([
+    {
+      label: '1986 daylight saving time',
+      castAt: '1986-06-01T00:00:00.000Z',
+      localDateTime: '1986-06-01T09:00:00+09:00',
+    },
+    {
+      label: '2026 standard time',
+      castAt: '2026-07-11T04:00:00.000Z',
+      localDateTime: '2026-07-11T12:00:00+08:00',
+    },
+  ])('formats $label with the actual Shanghai offset and preserves the instant', ({ castAt, localDateTime }) => {
+    const calendar = buildCalendarSnapshot(castAt, PROFILE);
+
+    expect(calendar.localDateTime).toBe(localDateTime);
+    expect(Date.parse(calendar.localDateTime)).toBe(Date.parse(castAt));
+  });
+
   it.each(JIE_BOUNDARIES_2026)('changes exact pillars at the 2026 $name boundary', (boundary) => {
     const before = buildCalendarSnapshot(boundary.beforeInstant, PROFILE);
     const atBoundary = buildCalendarSnapshot(boundary.atInstant, PROFILE);

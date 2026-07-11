@@ -43,7 +43,6 @@ const BRANCH_ELEMENTS: Readonly<Record<Branch, Element>> = {
 };
 
 const ZONED_ISO_PATTERN = /^(\d{4})-(\d{2})-(\d{2})T(\d{2}):(\d{2}):(\d{2})(?:\.\d+)?(Z|[+-]\d{2}:\d{2})$/;
-const SHANGHAI_OFFSET = '+08:00';
 
 interface LocalDateTimeParts {
   year: number;
@@ -52,6 +51,7 @@ interface LocalDateTimeParts {
   hour: number;
   minute: number;
   second: number;
+  offset: string;
 }
 
 export interface XunInfo {
@@ -118,29 +118,40 @@ function toLocalParts(instant: Date, timezone: 'Asia/Shanghai'): LocalDateTimePa
     hour: '2-digit',
     minute: '2-digit',
     second: '2-digit',
+    timeZoneName: 'longOffset',
     hourCycle: 'h23',
   });
-  const values = Object.fromEntries(
-    formatter
-      .formatToParts(instant)
-      .filter((part) => part.type !== 'literal')
-      .map((part) => [part.type, Number(part.value)]),
-  );
+  const formattedParts = formatter.formatToParts(instant);
+  const readNumber = (type: Intl.DateTimeFormatPartTypes): number => {
+    const value = formattedParts.find((part) => part.type === type)?.value;
+    const parsed = Number(value);
+    if (!Number.isInteger(parsed)) {
+      throw new RangeError(`Intl 未返回可用的上海本地${type}字段`);
+    }
+    return parsed;
+  };
+  const timeZoneName = formattedParts.find((part) => part.type === 'timeZoneName')?.value;
+  const offsetMatch = /^(?:GMT|UTC)([+-])(\d{2}):(\d{2})(?::(\d{2}))?$/.exec(timeZoneName ?? '');
+  if (!offsetMatch) {
+    throw new RangeError('Intl 未返回可表示的上海时区偏移');
+  }
+  const [, sign, offsetHour, offsetMinute, offsetSecond] = offsetMatch;
 
   return {
-    year: values.year,
-    month: values.month,
-    day: values.day,
-    hour: values.hour,
-    minute: values.minute,
-    second: values.second,
+    year: readNumber('year'),
+    month: readNumber('month'),
+    day: readNumber('day'),
+    hour: readNumber('hour'),
+    minute: readNumber('minute'),
+    second: readNumber('second'),
+    offset: `${sign}${offsetHour}:${offsetMinute}${offsetSecond ? `:${offsetSecond}` : ''}`,
   };
 }
 
 function formatLocalDateTime(parts: LocalDateTimeParts): string {
   const pad = (value: number, length = 2) => String(value).padStart(length, '0');
   return `${pad(parts.year, 4)}-${pad(parts.month)}-${pad(parts.day)}`
-    + `T${pad(parts.hour)}:${pad(parts.minute)}:${pad(parts.second)}${SHANGHAI_OFFSET}`;
+    + `T${pad(parts.hour)}:${pad(parts.minute)}:${pad(parts.second)}${parts.offset}`;
 }
 
 export function getXunInfo(ganZhi: string): XunInfo {
