@@ -1,0 +1,37 @@
+import type { EvidenceEntry } from '../lib/retrieval';
+import type { DivinationSession } from '../lib/session';
+import type { AnalysisReport } from '../lib/types';
+
+interface PublicSettings { baseUrl: string; model: string; hasApiKey: boolean }
+interface DesktopError { code: string; message: string; dataSafe: boolean; nextAction: string }
+interface CorpusStatus { count: number; originalCount: number; summaryCount: number; ready: boolean }
+
+export interface DesktopApi {
+  sessions: {
+    list(): Promise<DivinationSession[]>;
+    get(id: string): Promise<DivinationSession | null>;
+    save(session: DivinationSession): Promise<DivinationSession>;
+    delete(id: string): Promise<boolean>;
+  };
+  settings: {
+    get(): Promise<PublicSettings>;
+    save(payload: { baseUrl: string; model: string; apiKey?: string }): Promise<PublicSettings>;
+    clearKey(): Promise<PublicSettings>;
+    test(): Promise<{ ok: boolean; message?: string; error?: DesktopError }>;
+  };
+  corpus: {
+    list(): Promise<EvidenceEntry[]>;
+    status(): Promise<CorpusStatus>;
+  };
+  ai: {
+    analyze(payload: { question: string; category: string; plate: DivinationSession['plate']; evidence: EvidenceEntry[] }): Promise<{ ok: boolean; report?: AnalysisReport; error?: DesktopError }>;
+    followUp(payload: { question: string; session: DivinationSession; evidence: EvidenceEntry[] }): Promise<{ ok: boolean; answer?: { content: string; evidenceIds: string[] }; error?: DesktopError }>;
+  };
+  platform: string;
+}
+
+declare global {
+  interface Window { wenyao?: DesktopApi }
+}
+
+export {};

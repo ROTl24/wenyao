@@ -19,6 +19,8 @@ corpus/build/
 # JavaScript / Rust / Python build outputs
 node_modules/
 dist/
+release/
+*.tsbuildinfo
 target/
 .venv/
 __pycache__/
