@@ -312,13 +312,19 @@ export interface DerivedFact {
 ```ts
 export type QuestionIntentId =
   | 'career.rank-or-office'
+  | 'career.project-or-contract'
   | 'study.learning-or-documents'
   | 'study.exam-rank-or-admission'
   | 'wealth.income-or-asset'
-  | 'relationship.partner'
+  | 'relationship.female-partner'
+  | 'relationship.male-partner'
+  | 'relationship.relationship-dynamic'
   | 'health.self'
-  | 'lost-item.object'
+  | 'lost-item.money-or-valuables'
+  | 'lost-item.documents-or-vehicle'
+  | 'lost-item.animal'
   | 'travel.self'
+  | 'travel.other-person'
   | 'other.explicit';
 
 export interface UseGodCandidate {
@@ -355,6 +361,8 @@ export interface UseGodSelection {
 4. 多现时保留所有候选和评分依据；没有足够受审规则拉开差异时返回 `ambiguous`，不能让 AI 猜一个。
 5. `primary.entity` 必须是具体 `line` 或 `hidden-spirit`；“官鬼”“父母”只是六亲类型，仍不能代替具体候选。
 6. AI 可以解释 `UseGodSelection`，不能修改它。
+
+宽泛类别的默认处理：婚恋未说明所问对象时，在妻财、官鬼与世应观察之间请求澄清；寻物未说明钱财、文书车服或动物时请求澄清；问他人行踪未说明与问卦者的关系时请求澄清；自占健康和自身出行以世爻作为具体候选，不把世爻强行改写成某个固定六亲。
 
 ### 4.6 DivinationCaseV2
 
@@ -405,6 +413,8 @@ export interface RuleDefinition {
 - 神煞集合与权重。
 
 本规格默认：立春精确时刻、节令精确时刻、子初 23:00 换日；五行十二长生顺排且土从水；解释重点为生旺墓绝；神煞限贵人、禄神、驿马、天喜且只能辅助。切换任何一项都必须产生不同的 profile ID 和 `factSetHash`。
+
+默认 `yehe_core_v1` 的日冲分类采用保守门槛：日支冲爻始终只是结构性 `clashes`；月令同支、同五行或月令生爻且不月破时，才附加条件性暗动；月破或月令克爻且没有已记录生扶时，才附加条件性日破；其余不强判。默认神煞取法固定为天乙贵人、禄神以日干起，驿马以日支起，天喜以年支起，且统一为 `secondary + conditional`。
 
 ## 6. 完整结果页
 
