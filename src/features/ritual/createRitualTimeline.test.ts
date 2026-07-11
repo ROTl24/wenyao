@@ -190,6 +190,64 @@ describe('唯一 GSAP 摇卦时间轴', () => {
     controller.kill();
   });
 
+  it('restart 将所有目标复位到首帧并允许同一 controller 开始新一轮完成', () => {
+    const completed = vi.fn();
+    const { coinRig, setMediaProgress, targets } = fixtureTargets();
+    const controller = createRitualTimeline(targets, {
+      firstLine: true,
+      reducedMotion: false,
+      onComplete: completed,
+    });
+    controller.finish();
+    expect(completed).toHaveBeenCalledTimes(1);
+
+    controller.restart();
+
+    expect(targets.closedHands.style.opacity).toBe('1');
+    expect(targets.openHands.style.opacity).toBe('0');
+    expect(targets.inkCover.style.opacity).toBe('0');
+    expect(coinRig.setProgress).toHaveBeenLastCalledWith(0);
+    expect(setMediaProgress).toHaveBeenLastCalledWith(0);
+    expect(controller.getProgress()).toBe(0);
+
+    controller.finish();
+    expect(completed).toHaveBeenCalledTimes(2);
+    controller.kill();
+  });
+
+  it('reduced restart 仍只做首尾 snap，并作为新一轮再次完成', () => {
+    const completed = vi.fn();
+    const { coinRig, targets } = fixtureTargets();
+    const controller = createRitualTimeline(targets, {
+      firstLine: true,
+      reducedMotion: true,
+      onComplete: completed,
+    });
+    controller.play();
+    vi.mocked(coinRig.setProgress).mockClear();
+
+    controller.restart();
+
+    expect(vi.mocked(coinRig.setProgress).mock.calls.map(([progress]) => progress))
+      .toEqual([0, 1]);
+    expect(targets.closedHands.style.opacity).toBe('0');
+    expect(targets.openHands.style.opacity).toBe('1');
+    expect(completed).toHaveBeenCalledTimes(2);
+    controller.kill();
+  });
+
+  it('seekProgress 以归一化进度恢复同一主时间轴', () => {
+    const controller = createRitualTimeline(fixtureTargets().targets, {
+      firstLine: false,
+      reducedMotion: false,
+    });
+
+    controller.seekProgress(0.375);
+
+    expect(controller.getProgress()).toBeCloseTo(0.375, 8);
+    controller.kill();
+  });
+
   it('kill 后旧时间轴即使时钟继续也绝不触发完成回调', async () => {
     vi.useFakeTimers();
     const completed = vi.fn();

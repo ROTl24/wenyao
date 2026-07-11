@@ -1,39 +1,56 @@
-import { act, renderHook, waitFor } from '@testing-library/react';
+import { Suspense, startTransition, useEffect, useState } from 'react';
+import {
+  act,
+  fireEvent,
+  render,
+  renderHook,
+  screen,
+  waitFor,
+} from '@testing-library/react';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import type { CoinRigHandle } from './CoinRig';
 import type { InkHandsTargets } from './InkHands';
 import type {
   RitualTimelineController,
   RitualTimelineOptions,
+  RitualTimelineTargets,
 } from './createRitualTimeline';
 import { useRitualController } from './useRitualController';
 
 interface FakeController extends RitualTimelineController {
   options: RitualTimelineOptions;
+  targets: RitualTimelineTargets;
 }
 
 const harness = vi.hoisted(() => ({
   controllers: [] as FakeController[],
   create: vi.fn(),
+  snap: vi.fn(),
 }));
 
 vi.mock('./createRitualTimeline', () => ({
   createRitualTimeline: harness.create,
+  snapRitualTargetsToEnd: harness.snap,
 }));
 
-function fakeController(options: RitualTimelineOptions): FakeController {
+function fakeController(
+  targets: RitualTimelineTargets,
+  options: RitualTimelineOptions,
+): FakeController {
   let progress = 0;
   let killed = false;
   const controller: FakeController = {
     options,
+    targets,
     play: vi.fn(),
     finish: vi.fn(() => {
       if (killed) return;
       progress = 1;
       options.onComplete?.();
     }),
-    restart: vi.fn(),
+    restart: vi.fn(() => { progress = 0; }),
     seek: vi.fn(),
+    seekProgress: vi.fn((next: number) => { progress = next; }),
     kill: vi.fn(() => { killed = true; }),
     dispose: vi.fn(() => { killed = true; }),
     getProgress: vi.fn(() => progress),
@@ -99,8 +116,17 @@ function controllableMotionPreference(initial: boolean) {
 beforeEach(() => {
   harness.controllers.splice(0);
   harness.create.mockReset();
-  harness.create.mockImplementation((_targets, options: RitualTimelineOptions) => {
-    const controller = fakeController(options);
+  harness.snap.mockReset();
+  harness.snap.mockImplementation((targets: RitualTimelineTargets) => {
+    targets.closedHands.style.opacity = '0';
+    targets.openHands.style.opacity = '1';
+    targets.inkCover.style.opacity = '0';
+    targets.setMediaProgress(1);
+    targets.coinRig.setProgress(1);
+    targets.coinRig.invalidate();
+  });
+  harness.create.mockImplementation((targets, options: RitualTimelineOptions) => {
+    const controller = fakeController(targets, options);
     harness.controllers.push(controller);
     return controller;
   });
@@ -258,5 +284,135 @@ describe('useRitualController 生命周期', () => {
     expect(harness.controllers[0].kill).not.toHaveBeenCalled();
     expect(harness.controllers[0].finish).not.toHaveBeenCalled();
     expect(result.current.phase).toBe('ready');
+  });
+
+  it('活动中同一 toss 重绑 hands 会迁移到新 controller 并维持归一化进度', async () => {
+    const firstHands = fixtureHands();
+    const secondHands = fixtureHands();
+    const rig = fixtureRig();
+    const { result } = renderHook(() => useRitualController({
+      toss: { id: 'rebind-active-targets' },
+      lineIndex: 3,
+    }));
+    act(() => result.current.onHandsReady(firstHands));
+    act(() => result.current.bindRig('rebind-active-targets', rig));
+    await waitFor(() => expect(harness.create).toHaveBeenCalledTimes(1));
+    vi.mocked(harness.controllers[0].getProgress).mockReturnValue(0.413);
+
+    act(() => result.current.onHandsReady(secondHands));
+    await waitFor(() => expect(harness.create).toHaveBeenCalledTimes(2));
+
+    expect(harness.controllers[0].kill).toHaveBeenCalledTimes(1);
+    expect(harness.controllers[1].targets.openHands).toBe(secondHands.openHands);
+    expect(harness.controllers[1].seekProgress).toHaveBeenCalledWith(0.413);
+    expect(harness.controllers[1].play).toHaveBeenCalledTimes(1);
+    act(() => harness.controllers[0].options.onComplete?.());
+    expect(result.current.phase).toBe('held');
+  });
+
+  it('ready 后 manifest 与 rig 目标重建会同步 snap 新末帧且不复活旧 controller', async () => {
+    const firstHands = fixtureHands();
+    const firstRig = fixtureRig();
+    const nextHands = fixtureHands();
+    const nextRig = fixtureRig();
+    const { result } = renderHook(() => useRitualController({
+      toss: { id: 'rebind-final-targets' },
+      lineIndex: 4,
+    }));
+    act(() => result.current.onHandsReady(firstHands));
+    act(() => result.current.bindRig('rebind-final-targets', firstRig));
+    await waitFor(() => expect(harness.create).toHaveBeenCalledTimes(1));
+    act(() => harness.controllers[0].options.onComplete?.());
+
+    act(() => {
+      result.current.onHandsReady(nextHands);
+      result.current.bindRig('rebind-final-targets', nextRig);
+    });
+    await waitFor(() => expect(harness.snap).toHaveBeenCalled());
+
+    expect(harness.create).toHaveBeenCalledTimes(1);
+    expect(harness.controllers[0].kill).not.toHaveBeenCalled();
+    expect(nextHands.closedHands.style.opacity).toBe('0');
+    expect(nextHands.openHands.style.opacity).toBe('1');
+    expect(nextHands.setMediaProgress).toHaveBeenLastCalledWith(1);
+    expect(nextRig.setProgress).toHaveBeenLastCalledWith(1);
+    expect(nextRig.invalidate).toHaveBeenCalled();
+    expect(result.current.phase).toBe('ready');
+  });
+
+  it('reduced 完成后切回动态并换回视频目标仍保持开手末帧', async () => {
+    const motion = controllableMotionPreference(true);
+    const firstHands = fixtureHands();
+    const videoHands = fixtureHands();
+    const rig = fixtureRig();
+    const { result } = renderHook(() => useRitualController({
+      toss: { id: 'reduced-back-to-video' },
+      lineIndex: 1,
+    }));
+    act(() => result.current.onHandsReady(firstHands));
+    act(() => result.current.bindRig('reduced-back-to-video', rig));
+    await waitFor(() => expect(harness.create).toHaveBeenCalledTimes(1));
+    act(() => harness.controllers[0].options.onComplete?.());
+
+    act(() => motion.change(false));
+    act(() => result.current.onHandsReady(videoHands));
+    await waitFor(() => expect(harness.snap).toHaveBeenCalled());
+
+    expect(videoHands.closedHands.style.opacity).toBe('0');
+    expect(videoHands.openHands.style.opacity).toBe('1');
+    expect(videoHands.setMediaProgress).toHaveBeenLastCalledWith(1);
+    expect(harness.create).toHaveBeenCalledTimes(1);
+    expect(harness.controllers[0].kill).not.toHaveBeenCalled();
+  });
+
+  it('Suspense 中未提交的新 toss 不会污染已提交 toss 的完成与确认身份', async () => {
+    const hands = fixtureHands();
+    const rig = fixtureRig();
+    const never = new Promise<never>(() => undefined);
+
+    function ConcurrentHarness() {
+      const [id, setId] = useState('committed-a');
+      const [confirmed, setConfirmed] = useState('unset');
+      const controller = useRitualController({ toss: { id }, lineIndex: 1 });
+      useEffect(() => {
+        controller.onHandsReady(hands);
+        controller.bindRig(id, rig);
+      }, [controller.bindRig, controller.onHandsReady, id]);
+
+      if (id === 'uncommitted-b') throw never;
+      return (
+        <div>
+          <span data-testid="concurrent-phase">{controller.phase}</span>
+          <span data-testid="concurrent-confirmed">{confirmed}</span>
+          <button
+            onClick={() => startTransition(() => setId('uncommitted-b'))}
+            type="button"
+          >
+            render B
+          </button>
+          <button
+            onClick={() => setConfirmed(controller.tryConfirm() ?? 'none')}
+            type="button"
+          >
+            confirm A
+          </button>
+        </div>
+      );
+    }
+
+    render(
+      <Suspense fallback={<span>loading B</span>}>
+        <ConcurrentHarness />
+      </Suspense>,
+    );
+    await waitFor(() => expect(harness.create).toHaveBeenCalledTimes(1));
+    expect(screen.getByTestId('concurrent-phase')).toHaveTextContent('held');
+
+    fireEvent.click(screen.getByRole('button', { name: 'render B' }));
+    act(() => harness.controllers[0].options.onComplete?.());
+
+    expect(screen.getByTestId('concurrent-phase')).toHaveTextContent('ready');
+    fireEvent.click(screen.getByRole('button', { name: 'confirm A' }));
+    expect(screen.getByTestId('concurrent-confirmed')).toHaveTextContent('committed-a');
   });
 });

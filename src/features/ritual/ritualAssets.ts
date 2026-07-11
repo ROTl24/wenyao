@@ -55,6 +55,58 @@ export const DEFAULT_RITUAL_HANDS_MANIFEST: StillRitualHandsManifest = {
 
 export const DEFAULT_RITUAL_HANDS_MANIFEST_URL = '/ritual/manifest.json';
 
+export type RitualManifestFetcher = (
+  input: RequestInfo | URL,
+  init?: RequestInit,
+) => Promise<Pick<Response, 'ok' | 'json'>>;
+
+export interface LoadRitualHandsManifestOptions {
+  readonly url?: string;
+  readonly baseUrl?: string;
+  readonly fetcher?: RitualManifestFetcher;
+  readonly fallback?: RitualHandsManifest;
+}
+
+function defaultRitualBaseUrl(): string {
+  if (typeof document !== 'undefined' && document.baseURI) return document.baseURI;
+  if (typeof location !== 'undefined' && location.href) return location.href;
+  return 'http://localhost/';
+}
+
+export function resolveRitualAssetUrl(path: string, baseUrl: string): string {
+  const appRelativePath = path.startsWith('/') && !path.startsWith('//')
+    ? path.slice(1)
+    : path;
+  return new URL(appRelativePath, baseUrl).href;
+}
+
+export function resolveRitualHandsManifestUrls(
+  manifest: RitualHandsManifest,
+  baseUrl: string,
+): RitualHandsManifest {
+  if (manifest.mode === 'opaque-video' || manifest.mode === 'alpha-video') {
+    return {
+      ...manifest,
+      closedPoster: resolveRitualAssetUrl(manifest.closedPoster, baseUrl),
+      openPoster: resolveRitualAssetUrl(manifest.openPoster, baseUrl),
+      source: resolveRitualAssetUrl(manifest.source, baseUrl),
+    };
+  }
+  if (manifest.mode === 'image-sequence') {
+    return {
+      ...manifest,
+      closedPoster: resolveRitualAssetUrl(manifest.closedPoster, baseUrl),
+      openPoster: resolveRitualAssetUrl(manifest.openPoster, baseUrl),
+      frames: manifest.frames.map((frame) => resolveRitualAssetUrl(frame, baseUrl)),
+    };
+  }
+  return {
+    ...manifest,
+    closedPoster: resolveRitualAssetUrl(manifest.closedPoster, baseUrl),
+    openPoster: resolveRitualAssetUrl(manifest.openPoster, baseUrl),
+  };
+}
+
 function record(value: unknown): Record<string, unknown> {
   if (typeof value !== 'object' || value === null || Array.isArray(value)) {
     throw new TypeError('ritual manifest must be an object');
@@ -147,4 +199,25 @@ export function parseRitualHandsManifest(value: unknown): RitualHandsManifest {
     frames: input.frames.map((frame, index) => nonEmptyString(frame, `frames[${index}]`)),
     frameRate: positiveNumber(input.frameRate, 'frameRate'),
   };
+}
+
+export async function loadRitualHandsManifest({
+  url = DEFAULT_RITUAL_HANDS_MANIFEST_URL,
+  baseUrl = defaultRitualBaseUrl(),
+  fetcher = globalThis.fetch,
+  fallback = DEFAULT_RITUAL_HANDS_MANIFEST,
+}: LoadRitualHandsManifestOptions = {}): Promise<RitualHandsManifest> {
+  const resolvedFallback = resolveRitualHandsManifestUrls(fallback, baseUrl);
+  if (typeof fetcher !== 'function') return resolvedFallback;
+
+  try {
+    const response = await fetcher(resolveRitualAssetUrl(url, baseUrl), { cache: 'no-cache' });
+    if (!response.ok) throw new Error('ritual manifest request failed');
+    return resolveRitualHandsManifestUrls(
+      parseRitualHandsManifest(await response.json()),
+      baseUrl,
+    );
+  } catch {
+    return resolvedFallback;
+  }
 }

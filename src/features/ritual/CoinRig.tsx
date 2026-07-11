@@ -159,6 +159,9 @@ function MountedCoinRig({
 
   useLayoutEffect(() => {
     rig.prepare(input);
+  }, [input, rig]);
+
+  useEffect(() => {
     onReady(rig);
   }, [input, onReady, rig]);
 

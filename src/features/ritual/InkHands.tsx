@@ -1,6 +1,7 @@
-import { useLayoutEffect, useMemo, useRef } from 'react';
+import { useEffect, useMemo, useRef, useState } from 'react';
 import {
   DEFAULT_RITUAL_HANDS_MANIFEST,
+  loadRitualHandsManifest,
   parseRitualHandsManifest,
   type RitualHandsManifest,
 } from './ritualAssets';
@@ -28,19 +29,67 @@ function clampProgress(progress: number): number {
 
 export function InkHands({
   firstLine,
-  manifest = DEFAULT_RITUAL_HANDS_MANIFEST,
+  manifest,
   reducedMotion = false,
   className = '',
   onReady,
 }: InkHandsProps) {
-  const parsed = useMemo(() => parseRitualHandsManifest(manifest), [manifest]);
+  const explicitManifest = useMemo(
+    () => manifest === undefined ? null : parseRitualHandsManifest(manifest),
+    [manifest],
+  );
+  const [runtimeManifest, setRuntimeManifest] = useState<RitualHandsManifest | null>(null);
+
+  useEffect(() => {
+    if (explicitManifest) return;
+    let cancelled = false;
+    setRuntimeManifest(null);
+    void loadRitualHandsManifest().then((loaded) => {
+      if (!cancelled) setRuntimeManifest(loaded);
+    });
+    return () => { cancelled = true; };
+  }, [explicitManifest]);
+
+  const resolvedManifest = explicitManifest ?? runtimeManifest;
+  if (!resolvedManifest) {
+    return (
+      <div
+        aria-hidden="true"
+        className={`ink-hands-runtime ${className}`.trim()}
+        data-mode="loading-manifest"
+      />
+    );
+  }
+
+  return (
+    <LoadedInkHands
+      className={className}
+      firstLine={firstLine}
+      manifest={resolvedManifest}
+      onReady={onReady}
+      reducedMotion={reducedMotion}
+    />
+  );
+}
+
+interface LoadedInkHandsProps extends Omit<InkHandsProps, 'manifest'> {
+  readonly manifest: RitualHandsManifest;
+}
+
+function LoadedInkHands({
+  firstLine,
+  manifest: parsed = DEFAULT_RITUAL_HANDS_MANIFEST,
+  reducedMotion = false,
+  className = '',
+  onReady,
+}: LoadedInkHandsProps) {
   const rootRef = useRef<HTMLDivElement>(null);
   const closedRef = useRef<HTMLImageElement>(null);
   const openRef = useRef<HTMLElement | null>(null);
   const inkRef = useRef<HTMLDivElement>(null);
   const showClosed = firstLine && !reducedMotion;
 
-  useLayoutEffect(() => {
+  useEffect(() => {
     const root = rootRef.current;
     const closedHands = closedRef.current;
     const openHands = openRef.current;

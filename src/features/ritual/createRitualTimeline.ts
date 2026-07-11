@@ -45,6 +45,7 @@ export interface RitualTimelineController {
   finish(): void;
   restart(): void;
   seek(position: RitualTimelineLabel | number): void;
+  seekProgress(progress: number): void;
   kill(): void;
   dispose(): void;
   getProgress(): number;
@@ -94,6 +95,15 @@ function restoreStyle(element: HTMLElement, style: string | null): void {
   else element.setAttribute('style', style);
 }
 
+export function snapRitualTargetsToEnd(targets: RitualTimelineTargets): void {
+  targets.closedHands.style.opacity = '0';
+  targets.openHands.style.opacity = '1';
+  targets.inkCover.style.opacity = '0';
+  targets.setMediaProgress(1);
+  targets.coinRig.setProgress(1);
+  targets.coinRig.invalidate();
+}
+
 export function createRitualTimeline(
   targets: RitualTimelineTargets,
   options: RitualTimelineOptions,
@@ -109,6 +119,7 @@ export function createRitualTimeline(
   const endMarker = { value: 0 };
   let killed = false;
   let completed = false;
+  let finalStateApplied = false;
   let timeline!: gsap.core.Timeline;
 
   targets.closedHands.style.opacity = options.firstLine ? '1' : '0';
@@ -119,13 +130,9 @@ export function createRitualTimeline(
     if (!killed) options.onPhase?.(phase);
   };
   const applyFinalState = (): void => {
-    if (killed) return;
-    targets.closedHands.style.opacity = '0';
-    targets.openHands.style.opacity = '1';
-    targets.inkCover.style.opacity = '0';
-    targets.setMediaProgress(1);
-    targets.coinRig.setProgress(1);
-    targets.coinRig.invalidate();
+    if (killed || finalStateApplied) return;
+    finalStateApplied = true;
+    snapRitualTargetsToEnd(targets);
   };
   const emitComplete = (): void => {
     if (killed || completed) return;
@@ -217,9 +224,22 @@ export function createRitualTimeline(
 
   const finishTimeline = (): void => {
     if (killed || completed) return;
-    applyFinalState();
     timeline.pause().progress(1, false);
+    applyFinalState();
     emitComplete();
+  };
+  const resetToStart = (): void => {
+    timeline.pause(0, true);
+    coinProgress.value = 0;
+    mediaProgress.value = 0;
+    endMarker.value = 0;
+    finalStateApplied = false;
+    targets.closedHands.style.opacity = options.firstLine ? '1' : '0';
+    targets.openHands.style.opacity = options.firstLine ? '0' : '1';
+    targets.inkCover.style.opacity = '0';
+    targets.setMediaProgress(0);
+    targets.coinRig.setProgress(0);
+    targets.coinRig.invalidate();
   };
 
   const kill = (): void => {
@@ -239,12 +259,21 @@ export function createRitualTimeline(
     finish: finishTimeline,
     restart() {
       if (killed) return;
-      timeline.restart();
-      if (options.reducedMotion) applyFinalState();
+      completed = false;
+      resetToStart();
+      if (options.reducedMotion) finishTimeline();
+      else timeline.play(0);
     },
     seek(position) {
       if (killed) return;
       timeline.seek(position, false);
+    },
+    seekProgress(progress) {
+      if (killed) return;
+      const clamped = Number.isFinite(progress)
+        ? Math.min(1, Math.max(0, progress))
+        : 0;
+      timeline.progress(clamped, false);
     },
     kill,
     dispose: kill,

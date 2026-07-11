@@ -1,4 +1,4 @@
-import { StrictMode } from 'react';
+import { StrictMode, useLayoutEffect, useRef } from 'react';
 import { render, waitFor } from '@testing-library/react';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import { CoinRig } from './CoinRig';
@@ -105,5 +105,35 @@ describe('CoinRig 资源生命周期', () => {
     lifecycle.textureSetDisposals.forEach((dispose) => {
       expect(dispose).toHaveBeenCalledTimes(1);
     });
+  });
+
+  it('input 更新时在父级 commit token 落定后才发出 rig ready', async () => {
+    const observations: Array<readonly [number, number]> = [];
+
+    function Parent({ version }: { version: number }) {
+      const committedVersion = useRef(0);
+      useLayoutEffect(() => {
+        committedVersion.current = version;
+      }, [version]);
+      return (
+        <CoinRig
+          input={{
+            tossId: `passive-ready-${version}`,
+            visualSeed: 'committed-parent-token',
+            faces: ['text', 'reverse', 'text'],
+            lineIndex: version,
+          }}
+          onReady={() => observations.push([version, committedVersion.current])}
+        />
+      );
+    }
+
+    const view = render(<Parent version={1} />);
+    await waitFor(() => expect(observations).toContainEqual([1, 1]));
+    view.rerender(<Parent version={2} />);
+    await waitFor(() => expect(observations.some(([version]) => version === 2)).toBe(true));
+
+    expect(observations.at(-1)).toEqual([2, 2]);
+    view.unmount();
   });
 });
