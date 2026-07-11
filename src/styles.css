@@ -180,6 +180,7 @@ button:focus-visible, input:focus-visible, textarea:focus-visible { outline: 2px
 .corpus-stats span { padding: 12px; border: 1px solid var(--line); text-align: center; font-size: 10px; }
 .corpus-stats b { display: block; font: 22px var(--serif); color: var(--cinnabar); }
 .corpus-warning { color: #765d54; background: rgba(145,36,30,.055); padding: 10px; font-size: 11px; line-height: 1.6; }
+.corpus-ready { color: #4f654e; background: rgba(62,91,57,.06); border-left: 2px solid #657b5d; padding: 10px; font-size: 11px; line-height: 1.6; }
 .security-note { display: flex; gap: 12px; margin-top: 20px; color: #60625c; }
 .security-note svg { flex: 0 0 auto; color: var(--bronze); }
 .security-note p { margin: 0; font-size: 11px; line-height: 1.6; }

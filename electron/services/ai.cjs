@@ -23,7 +23,9 @@ function createLocalReport({ question, category, plate, evidence }) {
     relations: `${plate.monthGanZhi || '月建未载'}、${plate.dayGanZhi || '日辰未载'}；旬空${(plate.voidBranches || ['未载']).join('、')}。${plate.baseHexagram.shortName || plate.baseHexagram.name}属${plate.baseHexagram.palace}宫${plate.baseHexagram.palaceElement}。`,
     moving,
     synthesis: '当前展示的是本地规则推演，已完成排盘事实与相关证据整理。配置云端模型后，会在同一排盘和证据上生成更完整的综合判断。',
-    uncertainties: evidence.length ? ['当前证据为内置演示摘要，需替换为你提供古籍的原页校订证据。'] : ['当前知识库没有找到足够证据，暂不作确定判断。'],
+    uncertainties: evidence.some((entry) => entry.sourceType === 'original')
+      ? ['当前证据来自用户提供的纯文本古籍，位置以原始文本行号标注；源文件没有纸本页码或扫描页图。']
+      : ['当前知识库没有找到足够证据，暂不作确定判断。'],
     guidance: ['先核对所占之事是否单一明确。', '结合动爻、世应和日月旺衰观察后续变化。', '占断仅供传统文化研究与个人反思，不替代专业意见。'],
     claims,
     generatedAt: new Date().toISOString(),

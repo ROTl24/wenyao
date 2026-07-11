@@ -32,7 +32,13 @@ npm.cmd run build
 
 ## 古籍证据包
 
-`resources/corpus.json` 当前只包含明确标注的演示摘要，用于在正式古籍尚未导入时验证检索、引用和拒绝伪造机制。正式版本需要把固定古籍处理为同一结构，并保留书名、版本、卷章、页码、原文、标签和原页图像引用。未校订的 OCR 内容不得标记为正式原文。
+`resources/corpus.json` 已收入用户提供的《易隐》《卜筮正宗》《易冒》《火珠林》《增删卜易》五本纯文本古籍，共 1263 条原文证据。每条证据保留书名、章节标题和原始文本行号；`resources/corpus-manifest.json` 记录原文件名、SHA-256、编码、行数和条目数，便于复核与重建。
+
+语料构建脚本会自动识别 UTF-8/GB18030、去除下载站广告、按章节和段落切分，并拒绝含乱码或重复证据 ID 的构建结果：
+
+```powershell
+npm.cmd run build:corpus -- "C:\path\易隐.txt" "C:\path\卜筮正宗.txt" "C:\path\易冒.txt" "C:\path\火珠林.txt" "C:\path\增删卜易.txt"
+```
 
 ## AI 设置
 

@@ -33,7 +33,7 @@ const browserFallback: DesktopApi = {
   },
   corpus: {
     async list() { return corpus as import('./retrieval').EvidenceEntry[]; },
-    async status() { return { count: corpus.length, originalCount: 0, summaryCount: corpus.length, ready: true }; },
+    async status() { return { count: corpus.length, bookCount: new Set(corpus.map((entry) => entry.source)).size, originalCount: corpus.filter((entry) => entry.sourceType === 'original').length, summaryCount: corpus.filter((entry) => entry.sourceType === 'summary').length, ready: true }; },
   },
   ai: {
     async analyze() { return { ok: false, error: { code: 'DESKTOP_ONLY', message: '浏览器预览不发送 AI 请求。', dataSafe: true, nextAction: '桌面应用中可使用本地基础推演或云端 AI。' } }; },

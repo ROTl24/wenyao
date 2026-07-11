@@ -115,6 +115,7 @@ function registerIpc() {
   ipcMain.handle('corpus:list', () => structuredClone(corpus));
   ipcMain.handle('corpus:status', () => ({
     count: corpus.length,
+    bookCount: new Set(corpus.map((item) => item.source)).size,
     originalCount: corpus.filter((item) => item.sourceType === 'original').length,
     summaryCount: corpus.filter((item) => item.sourceType === 'summary').length,
     ready: corpus.length > 0,

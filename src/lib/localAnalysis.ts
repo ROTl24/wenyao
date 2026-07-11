@@ -22,9 +22,11 @@ export function createBrowserLocalReport(session: DivinationSession, evidence: E
     relations: `${plate.monthGanZhi}月、${plate.dayGanZhi}日，旬空${plate.voidBranches.join('、')}。本卦属${plate.baseHexagram.palace}宫${plate.baseHexagram.palaceElement}。`,
     moving: plate.movingLines.length ? `第 ${plate.movingLines.join('、')} 爻发动，应结合所临六亲、世应与变爻关系判断。` : '六爻安静，以本卦整体格局、世用旺衰和日月作用为主。',
     synthesis: '这是本地基础推演。应用已锁定排盘事实并整理相关规则；配置云端 AI 后，会在同一卦象和证据上补充综合分析。',
-    uncertainties: ['当前内置内容为演示摘要；导入你提供并校订的古籍后，才会显示真实原页引用。'],
+    uncertainties: evidence.some((entry) => entry.sourceType === 'original')
+      ? ['当前证据来自用户提供的纯文本古籍，位置以原始文本行号标注；源文件没有纸本页码或扫描页图。']
+      : ['当前知识库没有找到足够的古籍原文，暂不作确定判断。'],
     guidance: ['把问题限定为一个明确事项。', '重点观察动爻、世应和日月旺衰。', '占断仅供传统文化研究与个人反思。'],
-    claims: evidence.map((entry) => ({ text: entry.text, evidenceIds: [entry.id], confidence: '低' })),
+    claims: evidence.map((entry) => ({ text: entry.text, evidenceIds: [entry.id], confidence: entry.sourceType === 'original' ? '中' : '低' })),
     generatedAt: new Date().toISOString(),
   };
 }

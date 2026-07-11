@@ -1,0 +1,64 @@
+{
+  "schemaVersion": 1,
+  "corpusVersion": "2026.07.11-user-books-1",
+  "sourceType": "user-provided-plain-text",
+  "bookCount": 5,
+  "entryCount": 1263,
+  "sources": [
+    {
+      "id": "YIYIN",
+      "title": "易隐",
+      "filename": "易隐 (易隐.txt) (z-library.sk, 1lib.sk, z-lib.sk).txt",
+      "sha256": "4595d55959dc61e9db879a60214ce2b4ceabb3a8eaab13c179aabdcdd68deab2",
+      "encoding": "gb18030",
+      "bytes": 271769,
+      "rawLineCount": 2148,
+      "acceptedLineCount": 1717,
+      "entryCount": 465
+    },
+    {
+      "id": "BUSHI-ZHENGZONG",
+      "title": "卜筮正宗",
+      "filename": "卜筮正宗 (卜筮正宗.txt) (z-library.sk, 1lib.sk, z-lib.sk).txt",
+      "sha256": "e6ba468011293b3f4cd368a3f5c66c284334b1dcb96dd5530f9b749c84ba881b",
+      "encoding": "gb18030",
+      "bytes": 189422,
+      "rawLineCount": 4232,
+      "acceptedLineCount": 3465,
+      "entryCount": 269
+    },
+    {
+      "id": "YIMAO",
+      "title": "易冒",
+      "filename": "易 冒 (易 冒.txt) (z-library.sk, 1lib.sk, z-lib.sk).txt",
+      "sha256": "ab7eb41549cc30b4de2bc1c81757a2f0fdcec8823592e3b05f29417591982642",
+      "encoding": "gb18030",
+      "bytes": 219581,
+      "rawLineCount": 1736,
+      "acceptedLineCount": 1627,
+      "entryCount": 215
+    },
+    {
+      "id": "HUOZHULIN",
+      "title": "火珠林",
+      "filename": "火珠林 (火珠林.txt) (z-library.sk, 1lib.sk, z-lib.sk).txt",
+      "sha256": "516b8069e3eb0d48f579f35bce54b8eff1b2715dc08dba82e747f6674d4d166f",
+      "encoding": "gb18030",
+      "bytes": 45646,
+      "rawLineCount": 607,
+      "acceptedLineCount": 603,
+      "entryCount": 73
+    },
+    {
+      "id": "ZENGSHAN-BUYI",
+      "title": "增删卜易",
+      "filename": "增 删 卜 易 (增  删 卜 易.txt) (z-library.sk, 1lib.sk, z-lib.sk).txt",
+      "sha256": "5a1bf59de04180d2f118ebe25abb84565b30aa731c986a83ace4898f5c0c04ae",
+      "encoding": "gb18030",
+      "bytes": 299574,
+      "rawLineCount": 3724,
+      "acceptedLineCount": 3673,
+      "entryCount": 241
+    }
+  ]
+}

@@ -4,7 +4,7 @@ import type { AnalysisReport } from '../lib/types';
 
 interface PublicSettings { baseUrl: string; model: string; hasApiKey: boolean }
 interface DesktopError { code: string; message: string; dataSafe: boolean; nextAction: string }
-interface CorpusStatus { count: number; originalCount: number; summaryCount: number; ready: boolean }
+interface CorpusStatus { count: number; bookCount: number; originalCount: number; summaryCount: number; ready: boolean }
 
 export interface DesktopApi {
   sessions: {
