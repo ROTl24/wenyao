@@ -46,6 +46,27 @@ function localMaxima(values: readonly number[]): number[] {
   );
 }
 
+function normalizeQuaternion(
+  quaternion: readonly [number, number, number, number],
+): [number, number, number, number] {
+  const length = Math.hypot(...quaternion);
+  return quaternion.map((value) => value / length) as [number, number, number, number];
+}
+
+function quaternionAngleDifference(
+  left: readonly [number, number, number, number],
+  right: readonly [number, number, number, number],
+): number {
+  const normalizedLeft = normalizeQuaternion(left);
+  const normalizedRight = normalizeQuaternion(right);
+  const dot = normalizedLeft.reduce(
+    (sum, value, index) => sum + value * normalizedRight[index],
+    0,
+  );
+  const equivalentRotationDot = Math.min(1, Math.max(-1, Math.abs(dot)));
+  return 2 * Math.acos(equivalentRotationDot);
+}
+
 describe('确定性古钱轨迹', () => {
   it('同种子逐帧一致，新 tossId 会重播但最终面不变', () => {
     const input = {
@@ -168,7 +189,9 @@ describe('确定性古钱轨迹', () => {
       const settled = sampleCoinTrack(track, 1);
       const wobbling = sampleCoinTrack(track, 0.925);
 
-      expect(wobbling.quaternion).not.toEqual(settled.quaternion);
+      expect(quaternionAngleDifference(wobbling.quaternion, settled.quaternion)).toBeGreaterThan(
+        0.01,
+      );
       expect(settled.quaternion).toEqual(
         faces[index] === 'text' ? TEXT_QUATERNION : REVERSE_QUATERNION,
       );
