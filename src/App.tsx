@@ -14,12 +14,12 @@ import {
   createSession,
   isValidQuestion,
   prepareToss,
-  withAnalysis,
-  withMessage,
   type AdvanceCurrentTossTransaction,
+  type ChatMessage,
   type DivinationSession,
   type SessionCategory,
 } from './lib/session';
+import type { AnalysisReport } from './lib/types';
 
 type Screen = 'home' | 'casting' | 'result';
 
@@ -27,6 +27,11 @@ interface ConfirmCommitCommand {
   id: string;
   session: DivinationSession;
   owner: SessionOwner;
+}
+
+interface SessionWriteCommand {
+  id: string;
+  session: DivinationSession;
 }
 
 interface SessionOwner {
@@ -38,25 +43,72 @@ interface AppFlowState {
   screen: Screen;
   session: DivinationSession | null;
   pendingConfirmCommit: ConfirmCommitCommand | null;
+  pendingSessionWrite: SessionWriteCommand | null;
+  analysisOperationId: string | null;
+  followUpOperationId: string | null;
   epoch: number;
 }
 
 type AppFlowAction =
   | { type: 'OPEN_SESSION'; screen: Screen; session: DivinationSession | null }
-  | { type: 'APPLY_OWNED_SESSION'; owner: SessionOwner; session: DivinationSession }
   | {
     type: 'ADVANCE_TOSS';
+    commandId: string;
     expectedTossId: string;
     transaction: AdvanceCurrentTossTransaction;
   }
-  | { type: 'CONSUME_CONFIRM_COMMIT'; id: string };
+  | { type: 'CONSUME_CONFIRM_COMMIT'; id: string }
+  | { type: 'BEGIN_ANALYSIS'; owner: SessionOwner; operationId: string }
+  | {
+    type: 'APPLY_ANALYSIS';
+    owner: SessionOwner;
+    operationId: string;
+    writeId: string;
+    analysis: AnalysisReport;
+  }
+  | { type: 'END_ANALYSIS'; owner: SessionOwner; operationId: string }
+  | {
+    type: 'BEGIN_FOLLOW_UP';
+    owner: SessionOwner;
+    operationId: string;
+    writeId: string;
+    message: ChatMessage;
+  }
+  | {
+    type: 'RESOLVE_FOLLOW_UP';
+    owner: SessionOwner;
+    operationId: string;
+    writeId: string;
+    message: ChatMessage;
+  }
+  | { type: 'END_FOLLOW_UP'; owner: SessionOwner; operationId: string }
+  | { type: 'CONSUME_SESSION_WRITE'; id: string };
 
 const initialAppFlowState: AppFlowState = {
   screen: 'home',
   session: null,
   pendingConfirmCommit: null,
+  pendingSessionWrite: null,
+  analysisOperationId: null,
+  followUpOperationId: null,
   epoch: 0,
 };
+
+function latestTimestamp(current: string, candidate: string): string {
+  return current > candidate ? current : candidate;
+}
+
+function withPendingWrite(
+  state: AppFlowState,
+  session: DivinationSession,
+  writeId: string,
+): AppFlowState {
+  return {
+    ...state,
+    session,
+    pendingSessionWrite: { id: writeId, session },
+  };
+}
 
 function ownerMatches(state: AppFlowState, owner: SessionOwner): boolean {
   return state.epoch === owner.epoch && state.session?.id === owner.sessionId;
@@ -94,12 +146,10 @@ export function appFlowReducer(state: AppFlowState, action: AppFlowAction): AppF
         ...state,
         screen: action.screen,
         session: action.session,
+        analysisOperationId: null,
+        followUpOperationId: null,
         epoch: state.epoch + 1,
       };
-    case 'APPLY_OWNED_SESSION':
-      return ownerMatches(state, action.owner)
-        ? { ...state, session: action.session }
-        : state;
     case 'ADVANCE_TOSS': {
       if (state.screen !== 'casting' || !state.session) return state;
       const next = advanceCurrentToss(
@@ -113,7 +163,7 @@ export function appFlowReducer(state: AppFlowState, action: AppFlowAction): AppF
         screen: next.status === 'complete' ? 'result' : 'casting',
         session: next,
         pendingConfirmCommit: {
-          id: action.expectedTossId,
+          id: action.commandId,
           session: next,
           owner: { sessionId: state.session.id, epoch: state.epoch },
         },
@@ -122,6 +172,77 @@ export function appFlowReducer(state: AppFlowState, action: AppFlowAction): AppF
     case 'CONSUME_CONFIRM_COMMIT':
       return state.pendingConfirmCommit?.id === action.id
         ? { ...state, pendingConfirmCommit: null }
+        : state;
+    case 'BEGIN_ANALYSIS':
+      return ownerMatches(state, action.owner)
+        ? { ...state, analysisOperationId: action.operationId }
+        : state;
+    case 'APPLY_ANALYSIS': {
+      if (
+        !ownerMatches(state, action.owner)
+        || state.analysisOperationId !== action.operationId
+        || !state.session
+      ) return state;
+      const next = {
+        ...state.session,
+        analysis: action.analysis,
+        updatedAt: latestTimestamp(state.session.updatedAt, action.analysis.generatedAt),
+      };
+      return withPendingWrite(
+        { ...state, analysisOperationId: null },
+        next,
+        action.writeId,
+      );
+    }
+    case 'END_ANALYSIS':
+      return ownerMatches(state, action.owner)
+        && state.analysisOperationId === action.operationId
+        ? { ...state, analysisOperationId: null }
+        : state;
+    case 'BEGIN_FOLLOW_UP': {
+      if (!ownerMatches(state, action.owner) || !state.session) return state;
+      const messages = state.session.messages.some((message) => message.id === action.message.id)
+        ? state.session.messages
+        : [...state.session.messages, action.message];
+      const next = {
+        ...state.session,
+        messages,
+        updatedAt: latestTimestamp(state.session.updatedAt, action.message.createdAt),
+      };
+      return withPendingWrite(
+        { ...state, followUpOperationId: action.operationId },
+        next,
+        action.writeId,
+      );
+    }
+    case 'RESOLVE_FOLLOW_UP': {
+      if (
+        !ownerMatches(state, action.owner)
+        || state.followUpOperationId !== action.operationId
+        || !state.session
+      ) return state;
+      const messages = state.session.messages.some((message) => message.id === action.message.id)
+        ? state.session.messages
+        : [...state.session.messages, action.message];
+      const next = {
+        ...state.session,
+        messages,
+        updatedAt: latestTimestamp(state.session.updatedAt, action.message.createdAt),
+      };
+      return withPendingWrite(
+        { ...state, followUpOperationId: null },
+        next,
+        action.writeId,
+      );
+    }
+    case 'END_FOLLOW_UP':
+      return ownerMatches(state, action.owner)
+        && state.followUpOperationId === action.operationId
+        ? { ...state, followUpOperationId: null }
+        : state;
+    case 'CONSUME_SESSION_WRITE':
+      return state.pendingSessionWrite?.id === action.id
+        ? { ...state, pendingSessionWrite: null }
         : state;
   }
 }
@@ -152,13 +273,15 @@ export function App() {
   const [retrievalDiagnostics, setRetrievalDiagnostics] = useState<RetrievalDiagnostics | null>(null);
   const [historyOpen, setHistoryOpen] = useState(false);
   const [settingsOpen, setSettingsOpen] = useState(false);
-  const [analyzing, setAnalyzing] = useState(false);
   const [analysisError, setAnalysisError] = useState('');
-  const [chatting, setChatting] = useState(false);
+  const analyzing = flow.analysisOperationId !== null;
+  const chatting = flow.followUpOperationId !== null;
   const handledConfirmCommands = useRef(new Set<string>());
+  const handledSessionWrites = useRef(new Set<string>());
   const deletedSessionIds = useRef(new Set<string>());
   const epochRef = useRef(0);
   const activeOwnerRef = useRef<SessionOwner | null>(null);
+  const saveQueueRef = useRef<Promise<void>>(Promise.resolve());
 
   const isOwnerCurrent = (owner: SessionOwner): boolean => (
     activeOwnerRef.current?.sessionId === owner.sessionId
@@ -168,9 +291,7 @@ export function App() {
   const resetAsyncUi = () => {
     setEvidence([]);
     setRetrievalDiagnostics(null);
-    setAnalyzing(false);
     setAnalysisError('');
-    setChatting(false);
   };
 
   const openFlow = (
@@ -210,9 +331,10 @@ export function App() {
     }
   };
 
-  const persistOwned = async (next: DivinationSession, owner: SessionOwner) => {
-    dispatchFlow({ type: 'APPLY_OWNED_SESSION', owner, session: next });
-    await saveSession(next);
+  const queueSaveSession = (next: DivinationSession): Promise<void> => {
+    const queued = saveQueueRef.current.then(() => saveSession(next));
+    saveQueueRef.current = queued.catch(() => undefined);
+    return queued;
   };
 
   const evidenceFor = async (target: DivinationSession) => {
@@ -229,7 +351,8 @@ export function App() {
 
   const runAnalysis = async (target: DivinationSession, owner: SessionOwner) => {
     if (!target.plate || !isOwnerCurrent(owner)) return;
-    setAnalyzing(true);
+    const operationId = crypto.randomUUID();
+    dispatchFlow({ type: 'BEGIN_ANALYSIS', owner, operationId });
     setAnalysisError('');
     try {
       const found = await evidenceFor(target);
@@ -238,19 +361,28 @@ export function App() {
       setRetrievalDiagnostics(found.diagnostics);
       const result = await desktop.ai.analyze({ question: target.question, category: target.category, plate: target.plate, evidence: found.evidence, retrievalDiagnostics: found.diagnostics || undefined });
       if (!isOwnerCurrent(owner)) return;
-      if (result.ok && result.report) {
-        await persistOwned(withAnalysis(target, result.report), owner);
-      } else if (desktop.platform === 'browser') {
-        await persistOwned(withAnalysis(target, createBrowserLocalReport(target, found.evidence)), owner);
+      const report = result.ok && result.report
+        ? result.report
+        : desktop.platform === 'browser'
+          ? createBrowserLocalReport(target, found.evidence)
+          : null;
+      if (report) {
+        dispatchFlow({
+          type: 'APPLY_ANALYSIS',
+          owner,
+          operationId,
+          writeId: crypto.randomUUID(),
+          analysis: report,
+        });
       } else {
         setAnalysisError(`${result.error?.message || 'AI 分析失败'} ${result.error?.nextAction || ''}`.trim());
+        dispatchFlow({ type: 'END_ANALYSIS', owner, operationId });
       }
     } catch (error) {
       if (isOwnerCurrent(owner)) {
         setAnalysisError(error instanceof Error ? error.message : '检索或分析服务暂时不可用。');
+        dispatchFlow({ type: 'END_ANALYSIS', owner, operationId });
       }
-    } finally {
-      if (isOwnerCurrent(owner)) setAnalyzing(false);
     }
   };
 
@@ -258,7 +390,7 @@ export function App() {
     if (!category || !isValidQuestion(question)) return;
     const next = prepareNext(createSession(question, category));
     const owner = openFlow(next, 'casting');
-    if (owner) void saveSession(next);
+    if (owner) void queueSaveSession(next);
   };
 
   const confirm = (expectedTossId: string) => {
@@ -266,9 +398,11 @@ export function App() {
     const nextVisualSeed = crypto.randomUUID();
     const nextTossId = crypto.randomUUID();
     const plateId = crypto.randomUUID();
+    const commandId = crypto.randomUUID();
     const transitionAt = new Date().toISOString();
     dispatchFlow({
       type: 'ADVANCE_TOSS',
+      commandId,
       expectedTossId,
       transaction: {
         at: transitionAt,
@@ -288,12 +422,20 @@ export function App() {
     handledConfirmCommands.current.add(command.id);
     dispatchFlow({ type: 'CONSUME_CONFIRM_COMMIT', id: command.id });
     void (async () => {
-      await saveSession(command.session);
+      await queueSaveSession(command.session);
       if (command.session.status === 'complete' && isOwnerCurrent(command.owner)) {
         await runAnalysis(command.session, command.owner);
       }
     })();
   }, [flow.pendingConfirmCommit]);
+
+  useEffect(() => {
+    const command = flow.pendingSessionWrite;
+    if (!command || handledSessionWrites.current.has(command.id)) return;
+    handledSessionWrites.current.add(command.id);
+    dispatchFlow({ type: 'CONSUME_SESSION_WRITE', id: command.id });
+    void queueSaveSession(command.session);
+  }, [flow.pendingSessionWrite]);
 
   const openSession = async (saved: DivinationSession) => {
     let next = saved.plate ? { ...saved, plate: upgradePlate(saved.plate) } : saved;
@@ -310,7 +452,7 @@ export function App() {
       setRetrievalDiagnostics(found.diagnostics);
       if (!next.analysis) void runAnalysis(next, owner);
     } else {
-      void saveSession(next);
+      void queueSaveSession(next);
     }
   };
 
@@ -325,19 +467,50 @@ export function App() {
     if (!session || !session.plate) return;
     const owner = activeOwnerRef.current;
     if (!owner || owner.sessionId !== session.id) return;
-    setChatting(true);
-    let next = withMessage(session, { id: crypto.randomUUID(), role: 'user', content: followQuestion, createdAt: new Date().toISOString() });
-    await persistOwned(next, owner);
-    if (!isOwnerCurrent(owner)) return;
-    const result = await desktop.ai.followUp({ question: followQuestion, session: next, evidence });
-    if (!isOwnerCurrent(owner)) return;
-    const answer = result.ok && result.answer ? result.answer : {
-      content: desktop.platform === 'browser' ? '浏览器预览不会发送 AI 请求；桌面应用会沿用本次排盘和古籍证据继续回答。' : `${result.error?.message || '追问失败'} ${result.error?.nextAction || ''}`,
-      evidenceIds: [],
+    const operationId = crypto.randomUUID();
+    const userMessage: ChatMessage = {
+      id: crypto.randomUUID(),
+      role: 'user',
+      content: followQuestion,
+      createdAt: new Date().toISOString(),
     };
-    next = withMessage(next, { id: crypto.randomUUID(), role: 'assistant', content: answer.content, evidenceIds: answer.evidenceIds, createdAt: new Date().toISOString() });
-    await persistOwned(next, owner);
-    if (isOwnerCurrent(owner)) setChatting(false);
+    dispatchFlow({
+      type: 'BEGIN_FOLLOW_UP',
+      owner,
+      operationId,
+      writeId: crypto.randomUUID(),
+      message: userMessage,
+    });
+    const requestSession = {
+      ...session,
+      messages: [...session.messages, userMessage],
+      updatedAt: latestTimestamp(session.updatedAt, userMessage.createdAt),
+    };
+    try {
+      const result = await desktop.ai.followUp({ question: followQuestion, session: requestSession, evidence });
+      if (!isOwnerCurrent(owner)) return;
+      const answer = result.ok && result.answer ? result.answer : {
+        content: desktop.platform === 'browser' ? '浏览器预览不会发送 AI 请求；桌面应用会沿用本次排盘和古籍证据继续回答。' : `${result.error?.message || '追问失败'} ${result.error?.nextAction || ''}`,
+        evidenceIds: [],
+      };
+      dispatchFlow({
+        type: 'RESOLVE_FOLLOW_UP',
+        owner,
+        operationId,
+        writeId: crypto.randomUUID(),
+        message: {
+          id: crypto.randomUUID(),
+          role: 'assistant',
+          content: answer.content,
+          evidenceIds: answer.evidenceIds,
+          createdAt: new Date().toISOString(),
+        },
+      });
+    } catch {
+      if (isOwnerCurrent(owner)) {
+        dispatchFlow({ type: 'END_FOLLOW_UP', owner, operationId });
+      }
+    }
   };
 
   const appTitle = useMemo(() => screen === 'home' ? '问爻' : screen === 'casting' ? '六爻起卦' : '排盘与解读', [screen]);

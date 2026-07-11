@@ -3,7 +3,12 @@ import { act, fireEvent, render, screen, waitFor } from '@testing-library/react'
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import { createToss } from './lib/divination';
 import { createBrowserLocalReport } from './lib/localAnalysis';
-import { createSession, prepareToss, type DivinationSession } from './lib/session';
+import {
+  confirmCurrentToss,
+  createSession,
+  prepareToss,
+  type DivinationSession,
+} from './lib/session';
 import type { AnalysisReport } from './lib/types';
 
 type AnalyzeResult =
@@ -16,7 +21,9 @@ type AnalyzeResult =
 const harness = vi.hoisted(() => ({
   currentSession: null as DivinationSession | null,
   resultSession: null as DivinationSession | null,
+  openSession: null as DivinationSession | null,
   onConfirm: null as ((expectedTossId: string) => void) | null,
+  onFollowUp: null as ((question: string) => void) | null,
   save: vi.fn(async (session: DivinationSession) => session),
   delete: vi.fn(async () => true),
   analyze: vi.fn(async (): Promise<AnalyzeResult> => ({
@@ -27,6 +34,10 @@ const harness = vi.hoisted(() => ({
       dataSafe: true,
       nextAction: '',
     },
+  })),
+  followUp: vi.fn(async () => ({
+    ok: true as const,
+    answer: { content: '默认追问', evidenceIds: [] as string[] },
   })),
 }));
 
@@ -45,7 +56,7 @@ vi.mock('./lib/desktop', () => ({
     },
     ai: {
       analyze: harness.analyze,
-      followUp: vi.fn(),
+      followUp: harness.followUp,
     },
     platform: 'desktop',
   },
@@ -69,11 +80,14 @@ vi.mock('./components/ResultScreen', () => ({
   ResultScreen: ({
     session,
     onBack,
+    onFollowUp,
   }: {
     session: DivinationSession;
     onBack(): void;
+    onFollowUp(question: string): void;
   }) => {
     harness.resultSession = session;
+    harness.onFollowUp = onFollowUp;
     return (
       <div>
         <h1>{`成卦-${session.tosses.length}`}</h1>
@@ -87,9 +101,11 @@ vi.mock('./components/HistoryPanel', () => ({
   HistoryPanel: ({
     sessions,
     onDelete,
+    onOpen,
   }: {
     sessions: DivinationSession[];
     onDelete(id: string): void;
+    onOpen(session: DivinationSession): void;
   }) => (
     <div>
       <h2>{`history-${sessions.length}`}</h2>
@@ -98,6 +114,12 @@ vi.mock('./components/HistoryPanel', () => ({
         type="button"
       >
         删除当前测试会话
+      </button>
+      <button
+        onClick={() => harness.openSession && onOpen(harness.openSession)}
+        type="button"
+      >
+        打开指定测试会话
       </button>
     </div>
   ),
@@ -133,9 +155,15 @@ beforeEach(() => {
       nextAction: '',
     },
   });
+  harness.followUp.mockReset().mockResolvedValue({
+    ok: true,
+    answer: { content: '默认追问', evidenceIds: [] },
+  });
   harness.currentSession = null;
   harness.resultSession = null;
+  harness.openSession = null;
   harness.onConfirm = null;
+  harness.onFollowUp = null;
 });
 
 describe('App 原子确认命令', () => {
@@ -149,10 +177,14 @@ describe('App 原子确认命令', () => {
       screen: 'casting' as const,
       session,
       pendingConfirmCommit: null,
+      pendingSessionWrite: null,
+      analysisOperationId: null,
+      followUpOperationId: null,
       epoch: 1,
     };
     const action = {
       type: 'ADVANCE_TOSS' as const,
+      commandId: 'pure-command-id',
       expectedTossId: session.currentToss!.id,
       transaction: {
         at: '2026-07-12T00:00:01.000Z',
@@ -180,6 +212,9 @@ describe('App 原子确认命令', () => {
       screen: 'casting' as const,
       session: oldSession,
       pendingConfirmCommit: pending,
+      pendingSessionWrite: null,
+      analysisOperationId: null,
+      followUpOperationId: null,
       epoch: 7,
     };
 
@@ -305,5 +340,92 @@ describe('App 原子确认命令', () => {
 
     await waitFor(() => expect(screen.getByRole('heading', { name: 'history-0' })).toBeVisible());
     expect(harness.delete).toHaveBeenCalledTimes(2);
+  });
+
+  it('分析与追问交错完成时，当前会话和最终持久化快照同时保留全部字段', async () => {
+    const delayedAnalysis = deferred<AnalyzeResult>();
+    const delayedFollowUp = deferred<{
+      ok: true;
+      answer: { content: string; evidenceIds: string[] };
+    }>();
+    harness.analyze.mockReturnValue(delayedAnalysis.promise);
+    harness.followUp.mockReturnValue(delayedFollowUp.promise);
+    render(<App />);
+    await startCasting();
+
+    for (let lineIndex = 1; lineIndex <= 6; lineIndex += 1) {
+      act(() => harness.onConfirm?.(harness.currentSession!.currentToss!.id));
+      if (lineIndex < 6) {
+        await screen.findByRole('heading', { name: `第${lineIndex + 1}爻` });
+      }
+    }
+    await screen.findByRole('heading', { name: '成卦-6' });
+    await waitFor(() => expect(harness.analyze).toHaveBeenCalledTimes(1));
+    const completed = harness.resultSession!;
+
+    act(() => { harness.onFollowUp?.('交错追问'); });
+    await waitFor(() => expect(harness.resultSession?.messages).toHaveLength(1));
+
+    await act(async () => {
+      delayedAnalysis.resolve({
+        ok: true,
+        report: createBrowserLocalReport(completed, []),
+      });
+      await delayedAnalysis.promise;
+    });
+    await act(async () => {
+      delayedFollowUp.resolve({
+        ok: true,
+        answer: { content: '交错回答', evidenceIds: [] },
+      });
+      await delayedFollowUp.promise;
+    });
+
+    await waitFor(() => {
+      expect(harness.resultSession?.analysis).toBeDefined();
+      expect(harness.resultSession?.messages.map((message) => message.content))
+        .toEqual(['交错追问', '交错回答']);
+    });
+    await waitFor(() => {
+      const persisted = harness.save.mock.calls.at(-1)?.[0];
+      expect(persisted?.analysis).toBeDefined();
+      expect(persisted?.messages.map((message) => message.content))
+        .toEqual(['交错追问', '交错回答']);
+    });
+  });
+
+  it('同一 tossId 从历史进入新 epoch 后仍产生独立确认命令并完成保存分析', async () => {
+    render(<App />);
+    await startCasting();
+    const repeatedTossId = harness.currentSession!.currentToss!.id;
+    act(() => harness.onConfirm?.(repeatedTossId));
+    await screen.findByRole('heading', { name: '第2爻' });
+    await waitFor(() => expect(harness.save).toHaveBeenCalled());
+
+    let restored = createSession('历史同币次', 'other', new Date('2026-07-12T00:00:00.000Z'));
+    for (let index = 0; index < 5; index += 1) {
+      restored = confirmCurrentToss(
+        prepareToss(restored, createToss(['text', 'text', 'reverse']), `history-${index}`),
+        `2026-07-12T00:00:0${index + 1}.000Z`,
+      );
+    }
+    restored = prepareToss(
+      restored,
+      createToss(['reverse', 'reverse', 'reverse']),
+      'history-six',
+      { id: repeatedTossId, at: '2026-07-12T00:00:06.000Z' },
+    );
+    harness.openSession = restored;
+    harness.save.mockClear();
+    harness.analyze.mockClear();
+
+    fireEvent.click(screen.getByRole('button', { name: '历史记录' }));
+    fireEvent.click(await screen.findByRole('button', { name: '打开指定测试会话' }));
+    await screen.findByRole('heading', { name: '第6爻' });
+    act(() => harness.onConfirm?.(repeatedTossId));
+
+    await screen.findByRole('heading', { name: '成卦-6' });
+    await waitFor(() => expect(harness.analyze).toHaveBeenCalledTimes(1));
+    expect(harness.save.mock.calls.some(([saved]) => saved.status === 'complete')).toBe(true);
   });
 });
