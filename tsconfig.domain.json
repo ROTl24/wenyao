@@ -1,0 +1,18 @@
+{
+  "extends": "./tsconfig.json",
+  "compilerOptions": {
+    "module": "NodeNext",
+    "moduleResolution": "NodeNext",
+    "rootDir": "src/domain/liuyao",
+    "outDir": "electron/generated/domain",
+    "noEmit": false,
+    "declaration": true,
+    "sourceMap": true,
+    "isolatedModules": false
+  },
+  "include": [
+    "src/domain/liuyao/**/*.ts",
+    "src/types/lunar-javascript.d.ts"
+  ],
+  "exclude": ["src/domain/**/*.test.ts", "src/domain/**/__fixtures__/**"]
+}
