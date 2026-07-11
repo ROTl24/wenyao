@@ -180,17 +180,17 @@ function createTrack(
   ];
   const startPosition: Vector3Tuple = [
     (coinIndex - 1) * 0.32 + randomBetween(random, -0.08, 0.08),
-    randomBetween(random, 2.25, 2.65),
+    randomBetween(random, 0.4, 0.7),
     randomBetween(random, -0.3, -0.08),
   ];
   const firstControlPoint: Vector3Tuple = [
     startPosition[0] + randomBetween(random, -0.45, 0.45),
-    startPosition[1] + randomBetween(random, 1.15, 1.65),
+    startPosition[1] + randomBetween(random, 0.4, 0.5),
     startPosition[2] + randomBetween(random, -0.35, 0.35),
   ];
   const secondControlPoint: Vector3Tuple = [
     impactPosition[0] + randomBetween(random, -0.55, 0.55),
-    startPosition[1] + randomBetween(random, 0.85, 1.25),
+    startPosition[1] + randomBetween(random, 0.3, 0.4),
     impactPosition[2] + randomBetween(random, -0.45, 0.45),
   ];
   const spinAxis = normalizeVector([

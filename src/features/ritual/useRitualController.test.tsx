@@ -90,6 +90,7 @@ function fixtureRig(): CoinRigHandle {
   return {
     prepare: vi.fn(),
     setProgress: vi.fn(),
+    setVisible: vi.fn(),
     snapToEnd: vi.fn(),
     invalidate: vi.fn(),
   };

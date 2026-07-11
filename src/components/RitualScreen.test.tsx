@@ -7,6 +7,7 @@ import { RitualScreen } from './RitualScreen';
 const rig = vi.hoisted(() => ({
   prepare: vi.fn(),
   setProgress: vi.fn(),
+  setVisible: vi.fn(),
   snapToEnd: vi.fn(),
   invalidate: vi.fn(),
 }));
@@ -86,7 +87,8 @@ vi.mock('../features/ritual/createRitualTimeline', () => {
     targets.openHands.style.opacity = '1';
     targets.inkCover.style.opacity = '0';
     targets.setMediaProgress(1);
-    targets.coinRig.setProgress(1);
+    targets.coinRig.setVisible(true);
+    targets.coinRig.snapToEnd();
     targets.coinRig.invalidate();
   };
   return {
@@ -94,6 +96,7 @@ vi.mock('../features/ritual/createRitualTimeline', () => {
     createRitualTimeline: vi.fn((targets, options) => {
       let completed = false;
       let progress = 0;
+      targets.coinRig.setVisible(false);
       const controller = {
         tossId: '',
         coinRig: targets.coinRig,
@@ -164,6 +167,7 @@ function realControllers() {
 
 beforeEach(() => {
   vi.clearAllMocks();
+  rig.snapToEnd.mockImplementation(() => rig.setProgress(1));
   timelineHarness.controllers.splice(0);
   sceneHarness.deferReady = false;
   sceneHarness.throwError = false;
@@ -304,8 +308,14 @@ describe('RitualScreen 原子动画与确认', () => {
     render(<RitualScreen session={preparedSession('webgl-fallback')} onConfirm={vi.fn()} />);
 
     expect(await screen.findByRole('status')).toHaveTextContent('静态铜钱');
+    const fallbackCoins = Array.from(document.querySelectorAll<HTMLElement>(
+      '.coin-static-fallback__coins > span',
+    ));
+    expect(fallbackCoins).toHaveLength(3);
+    expect(fallbackCoins.every((coin) => coin.style.visibility === 'hidden')).toBe(true);
     fireEvent.click(stage());
     await waitFor(() => expect(screen.getByRole('button', { name: '定此爻' })).toBeEnabled());
+    expect(fallbackCoins.every((coin) => coin.style.visibility === 'visible')).toBe(true);
     expect(consoleError).toHaveBeenCalled();
     consoleError.mockRestore();
   });

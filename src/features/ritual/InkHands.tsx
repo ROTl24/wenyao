@@ -77,7 +77,6 @@ interface LoadedInkHandsProps extends Omit<InkHandsProps, 'manifest'> {
 }
 
 function LoadedInkHands({
-  firstLine,
   manifest: parsed = DEFAULT_RITUAL_HANDS_MANIFEST,
   reducedMotion = false,
   className = '',
@@ -87,7 +86,7 @@ function LoadedInkHands({
   const closedRef = useRef<HTMLImageElement>(null);
   const openRef = useRef<HTMLElement | null>(null);
   const inkRef = useRef<HTMLDivElement>(null);
-  const showClosed = firstLine && !reducedMotion;
+  const showClosed = !reducedMotion;
 
   useEffect(() => {
     const root = rootRef.current;

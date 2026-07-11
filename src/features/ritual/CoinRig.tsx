@@ -21,6 +21,7 @@ export type CoinTrackInput = CoinTrajectoryInput;
 export interface CoinRigHandle {
   prepare(input: CoinTrackInput): void;
   setProgress(progress: number): void;
+  setVisible(visible: boolean): void;
   snapToEnd(): void;
   invalidate(): void;
 }
@@ -33,6 +34,16 @@ export function createCoinRigHandle(
   requestRender: () => void,
 ): CoinRigHandle {
   let tracks: CoinTracks | null = null;
+  let visible = false;
+
+  objects.forEach((object) => { object.visible = false; });
+
+  const writeVisibility = (nextVisible: boolean): boolean => {
+    if (visible === nextVisible) return false;
+    visible = nextVisible;
+    objects.forEach((object) => { object.visible = visible; });
+    return true;
+  };
 
   const setProgress = (progress: number): void => {
     if (!tracks) return;
@@ -48,10 +59,15 @@ export function createCoinRigHandle(
   return {
     prepare(input) {
       tracks = createCoinTracks(input);
+      writeVisibility(false);
       setProgress(0);
     },
     setProgress,
+    setVisible(nextVisible) {
+      if (writeVisibility(nextVisible)) requestRender();
+    },
     snapToEnd() {
+      writeVisibility(true);
       setProgress(1);
     },
     invalidate: requestRender,

@@ -13,6 +13,7 @@ import { restoreOwnedCoinEnvironment } from '../features/ritual/coinEnvironment'
 import { DEFAULT_COIN_TEXTURE_QUALITY } from '../features/ritual/coinTextures';
 
 export const COIN_SCENE_TEXTURE_QUALITY = DEFAULT_COIN_TEXTURE_QUALITY;
+export const COIN_SCENE_SHADOW_MODE = 'basic' as const;
 
 export function coinSceneFrameloop(active: boolean): 'always' | 'demand' {
   return active ? 'always' : 'demand';
@@ -150,7 +151,7 @@ export default function CoinScene(props: CoinSceneProps) {
         gl.toneMapping = THREE.ACESFilmicToneMapping;
         gl.toneMappingExposure = 1.08;
       }}
-      shadows
+      shadows={COIN_SCENE_SHADOW_MODE}
     >
       <CoinSceneContents {...props} />
     </Canvas>

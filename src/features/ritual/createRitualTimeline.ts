@@ -73,9 +73,7 @@ export function ritualTimelineLabels(firstLine: boolean): RitualTimelineLabels {
 
   return {
     start: 0,
-    inkCover: firstLine
-      ? seconds(timing.releaseAt - INK_COVER_HOLD_SECONDS)
-      : 0,
+    inkCover: seconds(timing.releaseAt - INK_COVER_HOLD_SECONDS),
     release: timing.releaseAt,
     coinsAirborne: timing.airborneAt,
     firstImpact: timing.landingAt,
@@ -100,7 +98,8 @@ export function snapRitualTargetsToEnd(targets: RitualTimelineTargets): void {
   targets.openHands.style.opacity = '1';
   targets.inkCover.style.opacity = '0';
   targets.setMediaProgress(1);
-  targets.coinRig.setProgress(1);
+  targets.coinRig.setVisible(true);
+  targets.coinRig.snapToEnd();
   targets.coinRig.invalidate();
 }
 
@@ -121,9 +120,10 @@ export function createRitualTimeline(
   let completed = false;
   let finalStateApplied = false;
   let timeline!: gsap.core.Timeline;
+  const startsClosed = !options.reducedMotion;
 
-  targets.closedHands.style.opacity = options.firstLine ? '1' : '0';
-  targets.openHands.style.opacity = options.firstLine ? '0' : '1';
+  targets.closedHands.style.opacity = startsClosed ? '1' : '0';
+  targets.openHands.style.opacity = startsClosed ? '0' : '1';
   targets.inkCover.style.opacity = '0';
 
   const emitPhase = (phase: RitualTimelinePhase): void => {
@@ -153,11 +153,11 @@ export function createRitualTimeline(
       timeline.addLabel(label, at);
     }
 
-    timeline.set(targets.closedHands, { opacity: options.firstLine ? 1 : 0 }, labels.start);
-    timeline.set(targets.openHands, { opacity: options.firstLine ? 0 : 1 }, labels.start);
+    timeline.set(targets.closedHands, { opacity: startsClosed ? 1 : 0 }, labels.start);
+    timeline.set(targets.openHands, { opacity: startsClosed ? 0 : 1 }, labels.start);
     timeline.set(targets.inkCover, { opacity: 0 }, labels.start);
 
-    if (options.firstLine && !options.reducedMotion) {
+    if (!options.reducedMotion) {
       const coverDuration = 0.16;
       timeline.to(targets.inkCover, {
         duration: coverDuration,
@@ -174,6 +174,7 @@ export function createRitualTimeline(
       }, labels.inkCover);
     }
 
+    timeline.call(() => targets.coinRig.setVisible(true), [], labels.release);
     timeline.call(() => emitPhase('release'), [], labels.release);
     timeline.call(() => emitPhase('airborne'), [], labels.coinsAirborne);
     timeline.call(() => emitPhase('landing'), [], labels.firstImpact);
@@ -217,6 +218,7 @@ export function createRitualTimeline(
 
   targets.setMediaProgress(0);
   targets.coinRig.setProgress(0);
+  targets.coinRig.setVisible(false);
   timeline.seek(0, true).pause();
   if (options.reducedMotion) {
     timeline.timeScale(labels.confirmable / REDUCED_MOTION_DURATION);
@@ -234,11 +236,12 @@ export function createRitualTimeline(
     mediaProgress.value = 0;
     endMarker.value = 0;
     finalStateApplied = false;
-    targets.closedHands.style.opacity = options.firstLine ? '1' : '0';
-    targets.openHands.style.opacity = options.firstLine ? '0' : '1';
+    targets.closedHands.style.opacity = startsClosed ? '1' : '0';
+    targets.openHands.style.opacity = startsClosed ? '0' : '1';
     targets.inkCover.style.opacity = '0';
     targets.setMediaProgress(0);
     targets.coinRig.setProgress(0);
+    targets.coinRig.setVisible(false);
     targets.coinRig.invalidate();
   };
 
@@ -267,6 +270,7 @@ export function createRitualTimeline(
     seek(position) {
       if (killed) return;
       timeline.seek(position, false);
+      targets.coinRig.setVisible(timeline.time() >= labels.release);
     },
     seekProgress(progress) {
       if (killed) return;
@@ -274,6 +278,7 @@ export function createRitualTimeline(
         ? Math.min(1, Math.max(0, progress))
         : 0;
       timeline.progress(clamped, false);
+      targets.coinRig.setVisible(timeline.time() >= labels.release);
     },
     kill,
     dispose: kill,

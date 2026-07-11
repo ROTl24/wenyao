@@ -50,6 +50,16 @@ describe('InkHands 可替换资产层', () => {
     expect(targets!.inkCover.style.opacity).toBe('0');
   });
 
+  it('后续爻的非 reduced 首帧同样保持闭手，等待主时间轴完成墨幕切换', async () => {
+    let targets: InkHandsTargets | null = null;
+    render(<InkHands firstLine={false} onReady={(value) => { targets = value; }} />);
+
+    await waitFor(() => expect(targets).not.toBeNull());
+    expect(targets!.closedHands.style.opacity).toBe('1');
+    expect(targets!.openHands.style.opacity).toBe('0');
+    expect(targets!.inkCover.style.opacity).toBe('0');
+  });
+
   it('reduced motion 的视频清单不创建 video，也不请求视频 source', async () => {
     const manifest: RitualHandsManifest = {
       ...common,

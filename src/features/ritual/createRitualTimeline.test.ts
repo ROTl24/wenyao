@@ -19,10 +19,16 @@ function fixtureTargets(): Fixture {
   root.append(closedHands, openHands, inkCover);
   document.body.append(root);
 
+  const setProgress = vi.fn();
+  const setVisible = vi.fn();
   const coinRig: CoinRigHandle = {
     prepare: vi.fn(),
-    setProgress: vi.fn(),
-    snapToEnd: vi.fn(),
+    setProgress,
+    setVisible,
+    snapToEnd: vi.fn(() => {
+      setVisible(true);
+      setProgress(1);
+    }),
     invalidate: vi.fn(),
   };
   const setMediaProgress = vi.fn();
@@ -73,7 +79,7 @@ describe('唯一 GSAP 摇卦时间轴', () => {
     });
     expect(repeat.getLabels()).toEqual({
       start: 0,
-      inkCover: 0,
+      inkCover: 0.44,
       release: 0.46,
       coinsAirborne: 0.68,
       firstImpact: 1.28,
@@ -109,23 +115,95 @@ describe('唯一 GSAP 摇卦时间轴', () => {
     controller.kill();
   });
 
-  it('第二至第六爻从开手开始且墨幕始终不遮挡', () => {
-    const { targets } = fixtureTargets();
+  it('第二至第六爻同样先闭手蓄力，经完全墨幕切换后才开手', () => {
+    const { coinRig, targets } = fixtureTargets();
     const controller = createRitualTimeline(targets, {
       firstLine: false,
       reducedMotion: false,
     });
 
     controller.seek('start');
+    expect(targets.closedHands.style.opacity).toBe('1');
+    expect(targets.openHands.style.opacity).toBe('0');
+    expect(targets.inkCover.style.opacity).toBe('0');
+    expect(coinRig.setVisible).toHaveBeenLastCalledWith(false);
+
+    controller.seek(controller.getLabels().inkCover - 0.001);
+    expect(targets.closedHands.style.opacity).toBe('1');
+    expect(targets.openHands.style.opacity).toBe('0');
+    expect(coinRig.setVisible).toHaveBeenLastCalledWith(false);
+
+    controller.seek('inkCover');
+    expect(targets.inkCover.style.opacity).toBe('1');
     expect(targets.closedHands.style.opacity).toBe('0');
     expect(targets.openHands.style.opacity).toBe('1');
-    expect(targets.inkCover.style.opacity).toBe('0');
+    expect(coinRig.setVisible).toHaveBeenLastCalledWith(false);
 
     controller.seek('release');
-    expect(targets.closedHands.style.opacity).toBe('0');
-    expect(targets.openHands.style.opacity).toBe('1');
-    expect(targets.inkCover.style.opacity).toBe('0');
+    expect(coinRig.setVisible).toHaveBeenLastCalledWith(true);
     controller.kill();
+  });
+
+  it('release 前古钱始终隐藏，release/seek/finish/restart 都由主时间轴同步可见性', () => {
+    const { coinRig, targets } = fixtureTargets();
+    const onPhase = vi.fn();
+    const controller = createRitualTimeline(targets, {
+      firstLine: true,
+      reducedMotion: false,
+      onPhase,
+    });
+
+    controller.seek(controller.getLabels().release - 0.001);
+    expect(coinRig.setVisible).toHaveBeenLastCalledWith(false);
+    controller.seek('release');
+    expect(coinRig.setVisible).toHaveBeenLastCalledWith(true);
+    const firstVisibleCall = vi.mocked(coinRig.setVisible).mock.calls
+      .findIndex(([visible]) => visible);
+    expect(vi.mocked(coinRig.setVisible).mock.invocationCallOrder[firstVisibleCall])
+      .toBeLessThan(onPhase.mock.invocationCallOrder.at(-1)!);
+
+    controller.seekProgress(0.1);
+    expect(coinRig.setVisible).toHaveBeenLastCalledWith(false);
+    controller.seekProgress(0.5);
+    expect(coinRig.setVisible).toHaveBeenLastCalledWith(true);
+
+    controller.finish();
+    expect(coinRig.setVisible).toHaveBeenLastCalledWith(true);
+    controller.restart();
+    expect(coinRig.setVisible).toHaveBeenLastCalledWith(false);
+    controller.kill();
+  });
+
+  it('目标 rebind 后以旧时间轴归一化进度恢复同一可见状态', () => {
+    const first = fixtureTargets();
+    const firstController = createRitualTimeline(first.targets, {
+      firstLine: false,
+      reducedMotion: false,
+    });
+    firstController.seekProgress(0.5);
+    expect(first.coinRig.setVisible).toHaveBeenLastCalledWith(true);
+
+    const replacement = fixtureTargets();
+    const replacementController = createRitualTimeline(replacement.targets, {
+      firstLine: false,
+      reducedMotion: false,
+    });
+    expect(replacement.coinRig.setVisible).toHaveBeenLastCalledWith(false);
+    replacementController.seekProgress(firstController.getProgress());
+    expect(replacement.coinRig.setVisible).toHaveBeenLastCalledWith(true);
+
+    firstController.seekProgress(0.1);
+    const earlyReplacement = fixtureTargets();
+    const earlyController = createRitualTimeline(earlyReplacement.targets, {
+      firstLine: false,
+      reducedMotion: false,
+    });
+    earlyController.seekProgress(firstController.getProgress());
+    expect(earlyReplacement.coinRig.setVisible).toHaveBeenLastCalledWith(false);
+
+    firstController.kill();
+    replacementController.kill();
+    earlyController.kill();
   });
 
   it('只由主时间轴把 CoinRig 推进到飞行、碰撞与末帧', () => {

@@ -85,6 +85,11 @@ function staticFaceLabel(face: CoinFace): string {
 function StaticCoinFallback({ toss, notice, onRigReady }: StaticCoinFallbackProps) {
   const coinRefs = useRef<Array<HTMLSpanElement | null>>([]);
   const rig = useMemo<CoinRigHandle>(() => {
+    const setVisible = (visible: boolean) => {
+      coinRefs.current.forEach((coin) => {
+        if (coin) coin.style.visibility = visible ? 'visible' : 'hidden';
+      });
+    };
     const setProgress = (progress: number) => {
       const normalized = Number.isFinite(progress)
         ? Math.min(1, Math.max(0, progress))
@@ -98,9 +103,16 @@ function StaticCoinFallback({ toss, notice, onRigReady }: StaticCoinFallbackProp
       });
     };
     return {
-      prepare: () => setProgress(0),
+      prepare: () => {
+        setVisible(false);
+        setProgress(0);
+      },
       setProgress,
-      snapToEnd: () => setProgress(1),
+      setVisible,
+      snapToEnd: () => {
+        setVisible(true);
+        setProgress(1);
+      },
       invalidate: () => undefined,
     };
   }, [toss.faces]);
@@ -126,6 +138,7 @@ function StaticCoinFallback({ toss, notice, onRigReady }: StaticCoinFallbackProp
             data-progress="0.000"
             key={index}
             ref={(node) => { coinRefs.current[index] = node; }}
+            style={{ visibility: 'hidden' }}
           >
             <i />
             <b>旋</b>

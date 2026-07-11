@@ -105,6 +105,35 @@ describe('确定性古钱轨迹', () => {
     );
   });
 
+  it('所有种子的古钱都从掌心安全区起飞且弧线不侵入标题与上缘', () => {
+    const samples = Array.from({ length: 48 }, (_, index) => createCoinTracks({
+      tossId: `viewport-safe-${index}`,
+      visualSeed: `seed-${index * 17}`,
+      lineIndex: index % 6 + 1,
+      faces: index % 2 === 0
+        ? ['text', 'reverse', 'text'] as const
+        : ['reverse', 'text', 'reverse'] as const,
+    }));
+
+    for (const tracks of samples) {
+      for (const track of tracks) {
+        expect(track.startPosition[1]).toBeGreaterThanOrEqual(0.4);
+        expect(track.startPosition[1]).toBeLessThanOrEqual(0.8);
+        expect(track.firstControlPoint[1]).toBeLessThanOrEqual(1.25);
+        expect(track.secondControlPoint[1]).toBeLessThanOrEqual(1.15);
+
+        for (let frame = 0; frame <= 90; frame += 1) {
+          const progress = track.impactProgress * (frame / 90);
+          const pose = sampleCoinTrack(track, progress);
+          expect(Math.abs(pose.position[0])).toBeLessThanOrEqual(2.35);
+          expect(pose.position[1]).toBeGreaterThanOrEqual(0);
+          expect(pose.position[1]).toBeLessThanOrEqual(1.08);
+          expect(Math.abs(pose.position[2])).toBeLessThanOrEqual(1.1);
+        }
+      }
+    }
+  });
+
   it('不同 visualSeed 产生不同且仍受毫秒边界约束的 seeded 接触错峰', () => {
     const impactSeries = ['seed-a', 'seed-b', 'seed-c', 'seed-d'].map((visualSeed) => {
       const tracks = createCoinTracks({
