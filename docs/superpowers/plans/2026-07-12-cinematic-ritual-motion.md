@@ -230,7 +230,7 @@ git commit -m "feat(ritual): 实现可复现的三枚古钱轨迹"
 **Interfaces:**
 - Produces: `createQianlongCoinGeometry()`，三枚实例共享同一 `BufferGeometry`。
 - Produces: `createQianlongTextureSet(renderer, quality)`，同时包含正面、背面和边缘材质。
-- Produces: `CoinRigHandle { objects, snapToEnd, invalidate }`。
+- Produces: `CoinRigHandle { prepare, setProgress, snapToEnd, invalidate }`；GSAP 通过该接口写入 Object3D，不使用 R3F `useFrame` 计时。
 
 - [ ] **Step 1: 写真实方孔失败测试**
 
@@ -292,9 +292,8 @@ interface CoinSceneProps {
   visualSeed: string;
   faces: readonly [CoinFace, CoinFace, CoinFace];
   lineIndex: number;
-  motionProgress: { current: number };
   active: boolean;
-  onReady(): void;
+  onRigReady(rig: CoinRigHandle): void;
 }
 ```
 
@@ -345,7 +344,7 @@ it('finish 将所有目标推进到同一最终状态且只完成一次', () => 
   controller.play();
   controller.finish();
   controller.finish();
-  expect(targets.coinProgress.current).toBe(1);
+  expect(controller.getProgress()).toBe(1);
   expect(targets.openHands.style.opacity).toBe('1');
   expect(completed).toHaveBeenCalledTimes(1);
 });
@@ -381,7 +380,7 @@ Expected: FAIL。
 
 时间轴必须包含标签：`start`、`inkCover`、`release`、`coinsAirborne`、`firstImpact`、`lastImpact`、`settled`、`reveal`、`confirmable`。
 
-第一爻使用 3.20 秒；短流程 2.20 秒。`coinProgress.current` 从 release 标签开始 tween 到 1。`finish()` 使用 `timeline.progress(1, false)` 或等价实现，并以内部布尔值保证完成回调只执行一次。
+第一爻使用 3.20 秒；短流程 2.20 秒。时间轴从 release 标签开始 tween 内部 progress proxy，并在 `onUpdate` 调用 `CoinRigHandle.setProgress()`。`finish()` 使用 `timeline.progress(1, false)` 或等价实现，并以内部布尔值保证完成回调只执行一次。
 
 - [ ] **Step 5: 实现 React 生命周期**
 
@@ -392,7 +391,7 @@ Expected: FAIL。
 - 所有回调携带创建时的 `tossId`，过期回调不 dispatch；
 - 监听 `matchMedia('(prefers-reduced-motion: reduce)')` 的初值和 change；
 - reduced 模式直接 snap 到末帧，不加载视频、不播放 R3F 飞行动画；
-- 返回 `skip()`、`confirmable`、`phase`、`coinProgress` 和 `active`。
+- 返回 `skip()`、`confirmable`、`phase`、`getProgress()` 和 `active`。
 
 - [ ] **Step 6: 验证并提交**
 
