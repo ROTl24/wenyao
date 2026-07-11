@@ -197,7 +197,7 @@ export const BASE_RULE_CONTEXT = deepFreeze({
   "compilerOptions": {
     "module": "NodeNext",
     "moduleResolution": "NodeNext",
-    "rootDir": "src/domain",
+    "rootDir": "src/domain/liuyao",
     "outDir": "electron/generated/domain",
     "noEmit": false,
     "declaration": true,
