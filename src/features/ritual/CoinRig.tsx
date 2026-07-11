@@ -1,4 +1,4 @@
-import { Fragment, useLayoutEffect, useMemo, useState } from 'react';
+import { Fragment, useEffect, useLayoutEffect, useMemo, useState } from 'react';
 import { useThree } from '@react-three/fiber';
 import type * as THREE from 'three';
 import {
@@ -10,6 +10,7 @@ import {
 import { createQianlongCoinGeometry } from './coinGeometry';
 import {
   createQianlongTextureSet,
+  DEFAULT_COIN_TEXTURE_QUALITY,
   type CoinTextureQuality,
   type QianlongTextureSet,
 } from './coinTextures';
@@ -96,15 +97,31 @@ interface CoinRigProps {
   quality?: CoinTextureQuality;
 }
 
-export function CoinRig({ input, onReady, quality = 'high' }: CoinRigProps) {
+export function CoinRig({
+  input,
+  onReady,
+  quality = DEFAULT_COIN_TEXTURE_QUALITY,
+}: CoinRigProps) {
   const renderer = useThree((state) => state.gl);
   const requestRender = useThree((state) => state.invalidate);
   const [resources, setResources] = useState<SharedCoinResources | null>(null);
 
-  useLayoutEffect(() => {
-    const created = createSharedCoinResources(renderer, quality);
-    setResources(created);
-    return () => created.dispose();
+  useEffect(() => {
+    let cancelled = false;
+    let created: SharedCoinResources | null = null;
+    setResources(null);
+
+    void Promise.resolve().then(() => {
+      if (cancelled) return;
+      created = createSharedCoinResources(renderer, quality);
+      if (cancelled) created.dispose();
+      else setResources(created);
+    });
+
+    return () => {
+      cancelled = true;
+      created?.dispose();
+    };
   }, [quality, renderer]);
 
   if (!resources) return null;

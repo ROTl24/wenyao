@@ -2,6 +2,8 @@ import * as THREE from 'three';
 
 export type CoinTextureQuality = 'balanced' | 'high';
 
+export const DEFAULT_COIN_TEXTURE_QUALITY: CoinTextureQuality = 'balanced';
+
 export type QianlongCoinMaterials = [
   THREE.MeshPhysicalMaterial,
   THREE.MeshPhysicalMaterial,
@@ -249,13 +251,14 @@ function createCoinTexture(
   texture.magFilter = THREE.LinearFilter;
   texture.generateMipmaps = true;
   texture.name = `QianlongCoin.${surface}.${channel}`;
+  if (surface === 'edge') texture.wrapS = THREE.RepeatWrapping;
   texture.needsUpdate = true;
   return texture;
 }
 
 export function createQianlongTextureSet(
   renderer: THREE.WebGLRenderer,
-  quality: CoinTextureQuality = 'high',
+  quality: CoinTextureQuality = DEFAULT_COIN_TEXTURE_QUALITY,
 ): QianlongTextureSet {
   const frontBaseColor = createCoinTexture(renderer, quality, 'front', 'baseColor');
   const frontSurfaceData = createCoinTexture(renderer, quality, 'front', 'surfaceData');

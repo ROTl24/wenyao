@@ -19,6 +19,8 @@ vi.mock('./CoinScene', async () => {
   return {
     default: (props: {
       active: boolean;
+      faces: readonly string[];
+      lineIndex: number;
       tossId: string;
       visualSeed: string;
       onRigReady?(value: typeof rig): void;
@@ -30,6 +32,8 @@ vi.mock('./CoinScene', async () => {
       return (
         <div
           data-active={String(props.active)}
+          data-faces={props.faces.join(',')}
+          data-line-index={props.lineIndex}
           data-testid="coin-scene-stub"
           data-toss-id={props.tossId}
           data-visual-seed={props.visualSeed}
@@ -88,6 +92,8 @@ describe('RitualScreen 到 CoinRig 的静态交接', () => {
 
     expect(scene).toHaveAttribute('data-toss-id', 'toss-static-handoff');
     expect(scene).toHaveAttribute('data-visual-seed', 'ritual-screen-seed');
+    expect(scene).toHaveAttribute('data-faces', 'text,reverse,text');
+    expect(scene).toHaveAttribute('data-line-index', '1');
     expect(scene).toHaveAttribute('data-active', 'true');
 
     fireEvent.click(screen.getByRole('button', { name: '起卦动画，点击可直接查看结果' }));

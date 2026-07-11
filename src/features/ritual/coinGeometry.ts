@@ -70,7 +70,8 @@ function classifyTriangle(
 
 function faceUv(group: MaterialGroupIndex, x: number, y: number): [number, number] {
   const u = x / (OUTER_RADIUS * 2);
-  return [group === 1 ? 0.5 - u : 0.5 + u, 0.5 + y / (OUTER_RADIUS * 2)];
+  const v = y / (OUTER_RADIUS * 2);
+  return group === 1 ? [0.5 + u, 0.5 - v] : [0.5 + u, 0.5 + v];
 }
 
 function sideUv(x: number, y: number, z: number): [number, number] {
@@ -116,22 +117,38 @@ export function createQianlongCoinGeometry(): THREE.BufferGeometry {
       : '#ffffff');
 
     for (const triangleStart of starts) {
-      for (let offset = 0; offset < 3; offset += 1) {
+      const triangle = [0, 1, 2].map((offset) => {
         const vertex = triangleStart + offset;
-        const x = sourcePositions.getX(vertex);
-        const y = sourcePositions.getY(vertex);
-        const z = sourcePositions.getZ(vertex);
+        return {
+          vertex,
+          x: sourcePositions.getX(vertex),
+          y: sourcePositions.getY(vertex),
+          z: sourcePositions.getZ(vertex),
+        };
+      });
+      const triangleUvs = triangle.map(({ x, y, z }) => materialIndex < 2
+        ? faceUv(materialIndex as MaterialGroupIndex, x, y)
+        : sideUv(x, y, z));
+
+      if (materialIndex >= 2) {
+        const triangleU = triangleUvs.map(([u]) => u);
+        if (Math.max(...triangleU) - Math.min(...triangleU) > 0.5) {
+          triangleUvs.forEach((uv) => {
+            if (uv[0] < 0.5) uv[0] += 1;
+          });
+        }
+      }
+
+      triangle.forEach(({ vertex, x, y, z }, offset) => {
         positions.push(x, y, z);
         normals.push(
           sourceNormals.getX(vertex),
           sourceNormals.getY(vertex),
           sourceNormals.getZ(vertex),
         );
-        uvs.push(...(materialIndex < 2
-          ? faceUv(materialIndex as MaterialGroupIndex, x, y)
-          : sideUv(x, y, z)));
+        uvs.push(...triangleUvs[offset]);
         colors.push(vertexColor.r, vertexColor.g, vertexColor.b);
-      }
+      });
     }
 
     geometry.addGroup(groupStart, starts.length * 3, materialIndex);

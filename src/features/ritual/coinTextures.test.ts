@@ -49,6 +49,34 @@ describe('乾隆通宝程序纹理', () => {
     set.dispose();
   });
 
+  it('默认使用 1K balanced，6 张 RGBA8 含 4/3 mip 的预算明显低于 128MiB', () => {
+    const renderer = {
+      capabilities: { getMaxAnisotropy: () => 8 },
+    } as unknown as THREE.WebGLRenderer;
+    const set = createQianlongTextureSet(renderer);
+    const rgba8BytesWithMipmaps = set.textures.reduce(
+      (bytes, texture) => bytes + texture.image.width * texture.image.height * 4 * (4 / 3),
+      0,
+    );
+
+    expect(set.textures.every((texture) => texture.image.width === 1024)).toBe(true);
+    expect(rgba8BytesWithMipmaps).toBeCloseTo(32 * 1024 * 1024, 5);
+    expect(rgba8BytesWithMipmaps).toBeLessThan(128 * 1024 * 1024);
+    set.dispose();
+  });
+
+  it('边缘颜色与数据纹理允许展开后的 U 重复采样', () => {
+    const renderer = {
+      capabilities: { getMaxAnisotropy: () => 8 },
+    } as unknown as THREE.WebGLRenderer;
+    const set = createQianlongTextureSet(renderer, 'balanced');
+    const edgeTextures = set.textures.filter((texture) => texture.name.includes('.edge.'));
+
+    expect(edgeTextures).toHaveLength(2);
+    edgeTextures.forEach((texture) => expect(texture.wrapS).toBe(THREE.RepeatWrapping));
+    set.dispose();
+  });
+
   it('材质满足铜质 PBR 范围、无 emissive，孔壁复用边缘材质且资源只释放一次', () => {
     const renderer = {
       capabilities: { getMaxAnisotropy: () => 8 },

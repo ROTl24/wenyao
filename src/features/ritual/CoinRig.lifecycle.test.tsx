@@ -1,6 +1,6 @@
 import { StrictMode } from 'react';
 import { render, waitFor } from '@testing-library/react';
-import { describe, expect, it, vi } from 'vitest';
+import { beforeEach, describe, expect, it, vi } from 'vitest';
 import { CoinRig } from './CoinRig';
 
 const lifecycle = vi.hoisted(() => ({
@@ -30,6 +30,7 @@ vi.mock('./coinGeometry', async () => {
 });
 
 vi.mock('./coinTextures', () => ({
+  DEFAULT_COIN_TEXTURE_QUALITY: 'balanced',
   createQianlongTextureSet: () => {
     const dispose = vi.fn();
     lifecycle.textureSetDisposals.push(dispose);
@@ -49,7 +50,34 @@ vi.mock('./QianlongCoin', async () => {
   };
 });
 
+beforeEach(() => {
+  lifecycle.geometryDisposals.splice(0);
+  lifecycle.textureSetDisposals.splice(0);
+  fiberState.invalidate.mockClear();
+});
+
 describe('CoinRig 资源生命周期', () => {
+  it('首个提交不创建 Canvas/材质，资源异步就绪后才暴露 rig', async () => {
+    const onReady = vi.fn();
+    const view = render(
+      <CoinRig
+        input={{
+          tossId: 'async-resource-ready',
+          visualSeed: 'do-not-block-commit',
+          faces: ['text', 'reverse', 'text'],
+          lineIndex: 1,
+        }}
+        onReady={onReady}
+      />,
+    );
+
+    expect(lifecycle.geometryDisposals).toHaveLength(0);
+    expect(onReady).not.toHaveBeenCalled();
+    await waitFor(() => expect(onReady).toHaveBeenCalled());
+
+    view.unmount();
+  });
+
   it('StrictMode 探测渲染与最终卸载产生的每套资源都恰好释放一次', async () => {
     const onReady = vi.fn();
     const { unmount } = render(

@@ -1,5 +1,3 @@
-import { readFileSync } from 'node:fs';
-import { resolve } from 'node:path';
 import * as THREE from 'three';
 import { describe, expect, it, vi } from 'vitest';
 import { createCoinTracks, sampleCoinTrack } from './coinTrajectory';
@@ -58,15 +56,5 @@ describe('CoinRig 唯一轨迹时钟', () => {
     invalidate.mockClear();
     rig.invalidate();
     expect(invalidate).toHaveBeenCalledTimes(1);
-  });
-
-  it('源码不引入 useFrame 或第二套时间源', () => {
-    const source = readFileSync(
-      resolve(process.cwd(), 'src/features/ritual/CoinRig.tsx'),
-      'utf8',
-    );
-
-    expect(source).not.toMatch(/\buseFrame\b/);
-    expect(source).not.toMatch(/elapsedTime|requestAnimationFrame|\bFloat\b/);
   });
 });

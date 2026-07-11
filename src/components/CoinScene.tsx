@@ -9,6 +9,14 @@ import {
   type CoinRigHandle,
   type CoinTrackInput,
 } from '../features/ritual/CoinRig';
+import { restoreOwnedCoinEnvironment } from '../features/ritual/coinEnvironment';
+import { DEFAULT_COIN_TEXTURE_QUALITY } from '../features/ritual/coinTextures';
+
+export const COIN_SCENE_TEXTURE_QUALITY = DEFAULT_COIN_TEXTURE_QUALITY;
+
+export function coinSceneFrameloop(active: boolean): 'always' | 'demand' {
+  return active ? 'always' : 'demand';
+}
 
 export interface CoinSceneProps {
   tossId: string;
@@ -45,8 +53,12 @@ function OfflineCoinEnvironment() {
     invalidate();
 
     return () => {
-      if (scene.environment === target.texture) scene.environment = previousEnvironment;
-      scene.environmentIntensity = previousIntensity;
+      restoreOwnedCoinEnvironment(
+        scene,
+        target.texture,
+        previousEnvironment,
+        previousIntensity,
+      );
       target.dispose();
       room.dispose();
       generator.dispose();
@@ -76,7 +88,11 @@ function CoinSceneContents(props: CoinSceneProps) {
         shadow-mapSize-width={1024}
       />
       <pointLight color="#b96a35" distance={13} intensity={6.4} position={[-4, 2.5, 3]} />
-      <CoinRig input={input} onReady={props.onRigReady} />
+      <CoinRig
+        input={input}
+        onReady={props.onRigReady}
+        quality={COIN_SCENE_TEXTURE_QUALITY}
+      />
       <mesh position={[0, -0.12, 0]} receiveShadow rotation={[-Math.PI / 2, 0, 0]}>
         <planeGeometry args={[8, 5]} />
         <shadowMaterial color="#18120c" opacity={0.24} transparent />
@@ -126,7 +142,7 @@ export default function CoinScene(props: CoinSceneProps) {
       camera={{ fov: 36, position: [0, 4.2, 7.2] }}
       className="coin-canvas"
       dpr={[1, 1.6]}
-      frameloop={props.active ? 'always' : 'demand'}
+      frameloop={coinSceneFrameloop(props.active)}
       gl={{ alpha: true, antialias: true }}
       onCreated={({ camera, gl }) => {
         camera.lookAt(0, 0, 0);

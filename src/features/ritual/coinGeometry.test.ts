@@ -1,6 +1,7 @@
 import { afterEach, describe, expect, it } from 'vitest';
 import * as THREE from 'three';
 import { createQianlongCoinGeometry } from './coinGeometry';
+import { createCoinTracks, sampleCoinTrack } from './coinTrajectory';
 
 const geometries: THREE.BufferGeometry[] = [];
 
@@ -75,5 +76,62 @@ describe('乾隆通宝方孔几何', () => {
     expect(bounds.min.x).toBeCloseTo(-bounds.max.x, 5);
     expect(bounds.min.y).toBeCloseTo(-bounds.max.y, 5);
     expect(bounds.min.z).toBeCloseTo(-bounds.max.z, 5);
+  });
+
+  it('应用 Task 2 末帧后正背可见面的 U 向右、V 向上世界方向一致', () => {
+    const geometry = createGeometry();
+    const positions = geometry.getAttribute('position');
+    const uvs = geometry.getAttribute('uv');
+    const tracks = createCoinTracks({
+      tossId: 'final-visible-uv-orientation',
+      visualSeed: 'front-and-reverse',
+      faces: ['text', 'reverse', 'text'],
+      lineIndex: 1,
+    });
+
+    const directionalCovariance = (
+      group: (typeof geometry.groups)[number],
+      quaternion: THREE.Quaternion,
+      worldAxis: 'x' | 'z',
+      uvAxis: 'u' | 'v',
+    ): number => {
+      const count = group.count ?? 0;
+      let covariance = 0;
+      for (let index = group.start; index < group.start + count; index += 1) {
+        const worldPosition = new THREE.Vector3(
+          positions.getX(index),
+          positions.getY(index),
+          positions.getZ(index),
+        ).applyQuaternion(quaternion);
+        const uv = uvAxis === 'u' ? uvs.getX(index) : uvs.getY(index);
+        covariance += worldPosition[worldAxis] * (uv - 0.5);
+      }
+      return covariance;
+    };
+
+    const front = geometry.groups[0];
+    const reverse = geometry.groups[1];
+    const frontPose = sampleCoinTrack(tracks[0], 1);
+    const reversePose = sampleCoinTrack(tracks[1], 1);
+    const frontQuaternion = new THREE.Quaternion(...frontPose.quaternion);
+    const reverseQuaternion = new THREE.Quaternion(...reversePose.quaternion);
+
+    expect(directionalCovariance(front, frontQuaternion, 'x', 'u')).toBeGreaterThan(0);
+    expect(directionalCovariance(front, frontQuaternion, 'z', 'v')).toBeLessThan(0);
+    expect(directionalCovariance(reverse, reverseQuaternion, 'x', 'u')).toBeGreaterThan(0);
+    expect(directionalCovariance(reverse, reverseQuaternion, 'z', 'v')).toBeLessThan(0);
+  });
+
+  it('外缘与孔壁每个三角的 U 接缝跨度不超过半圈', () => {
+    const geometry = createGeometry();
+    const uvs = geometry.getAttribute('uv');
+
+    for (const group of geometry.groups.slice(2)) {
+      const count = group.count ?? 0;
+      for (let start = group.start; start < group.start + count; start += 3) {
+        const triangleU = [uvs.getX(start), uvs.getX(start + 1), uvs.getX(start + 2)];
+        expect(Math.max(...triangleU) - Math.min(...triangleU)).toBeLessThanOrEqual(0.5);
+      }
+    }
   });
 });
