@@ -1,0 +1,81 @@
+import { StrictMode } from 'react';
+import { render, waitFor } from '@testing-library/react';
+import { describe, expect, it, vi } from 'vitest';
+import { CoinRig } from './CoinRig';
+
+const lifecycle = vi.hoisted(() => ({
+  geometryDisposals: [] as Array<ReturnType<typeof vi.fn>>,
+  textureSetDisposals: [] as Array<ReturnType<typeof vi.fn>>,
+}));
+const fiberState = vi.hoisted(() => ({
+  gl: {},
+  invalidate: vi.fn(),
+}));
+
+vi.mock('@react-three/fiber', () => ({
+  useThree: (selector: (state: typeof fiberState) => unknown) => selector(fiberState),
+}));
+
+vi.mock('./coinGeometry', async () => {
+  const THREE = await import('three');
+  return {
+    createQianlongCoinGeometry: () => {
+      const geometry = new THREE.BufferGeometry();
+      const dispose = vi.fn();
+      geometry.dispose = dispose;
+      lifecycle.geometryDisposals.push(dispose);
+      return geometry;
+    },
+  };
+});
+
+vi.mock('./coinTextures', () => ({
+  createQianlongTextureSet: () => {
+    const dispose = vi.fn();
+    lifecycle.textureSetDisposals.push(dispose);
+    return { dispose, materials: [] };
+  },
+}));
+
+vi.mock('./QianlongCoin', async () => {
+  const THREE = await import('three');
+  return {
+    createQianlongCoinMeshes: () => [
+      new THREE.Object3D(),
+      new THREE.Object3D(),
+      new THREE.Object3D(),
+    ],
+    QianlongCoin: () => null,
+  };
+});
+
+describe('CoinRig 资源生命周期', () => {
+  it('StrictMode 探测渲染与最终卸载产生的每套资源都恰好释放一次', async () => {
+    const onReady = vi.fn();
+    const { unmount } = render(
+      <StrictMode>
+        <CoinRig
+          input={{
+            tossId: 'strict-resource-lifecycle',
+            visualSeed: 'dispose-every-created-set',
+            faces: ['text', 'reverse', 'text'],
+            lineIndex: 1,
+          }}
+          onReady={onReady}
+        />
+      </StrictMode>,
+    );
+    await waitFor(() => expect(onReady).toHaveBeenCalled());
+
+    unmount();
+
+    expect(lifecycle.geometryDisposals.length).toBeGreaterThan(0);
+    expect(lifecycle.textureSetDisposals.length).toBe(lifecycle.geometryDisposals.length);
+    lifecycle.geometryDisposals.forEach((dispose) => {
+      expect(dispose).toHaveBeenCalledTimes(1);
+    });
+    lifecycle.textureSetDisposals.forEach((dispose) => {
+      expect(dispose).toHaveBeenCalledTimes(1);
+    });
+  });
+});

@@ -1,0 +1,72 @@
+import { readFileSync } from 'node:fs';
+import { resolve } from 'node:path';
+import * as THREE from 'three';
+import { describe, expect, it, vi } from 'vitest';
+import { createCoinTracks, sampleCoinTrack } from './coinTrajectory';
+import { createCoinRigHandle } from './CoinRig';
+
+const input = {
+  tossId: 'rig-final-frame',
+  visualSeed: 'shared-clock',
+  faces: ['text', 'reverse', 'text'] as const,
+  lineIndex: 4,
+};
+
+describe('CoinRig 唯一轨迹时钟', () => {
+  it('setProgress(1) 精确写入 Task 2 的三枚末帧并请求渲染', () => {
+    const objects = [
+      new THREE.Object3D(),
+      new THREE.Object3D(),
+      new THREE.Object3D(),
+    ] as const;
+    const invalidate = vi.fn();
+    const rig = createCoinRigHandle(objects, invalidate);
+    const tracks = createCoinTracks(input);
+
+    rig.prepare(input);
+    invalidate.mockClear();
+    rig.setProgress(1);
+
+    objects.forEach((object, index) => {
+      const pose = sampleCoinTrack(tracks[index], 1);
+      expect(object.position.toArray()).toEqual(pose.position);
+      expect(object.quaternion.toArray()).toEqual(pose.quaternion);
+    });
+    expect(invalidate).toHaveBeenCalledTimes(1);
+  });
+
+  it('snapToEnd 与 setProgress(1) 一致，显式 invalidate 复用同一渲染入口', () => {
+    const objects = [
+      new THREE.Object3D(),
+      new THREE.Object3D(),
+      new THREE.Object3D(),
+    ] as const;
+    const invalidate = vi.fn();
+    const rig = createCoinRigHandle(objects, invalidate);
+
+    rig.prepare(input);
+    rig.setProgress(0.42);
+    rig.snapToEnd();
+
+    const tracks = createCoinTracks(input);
+    objects.forEach((object, index) => {
+      const pose = sampleCoinTrack(tracks[index], 1);
+      expect(object.position.toArray()).toEqual(pose.position);
+      expect(object.quaternion.toArray()).toEqual(pose.quaternion);
+    });
+
+    invalidate.mockClear();
+    rig.invalidate();
+    expect(invalidate).toHaveBeenCalledTimes(1);
+  });
+
+  it('源码不引入 useFrame 或第二套时间源', () => {
+    const source = readFileSync(
+      resolve(process.cwd(), 'src/features/ritual/CoinRig.tsx'),
+      'utf8',
+    );
+
+    expect(source).not.toMatch(/\buseFrame\b/);
+    expect(source).not.toMatch(/elapsedTime|requestAnimationFrame|\bFloat\b/);
+  });
+});
