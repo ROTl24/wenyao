@@ -39,6 +39,11 @@ export interface DivinationSession {
   messages: ChatMessage[];
 }
 
+export function isValidQuestion(question: string): boolean {
+  const length = question.trim().length;
+  return length > 0 && length <= 500;
+}
+
 export function createSession(
   question: string,
   category: SessionCategory,

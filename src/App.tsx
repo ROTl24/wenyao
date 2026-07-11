@@ -12,6 +12,7 @@ import type { EvidenceEntry, RetrievalDiagnostics } from './lib/retrieval';
 import {
   confirmCurrentToss,
   createSession,
+  isValidQuestion,
   prepareToss,
   withAnalysis,
   withMessage,
@@ -101,7 +102,7 @@ export function App() {
   };
 
   const start = () => {
-    if (!category || question.trim().length < 10) return;
+    if (!category || !isValidQuestion(question)) return;
     const next = prepareNext(createSession(question, category));
     void persist(next);
     setScreen('casting');

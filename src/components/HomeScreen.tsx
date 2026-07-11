@@ -1,5 +1,5 @@
 import { BookOpen, BriefcaseBusiness, Coins, Heart, MapPinned, MoreHorizontal, Search, Stethoscope } from 'lucide-react';
-import type { SessionCategory } from '../lib/session';
+import { isValidQuestion, type SessionCategory } from '../lib/session';
 
 const categories: Array<{ id: SessionCategory; label: string; Icon: typeof BriefcaseBusiness }> = [
   { id: 'career', label: '事业工作', Icon: BriefcaseBusiness },
@@ -21,7 +21,7 @@ interface Props {
 }
 
 export function HomeScreen({ question, category, onQuestionChange, onCategoryChange, onStart }: Props) {
-  const valid = question.trim().length >= 10 && question.trim().length <= 500 && Boolean(category);
+  const valid = isValidQuestion(question) && Boolean(category);
   return (
     <main className="home-screen">
       <div className="mountain-wash mountain-wash--left" />

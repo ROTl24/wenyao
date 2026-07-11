@@ -8,16 +8,23 @@ beforeEach(() => {
 });
 
 describe('问爻桌面体验', () => {
-  it('validates the question then enters the first casting line', async () => {
+  it('accepts a concise non-empty question then enters the first casting line', async () => {
     render(<App />);
     const start = screen.getByRole('button', { name: '开始起卦' });
     expect(start).toBeDisabled();
-    fireEvent.change(screen.getByLabelText('所占之事'), { target: { value: '近期事业是否会出现新的发展机会？' } });
+    fireEvent.change(screen.getByLabelText('所占之事'), { target: { value: '会变好吗' } });
     fireEvent.click(screen.getByRole('button', { name: '事业工作' }));
     expect(start).toBeEnabled();
     fireEvent.click(start);
     expect(await screen.findByRole('heading', { name: '第一爻' })).toBeVisible();
     expect(screen.getAllByLabelText(/乾隆古币/)).toHaveLength(3);
+  });
+
+  it('rejects a question containing only whitespace', () => {
+    render(<App />);
+    fireEvent.change(screen.getByLabelText('所占之事'), { target: { value: '   ' } });
+    fireEvent.click(screen.getByRole('button', { name: '事业工作' }));
+    expect(screen.getByRole('button', { name: '开始起卦' })).toBeDisabled();
   });
 
   it('opens history and settings from the desktop chrome', async () => {
