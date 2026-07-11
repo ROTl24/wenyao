@@ -33,6 +33,14 @@ describe('摇卦动画时序', () => {
 });
 
 describe('摇卦动画状态机', () => {
+  it('场景就绪前忽略同轮次的 PHASE_AT', () => {
+    const awaiting = ritualReducer(initialRitualState, { type: 'TOSS_CHANGED', tossId: 'toss-a' });
+
+    for (const phase of ['release', 'ready'] as const) {
+      expect(ritualReducer(awaiting, { type: 'PHASE_AT', tossId: 'toss-a', phase })).toBe(awaiting);
+    }
+  });
+
   it('丢弃旧轮次回调并锁住重复确认', () => {
     let state = ritualReducer(initialRitualState, { type: 'TOSS_CHANGED', tossId: 'toss-a' });
     state = ritualReducer(state, { type: 'SCENE_READY', tossId: 'toss-a' });

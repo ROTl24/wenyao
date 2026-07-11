@@ -57,7 +57,7 @@ export function ritualReducer(state: RitualState, event: RitualEvent): RitualSta
     case 'SCENE_READY':
       return state.phase === 'awaiting-scene' ? { ...state, phase: 'held' } : state;
     case 'PHASE_AT':
-      return advancePhase(state, event.phase);
+      return state.phase === 'awaiting-scene' ? state : advancePhase(state, event.phase);
     case 'TIMELINE_DONE':
       return advancePhase(state, 'ready');
     case 'CONFIRM':
