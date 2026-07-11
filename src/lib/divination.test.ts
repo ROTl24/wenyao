@@ -1,6 +1,7 @@
 import { describe, expect, it } from 'vitest';
 import {
   buildPlate,
+  branchCalendarEffects,
   createToss,
   getHexagram,
   type CoinFace,
@@ -39,5 +40,23 @@ describe('排盘不变量', () => {
     });
     expect(plate.lines.filter((line) => line.role === '世')).toHaveLength(1);
     expect(plate.lines.filter((line) => line.role === '应')).toHaveLength(1);
+  });
+
+  it('computes immutable 纳甲 stems, branches and changed-line relations', () => {
+    const plate = buildPlate([9, 7, 7, 7, 7, 7], new Date('2026-07-11T12:00:00+08:00'));
+    expect(plate.baseHexagram.name).toBe('乾为天');
+    expect(plate.changedHexagram.name).toBe('天风姤');
+    expect(plate.lines[0]).toMatchObject({ stem: '甲', branch: '子', ganZhi: '甲子', element: '水', changedStem: '辛', changedBranch: '丑', changedGanZhi: '辛丑', changedElement: '土', changedRelation: '父母' });
+    expect(plate.lines[3]).toMatchObject({ stem: '壬', branch: '午', ganZhi: '壬午' });
+  });
+
+  it('computes calendar clashes, combinations and void status as locked facts', () => {
+    expect(branchCalendarEffects('子', '午', '乙丑', ['子', '丑'])).toEqual({
+      void: true,
+      monthBreak: true,
+      dayClash: false,
+      monthCombine: false,
+      dayCombine: true,
+    });
   });
 });

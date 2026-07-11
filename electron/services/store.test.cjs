@@ -21,10 +21,26 @@ test('JsonStore persists, orders and deletes sessions atomically', () => {
 test('JsonStore never exposes an encrypted secret through public settings', () => {
   const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'wenyao-store-'));
   const store = new JsonStore(path.join(dir, 'app-data.json'));
-  store.saveSettings({ baseUrl: 'https://api.example.com/v1', model: 'model-a', encryptedApiKey: 'ciphertext' });
+  store.saveSettings({ baseUrl: 'https://api.example.com/v1', model: 'model-a', embeddingModel: 'embed-a', rerankModel: 'rank-a', rerankUrl: 'https://rank.example/reranks', encryptedApiKey: 'ciphertext' });
   assert.deepEqual(store.getPublicSettings(), {
     baseUrl: 'https://api.example.com/v1',
     model: 'model-a',
+    embeddingModel: 'embed-a',
+    rerankModel: 'rank-a',
+    rerankUrl: 'https://rank.example/reranks',
     hasApiKey: true,
+  });
+});
+
+test('JsonStore defaults to the Alibaba high-quality model stack', () => {
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'wenyao-store-'));
+  const store = new JsonStore(path.join(dir, 'app-data.json'));
+  assert.deepEqual(store.getPublicSettings(), {
+    baseUrl: 'https://dashscope.aliyuncs.com/compatible-mode/v1',
+    model: 'qwen3.7-plus',
+    embeddingModel: 'text-embedding-v4',
+    rerankModel: 'qwen3-rerank',
+    rerankUrl: '',
+    hasApiKey: false,
   });
 });

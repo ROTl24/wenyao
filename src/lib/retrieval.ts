@@ -9,11 +9,29 @@ export interface EvidenceEntry {
   tags: string[];
   sourceType: EvidenceSourceType;
   pageImage?: string;
+  knowledgeKind?: 'rule' | 'case' | 'doctrine';
+  topics?: string[];
+  retrieval?: {
+    lexicalScore: number;
+    vectorScore: number;
+    fusionScore: number;
+    rerankScore: number | null;
+  };
 }
 
 export interface RankedEvidence extends EvidenceEntry {
   score: number;
   matchedTerms: string[];
+}
+
+export interface RetrievalDiagnostics {
+  mode: 'hybrid-reranked' | 'hybrid-fused' | 'lexical-fallback';
+  lexicalCandidates: number;
+  vectorCandidates: number;
+  fusedCandidates: number;
+  vectorUsed: boolean;
+  rerankUsed: boolean;
+  warnings: string[];
 }
 
 const SUBJECT_TERMS = new Set([

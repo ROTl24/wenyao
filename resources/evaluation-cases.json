@@ -1,0 +1,10 @@
+[
+  { "id": "career-use-god", "query": "占问事业升迁应当取什么为用神", "domainTerms": ["事业", "功名", "官鬼", "世爻"], "expectedTopics": ["官鬼"] },
+  { "id": "wealth-use-god", "query": "近期求财生意能否获利", "domainTerms": ["求财", "妻财", "子孙", "兄弟"], "expectedTopics": ["妻财"] },
+  { "id": "relationship-shi-ying", "query": "两人感情和婚姻后续如何", "domainTerms": ["婚姻", "世爻", "应爻", "官鬼", "妻财"], "expectedTopics": ["世爻", "应爻"] },
+  { "id": "health-disease", "query": "身体疾病何时好转", "domainTerms": ["疾病", "官鬼", "子孙", "世爻"], "expectedTopics": ["疾病"] },
+  { "id": "study-exam", "query": "考试功名是否能够录取", "domainTerms": ["学业", "功名", "父母", "官鬼"], "expectedTopics": ["功名"] },
+  { "id": "lost-item", "query": "遗失物品能否寻回在什么方位", "domainTerms": ["失物", "用神", "方位", "冲合"], "expectedTopics": ["失物"] },
+  { "id": "moving-line", "query": "动爻发动以后变爻怎样影响吉凶", "domainTerms": ["动爻", "变爻", "进神", "退神"], "expectedTopics": ["动爻"] },
+  { "id": "void-branch", "query": "用神旬空是否还能成事", "domainTerms": ["旬空", "用神", "日辰"], "expectedTopics": ["旬空"] }
+]

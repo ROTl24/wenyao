@@ -16,6 +16,10 @@ contextBridge.exposeInMainWorld('wenyao', {
   corpus: {
     list: () => ipcRenderer.invoke('corpus:list'),
     status: () => ipcRenderer.invoke('corpus:status'),
+    rebuildVectors: () => ipcRenderer.invoke('corpus:rebuild-vectors'),
+  },
+  retrieval: {
+    search: (payload) => ipcRenderer.invoke('retrieval:search', payload),
   },
   ai: {
     analyze: (payload) => ipcRenderer.invoke('ai:analyze', payload),

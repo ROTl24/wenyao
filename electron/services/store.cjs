@@ -66,12 +66,26 @@ class JsonStore {
   }
 
   getRawSettings() {
-    return structuredClone(this.state.settings);
+    return {
+      baseUrl: 'https://dashscope.aliyuncs.com/compatible-mode/v1',
+      model: 'qwen3.7-plus',
+      embeddingModel: 'text-embedding-v4',
+      rerankModel: 'qwen3-rerank',
+      rerankUrl: '',
+      ...structuredClone(this.state.settings),
+    };
   }
 
   getPublicSettings() {
-    const { baseUrl = 'https://api.openai.com/v1', model = '', encryptedApiKey = '' } = this.state.settings;
-    return { baseUrl, model, hasApiKey: Boolean(encryptedApiKey) };
+    const {
+      baseUrl = 'https://dashscope.aliyuncs.com/compatible-mode/v1',
+      model = 'qwen3.7-plus',
+      embeddingModel = 'text-embedding-v4',
+      rerankModel = 'qwen3-rerank',
+      rerankUrl = '',
+      encryptedApiKey = '',
+    } = this.state.settings;
+    return { baseUrl, model, embeddingModel, rerankModel, rerankUrl, hasApiKey: Boolean(encryptedApiKey) };
   }
 }
 

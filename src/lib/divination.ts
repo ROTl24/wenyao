@@ -38,9 +38,26 @@ export interface Hexagram {
 
 export interface PlateLine extends Toss {
   index: number;
+  stem: string;
   branch: string;
+  ganZhi: string;
   element: Element;
   relation: SixRelation;
+  changedStem: string;
+  changedBranch: string;
+  changedGanZhi: string;
+  changedElement: Element;
+  changedRelation: SixRelation;
+  void: boolean;
+  monthBreak: boolean;
+  dayClash: boolean;
+  monthCombine: boolean;
+  dayCombine: boolean;
+  changedVoid: boolean;
+  changedMonthBreak: boolean;
+  changedDayClash: boolean;
+  changedMonthCombine: boolean;
+  changedDayCombine: boolean;
   role: LineRole;
   beast: string;
 }
@@ -108,9 +125,14 @@ const OUTER_BRANCHES: Record<TrigramKey, [string, string, string]> = {
   巽: ['未', '巳', '卯'], 坎: ['申', '戌', '子'], 艮: ['戌', '子', '寅'], 坤: ['丑', '亥', '酉'],
 };
 
+const INNER_STEM: Record<TrigramKey, string> = { 乾: '甲', 坤: '乙', 震: '庚', 巽: '辛', 坎: '戊', 离: '己', 艮: '丙', 兑: '丁' };
+const OUTER_STEM: Record<TrigramKey, string> = { 乾: '壬', 坤: '癸', 震: '庚', 巽: '辛', 坎: '戊', 离: '己', 艮: '丙', 兑: '丁' };
+
 const BRANCH_ELEMENTS: Record<string, Element> = {
   子: '水', 亥: '水', 寅: '木', 卯: '木', 巳: '火', 午: '火', 申: '金', 酉: '金', 辰: '土', 戌: '土', 丑: '土', 未: '土',
 };
+const OPPOSITE_BRANCH: Record<string, string> = { 子: '午', 午: '子', 丑: '未', 未: '丑', 寅: '申', 申: '寅', 卯: '酉', 酉: '卯', 辰: '戌', 戌: '辰', 巳: '亥', 亥: '巳' };
+const COMBINE_BRANCH: Record<string, string> = { 子: '丑', 丑: '子', 寅: '亥', 亥: '寅', 卯: '戌', 戌: '卯', 辰: '酉', 酉: '辰', 巳: '申', 申: '巳', 午: '未', 未: '午' };
 
 const GENERATES: Record<Element, Element> = { 木: '火', 火: '土', 土: '金', 金: '水', 水: '木' };
 const CONTROLS: Record<Element, Element> = { 木: '土', 土: '水', 水: '火', 火: '金', 金: '木' };
@@ -188,6 +210,58 @@ function relationOf(lineElement: Element, palaceElement: Element): SixRelation {
   return '妻财';
 }
 
+function nakJiaFields(baseHexagram: Hexagram, changedHexagram: Hexagram, zeroIndex: number) {
+  const inner = zeroIndex < 3;
+  const trigramIndex = zeroIndex % 3;
+  const baseTrigram = inner ? baseHexagram.lower.key : baseHexagram.upper.key;
+  const changedTrigram = inner ? changedHexagram.lower.key : changedHexagram.upper.key;
+  const stem = inner ? INNER_STEM[baseTrigram] : OUTER_STEM[baseTrigram];
+  const changedStem = inner ? INNER_STEM[changedTrigram] : OUTER_STEM[changedTrigram];
+  const branch = (inner ? INNER_BRANCHES[baseTrigram] : OUTER_BRANCHES[baseTrigram])[trigramIndex];
+  const changedBranch = (inner ? INNER_BRANCHES[changedTrigram] : OUTER_BRANCHES[changedTrigram])[trigramIndex];
+  const element = BRANCH_ELEMENTS[branch];
+  const changedElement = BRANCH_ELEMENTS[changedBranch];
+  return {
+    stem, branch, ganZhi: `${stem}${branch}`, element, relation: relationOf(element, baseHexagram.palaceElement),
+    changedStem, changedBranch, changedGanZhi: `${changedStem}${changedBranch}`, changedElement,
+    changedRelation: relationOf(changedElement, baseHexagram.palaceElement),
+  };
+}
+
+export function upgradePlate(plate: DivinationPlate): DivinationPlate {
+  return {
+    ...plate,
+    lines: plate.lines.map((line, zeroIndex) => {
+      const nakJia = nakJiaFields(plate.baseHexagram, plate.changedHexagram, zeroIndex);
+      return { ...line, ...nakJia, ...lineCalendarFields(nakJia.branch, nakJia.changedBranch, plate.monthBranch, plate.dayGanZhi, plate.voidBranches) };
+    }),
+  };
+}
+
+export function branchCalendarEffects(branch: string, monthBranch: string, dayGanZhi: string, emptyBranches: readonly string[]) {
+  const dayBranch = dayGanZhi[1];
+  return {
+    void: emptyBranches.includes(branch),
+    monthBreak: OPPOSITE_BRANCH[branch] === monthBranch,
+    dayClash: OPPOSITE_BRANCH[branch] === dayBranch,
+    monthCombine: COMBINE_BRANCH[branch] === monthBranch,
+    dayCombine: COMBINE_BRANCH[branch] === dayBranch,
+  };
+}
+
+function lineCalendarFields(branch: string, changedBranch: string, monthBranch: string, dayGanZhi: string, emptyBranches: readonly string[]) {
+  const base = branchCalendarEffects(branch, monthBranch, dayGanZhi, emptyBranches);
+  const changed = branchCalendarEffects(changedBranch, monthBranch, dayGanZhi, emptyBranches);
+  return {
+    ...base,
+    changedVoid: changed.void,
+    changedMonthBreak: changed.monthBreak,
+    changedDayClash: changed.dayClash,
+    changedMonthCombine: changed.monthCombine,
+    changedDayCombine: changed.dayCombine,
+  };
+}
+
 function voidBranches(dayGanZhi: string): [string, string] {
   const stemIndex = STEMS.indexOf(dayGanZhi[0]);
   const branchIndex = BRANCHES.indexOf(dayGanZhi[1]);
@@ -214,21 +288,18 @@ export function buildPlate(values: readonly LineValue[], castAt: Date): Divinati
   const lunar = Solar.fromDate(castAt).getLunar();
   const dayGanZhi = lunar.getDayInGanZhiExact();
   const monthGanZhi = lunar.getMonthInGanZhiExact();
+  const monthBranch = lunar.getMonthZhiExact();
+  const emptyBranches = voidBranches(dayGanZhi);
   const beastStart = BEAST_START[lunar.getDayGanExact()] ?? 0;
-  const branches = [
-    ...INNER_BRANCHES[baseHexagram.lower.key],
-    ...OUTER_BRANCHES[baseHexagram.upper.key],
-  ];
   const lines: PlateLine[] = tosses.map((toss, zeroIndex) => {
     const index = zeroIndex + 1;
-    const element = BRANCH_ELEMENTS[branches[zeroIndex]];
     const role: LineRole = index === baseHexagram.shiLine ? '世' : index === baseHexagram.yingLine ? '应' : null;
+    const nakJia = nakJiaFields(baseHexagram, changedHexagram, zeroIndex);
     return {
       ...toss,
       index,
-      branch: branches[zeroIndex],
-      element,
-      relation: relationOf(element, baseHexagram.palaceElement),
+      ...nakJia,
+      ...lineCalendarFields(nakJia.branch, nakJia.changedBranch, monthBranch, dayGanZhi, emptyBranches),
       role,
       beast: BEASTS[(beastStart + zeroIndex) % 6],
     };
@@ -239,8 +310,8 @@ export function buildPlate(values: readonly LineValue[], castAt: Date): Divinati
     castAt: castAt.toISOString(),
     dayGanZhi,
     monthGanZhi,
-    monthBranch: lunar.getMonthZhiExact(),
-    voidBranches: voidBranches(dayGanZhi),
+    monthBranch,
+    voidBranches: emptyBranches,
     baseHexagram,
     changedHexagram,
     movingLines: lines.filter((line) => line.moving).map((line) => line.index),

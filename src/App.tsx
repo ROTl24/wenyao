@@ -6,9 +6,9 @@ import { ResultScreen } from './components/ResultScreen';
 import { RitualScreen } from './components/RitualScreen';
 import { SettingsPanel } from './components/SettingsPanel';
 import { desktop } from './lib/desktop';
-import { randomToss } from './lib/divination';
+import { randomToss, upgradePlate } from './lib/divination';
 import { createBrowserLocalReport } from './lib/localAnalysis';
-import { searchEvidence, type EvidenceEntry } from './lib/retrieval';
+import type { EvidenceEntry, RetrievalDiagnostics } from './lib/retrieval';
 import {
   confirmCurrentToss,
   createSession,
@@ -43,8 +43,8 @@ export function App() {
   const [category, setCategory] = useState<SessionCategory | null>(null);
   const [session, setSession] = useState<DivinationSession | null>(null);
   const [history, setHistory] = useState<DivinationSession[]>([]);
-  const [corpus, setCorpus] = useState<EvidenceEntry[]>([]);
   const [evidence, setEvidence] = useState<EvidenceEntry[]>([]);
+  const [retrievalDiagnostics, setRetrievalDiagnostics] = useState<RetrievalDiagnostics | null>(null);
   const [historyOpen, setHistoryOpen] = useState(false);
   const [settingsOpen, setSettingsOpen] = useState(false);
   const [analyzing, setAnalyzing] = useState(false);
@@ -52,9 +52,8 @@ export function App() {
   const [chatting, setChatting] = useState(false);
 
   useEffect(() => {
-    void Promise.all([desktop.sessions.list(), desktop.corpus.list()]).then(([sessions, entries]) => {
-      setHistory(sessions);
-      setCorpus(entries);
+    void desktop.sessions.list().then((sessions) => {
+      setHistory(sessions.map((saved) => saved.plate ? { ...saved, plate: upgradePlate(saved.plate) } : saved));
     });
   }, []);
 
@@ -68,32 +67,37 @@ export function App() {
     }
   };
 
-  const evidenceFor = (target: DivinationSession) => {
-    if (!target.plate) return [];
+  const evidenceFor = async (target: DivinationSession) => {
+    if (!target.plate) return { evidence: [], diagnostics: null };
     const terms = [
       ...categoryTerms[target.category],
       target.plate.baseHexagram.shortName,
       target.plate.changedHexagram.shortName,
       ...target.plate.lines.filter((line) => line.moving || line.role).flatMap((line) => [line.relation, line.role || '']),
     ].filter(Boolean);
-    return searchEvidence(corpus, target.question, terms, 8);
+    const result = await desktop.retrieval.search({ query: target.question, domainTerms: terms, limit: 8 });
+    return { evidence: result.evidence, diagnostics: result.diagnostics };
   };
 
   const runAnalysis = async (target: DivinationSession) => {
     if (!target.plate) return;
     setAnalyzing(true);
     setAnalysisError('');
-    const found = evidenceFor(target);
-    setEvidence(found);
-    const result = await desktop.ai.analyze({ question: target.question, category: target.category, plate: target.plate, evidence: found });
-    if (result.ok && result.report) {
-      await persist(withAnalysis(target, result.report));
-    } else if (desktop.platform === 'browser') {
-      await persist(withAnalysis(target, createBrowserLocalReport(target, found)));
-    } else {
-      setAnalysisError(`${result.error?.message || 'AI 分析失败'} ${result.error?.nextAction || ''}`.trim());
-    }
-    setAnalyzing(false);
+    try {
+      const found = await evidenceFor(target);
+      setEvidence(found.evidence);
+      setRetrievalDiagnostics(found.diagnostics);
+      const result = await desktop.ai.analyze({ question: target.question, category: target.category, plate: target.plate, evidence: found.evidence, retrievalDiagnostics: found.diagnostics || undefined });
+      if (result.ok && result.report) {
+        await persist(withAnalysis(target, result.report));
+      } else if (desktop.platform === 'browser') {
+        await persist(withAnalysis(target, createBrowserLocalReport(target, found.evidence)));
+      } else {
+        setAnalysisError(`${result.error?.message || 'AI 分析失败'} ${result.error?.nextAction || ''}`.trim());
+      }
+    } catch (error) {
+      setAnalysisError(error instanceof Error ? error.message : '检索或分析服务暂时不可用。');
+    } finally { setAnalyzing(false); }
   };
 
   const start = () => {
@@ -114,16 +118,17 @@ export function App() {
     }
   };
 
-  const openSession = (saved: DivinationSession) => {
-    let next = saved;
-    if (saved.status === 'casting') next = prepareNext(saved);
+  const openSession = async (saved: DivinationSession) => {
+    let next = saved.plate ? { ...saved, plate: upgradePlate(saved.plate) } : saved;
+    if (saved.status === 'casting') next = prepareNext(next);
     setSession(next);
     setQuestion(next.question);
     setCategory(next.category);
     setHistoryOpen(false);
     if (next.status === 'complete') {
-      const found = evidenceFor(next);
-      setEvidence(found);
+      const found = await evidenceFor(next);
+      setEvidence(found.evidence);
+      setRetrievalDiagnostics(found.diagnostics);
       setScreen('result');
       if (!next.analysis) void runAnalysis(next);
     } else {
@@ -165,8 +170,8 @@ export function App() {
       </header>
       {screen === 'home' && <HomeScreen question={question} category={category} onQuestionChange={setQuestion} onCategoryChange={setCategory} onStart={start} />}
       {screen === 'casting' && session?.currentToss && <RitualScreen session={session} onConfirm={confirm} />}
-      {screen === 'result' && session?.plate && <ResultScreen session={session} evidence={evidence} analyzing={analyzing} analysisError={analysisError} chatting={chatting} onAnalyze={() => void runAnalysis(session)} onFollowUp={followUp} onBack={() => { setSession(null); setQuestion(''); setCategory(null); setScreen('home'); }} />}
-      {historyOpen && <HistoryPanel sessions={history} onClose={() => setHistoryOpen(false)} onOpen={openSession} onDelete={(id) => void deleteSession(id)} />}
+      {screen === 'result' && session?.plate && <ResultScreen session={session} evidence={evidence} retrievalDiagnostics={retrievalDiagnostics} analyzing={analyzing} analysisError={analysisError} chatting={chatting} onAnalyze={() => void runAnalysis(session)} onFollowUp={followUp} onBack={() => { setSession(null); setQuestion(''); setCategory(null); setScreen('home'); }} />}
+      {historyOpen && <HistoryPanel sessions={history} onClose={() => setHistoryOpen(false)} onOpen={(saved) => void openSession(saved)} onDelete={(id) => void deleteSession(id)} />}
       {settingsOpen && <SettingsPanel onClose={() => setSettingsOpen(false)} />}
     </div>
   );

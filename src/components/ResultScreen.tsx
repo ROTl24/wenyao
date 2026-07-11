@@ -1,12 +1,14 @@
 import { ArrowLeft, BookMarked, RefreshCw, Send, Sparkles } from 'lucide-react';
 import { useMemo, useState } from 'react';
-import type { EvidenceEntry } from '../lib/retrieval';
+import type { PlateLine } from '../lib/divination';
+import type { EvidenceEntry, RetrievalDiagnostics } from '../lib/retrieval';
 import type { DivinationSession } from '../lib/session';
 import { HexagramLines } from './HexagramLines';
 
 interface Props {
   session: DivinationSession;
   evidence: EvidenceEntry[];
+  retrievalDiagnostics: RetrievalDiagnostics | null;
   analyzing: boolean;
   analysisError: string;
   chatting: boolean;
@@ -15,7 +17,7 @@ interface Props {
   onBack(): void;
 }
 
-export function ResultScreen({ session, evidence, analyzing, analysisError, chatting, onAnalyze, onFollowUp, onBack }: Props) {
+export function ResultScreen({ session, evidence, retrievalDiagnostics, analyzing, analysisError, chatting, onAnalyze, onFollowUp, onBack }: Props) {
   const [followUp, setFollowUp] = useState('');
   const plate = session.plate!;
   const evidenceById = useMemo(() => new Map(evidence.map((item) => [item.id, item])), [evidence]);
@@ -49,11 +51,11 @@ export function ResultScreen({ session, evidence, analyzing, analysisError, chat
               <div className={line.moving ? 'plate-row plate-row--moving' : 'plate-row'} key={line.index}>
                 <span className="line-index">{['初', '二', '三', '四', '五', '上'][line.index - 1]}爻</span>
                 <span className="beast">{line.beast}</span>
-                <span className="relation">{line.relation} {line.branch}{line.element}</span>
+                <span className="relation">{line.relation} {line.ganZhi}{line.element}<small>{lineFacts(line)}</small></span>
                 <span className="mini-line">{line.baseYang ? <i className="solid" /> : <><i /><i /></>}</span>
                 <span className="line-kind">{line.label}</span>
                 <span className="line-role">{line.role || ''}</span>
-                {line.moving && <span className="moving-arrow">→</span>}
+                {line.moving && <><span className="moving-arrow">→</span><span className="changed-relation">{line.changedRelation} {line.changedGanZhi}{line.changedElement}<small>{changedLineFacts(line)}</small></span></>}
               </div>
             ))}
           </div>
@@ -65,6 +67,7 @@ export function ResultScreen({ session, evidence, analyzing, analysisError, chat
           {!analyzing && session.analysis && (
             <article className="analysis-report">
               <div className="analysis-mode"><Sparkles size={15} />{session.analysis.mode === 'cloud' ? '云端 AI · 已校验' : '本地基础推演'}</div>
+              {session.analysis.pipeline && <div className="pipeline-trace"><span>排盘事实锁定</span><span>证据引用校验</span><span>{session.analysis.pipeline.retrievalMode === 'hybrid-reranked' ? '混合召回 + 模型重排' : session.analysis.pipeline.retrievalMode === 'hybrid-fused' ? '混合召回 + 融合排序' : '关键词降级检索'}</span></div>}
               <ReportSection title="卦象总断" body={session.analysis.summary} />
               <ReportSection title="用神取用" body={session.analysis.focus} />
               <ReportSection title="日月生克" body={session.analysis.relations} />
@@ -83,11 +86,12 @@ export function ResultScreen({ session, evidence, analyzing, analysisError, chat
       </div>
       <section className="evidence-rail">
         <div className="section-title"><i />古籍依据</div>
+        {retrievalDiagnostics && <div className={`retrieval-status retrieval-status--${retrievalDiagnostics.mode}`}><strong>{retrievalDiagnostics.mode === 'hybrid-reranked' ? '向量 + 关键词 + qwen3-rerank' : retrievalDiagnostics.mode === 'hybrid-fused' ? '向量 + 关键词融合' : '关键词检索（降级）'}</strong><span>关键词候选 {retrievalDiagnostics.lexicalCandidates} · 向量候选 {retrievalDiagnostics.vectorCandidates}</span>{retrievalDiagnostics.warnings.map((warning) => <small key={warning}>{warning}</small>)}</div>}
         <div className="evidence-list">
           {evidence.length ? evidence.map((item) => (
             <article id={`evidence-${item.id}`} className="evidence-entry" key={item.id}>
               <div className="evidence-thumbnail"><BookMarked size={26} /><span>{item.sourceType === 'original' ? '原' : '摘'}</span></div>
-              <div><strong>{item.title}</strong><span>{item.source} · {item.location}</span><p>{item.text}</p></div>
+              <div><strong>{item.title}</strong><span>{item.source} · {item.location} · {item.knowledgeKind === 'rule' ? '规则' : item.knowledgeKind === 'case' ? '占例' : '义理'}</span><p>{item.text}</p></div>
             </article>
           )) : <p className="empty-evidence">当前知识库没有找到足够证据，因此不会编造古籍引用。</p>}
         </div>
@@ -105,4 +109,12 @@ export function ResultScreen({ session, evidence, analyzing, analysisError, chat
 
 function ReportSection({ title, body }: { title: string; body: string }) {
   return <section className="report-section"><h3>{title}</h3><p>{body}</p></section>;
+}
+
+function lineFacts(line: PlateLine) {
+  return [[line.void, '空'], [line.monthBreak, '月破'], [line.dayClash, '日冲'], [line.monthCombine, '月合'], [line.dayCombine, '日合']].filter(([active]) => active).map(([, label]) => label).join(' · ');
+}
+
+function changedLineFacts(line: PlateLine) {
+  return [[line.changedVoid, '空'], [line.changedMonthBreak, '月破'], [line.changedDayClash, '日冲'], [line.changedMonthCombine, '月合'], [line.changedDayCombine, '日合']].filter(([active]) => active).map(([, label]) => label).join(' · ');
 }
