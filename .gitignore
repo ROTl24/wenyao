@@ -1,0 +1,31 @@
+# Visual brainstorming companion runtime files
+.superpowers/
+.impeccable/
+
+# Local secrets and runtime data
+.env
+.env.*
+!.env.example
+*.db
+*.db-shm
+*.db-wal
+*.sqlite
+*.sqlite3
+
+# Fixed corpus artifacts are built locally from user-provided books
+corpus/source/
+corpus/build/
+
+# JavaScript / Rust / Python build outputs
+node_modules/
+dist/
+target/
+.venv/
+__pycache__/
+*.py[cod]
+
+# IDE and OS files
+.idea/
+.vscode/
+.DS_Store
+Thumbs.db
