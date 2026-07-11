@@ -1,6 +1,7 @@
 # Visual brainstorming companion runtime files
 .superpowers/
 .impeccable/
+.worktrees/
 
 # Local secrets and runtime data
 .env
