@@ -1,7 +1,7 @@
 # 六爻占卜 Windows 桌面应用设计规格
 
 - **日期：** 2026-07-11
-- **状态：** 分段设计已确认，等待正式文档审阅
+- **状态：** 正式文档已审阅确认
 - **首发平台：** Windows x64
 - **目标用户：** 用户本人及少量内部人员
 
@@ -230,6 +230,7 @@ Tauri Windows App
 
 ```text
 session_id
+plate_id
 engine_version
 coin_convention_id
 rule_pack_id
