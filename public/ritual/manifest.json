@@ -1,0 +1,11 @@
+{
+  "id": "wenyao-ritual-stills-v1",
+  "version": 1,
+  "mode": "still-occlusion-cut",
+  "closedPoster": "/images/ritual-hands-closed.png",
+  "openPoster": "/images/ritual-hands.png",
+  "width": 1672,
+  "height": 941,
+  "colorSpace": "srgb",
+  "alphaMode": "none"
+}
