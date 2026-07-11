@@ -22,7 +22,8 @@
 ## 执行前审阅决议
 
 - `回头生/回头克` 的方向以“化爻作用于原动爻”为准：原爻木、化爻水是回头生；原爻木、化爻金是回头克。不得把“原爻生化爻”误标为回头生。
-- `wenwang-najia-v2-review.md` 中的“双重复核”指两个相互独立的审阅代理分别核表并留下审阅身份、日期、输入来源与结论；不得伪写成人工专家复核。若两次审阅不能一致，结构表保持 `reviewed`，不能进入 `approved` 默认上下文。
+- `wenwang-najia-v2-review.md` 中的“双重复核”指两个相互独立的审阅代理针对最终同一规则表 artifact 分别核表并留下真实身份类型、独立运行 ID、日期、输入来源、artifact hash 与结论；不得伪写成人工专家复核。两次自动审阅一致时只标 `independent-automated + project-enabled`；只有真实人工底本复核后才标 `human-reviewed`。两次不能一致则保持 `fixture-only`，不能进入默认上下文。
+- `PlateV2` 只承载可复算结构：不预填十二长生、六神、六合/六冲或 `ruleContextHash`。十二长生与六神在 Task 6 生成 facts，六合/六冲在 Task 5 生成 facts，`ruleContextHash` 在 Task 8 组装完整 Case 时计算。
 - `yehe_core_v1` 对日冲采用保守分类：先始终输出结构性 `clashes`；只有月令同支、同五行或月令生爻且不存在月破时，才输出条件性 `is-dark-moving`；只有月破或月令克爻且没有任何已记录生扶时，才输出条件性 `is-day-break`；其余只保留日冲原始事实，不强判暗动或日破。这个阈值是产品 profile 对“旺相/休囚”的现代操作化，不得伪称古籍给出了同一算法。
 - 受限神煞的取法必须登记为：天乙贵人、禄神以日干起；驿马以日支三合局起；`yehe-seasonal-tianxi` 依月令季节取春戌、夏丑、秋辰、冬未。按年支起红鸾天喜属于另一星命 profile，不得混入。四项都只能输出 `secondary + conditional`，不得进入旺衰评分或单独定吉凶。
 - 事项类别不能替代问意。婚恋对象性别/角色、失物类型、代占行人身份等信息不足时必须 `needs-user-input`；Task 7 可扩充 `QuestionIntentId`，不得为满足旧联合类型而静默猜用神。
@@ -349,12 +350,14 @@ git commit -m "feat(domain): 计算四柱干支旬空与五行"
 - Create: `src/domain/liuyao/__fixtures__/golden-hexagrams.ts`
 - Create: `src/domain/liuyao/__fixtures__/golden-najia.ts`
 - Create: `docs/domain/wenwang-najia-v2-review.md`
+- Modify: `src/domain/liuyao/model.ts`
+- Modify: `src/domain/liuyao/rules/model.ts`
 - Modify: `src/domain/liuyao/rules/default-context.ts`
 - Modify: `src/domain/liuyao/index.ts`
 
 **Interfaces:**
 - Consumes: `buildPlateV2({ plateId, sessionId, castAt, tossValues, ruleContext })`。
-- Produces: 完整 `PlateV2`；本卦/变卦均有六行；`relationToBasePalace` 与 `relationToOwnPalace` 分离；伏神由规则包确定。
+- Produces: 纯结构 `PlateV2`；本卦/变卦均有六行；`relationToBasePalace` 与 `relationToOwnPalace` 分离；规则包 manifest 与潜在伏神候选可审计。Plate 不含长生、六神、六合/六冲或 context hash 占位。
 
 - [ ] **Step 1: 写黄金表与完整双盘红灯测试**
 
@@ -365,7 +368,7 @@ it('builds complete base and changed sides without conflating relations', () => 
     sessionId: 'session-fixed',
     castAt: '2026-07-11T04:00:00.000Z',
     tossValues: [9, 7, 7, 7, 7, 7],
-    ruleContext: APPROVED_CONTEXT,
+    ruleContext: DEFAULT_RULE_CONTEXT,
   });
   expect(plate.baseHexagram.name).toBe('乾为天');
   expect(plate.changedHexagram.name).toBe('天风姤');
@@ -399,30 +402,39 @@ it('covers every toss combination deterministically', () => {
 Run: `cmd /c npx vitest run src/domain/liuyao/plate.test.ts`
 Expected: FAIL，`buildPlateV2` 不存在。
 
-- [ ] **Step 3: 建立审查门**
+- [ ] **Step 3: 建立诚实的 artifact 审查门**
 
-`registry.ts` 只允许 `approved` 的 structural rule 进入 `buildPlateV2`：
+`RuleSourceRef` 只保存固定书目、定位和内容哈希，不再把来源本身标成含糊的 `approved`。`registry.ts` 对最终规范化规则表 manifest 验证：
 
 ```ts
-export function assertProductionRuleContext(context: RuleContext): void {
-  const byId = new Map(context.sources.map((source) => [source.id, source]));
-  const missing = REQUIRED_STRUCTURAL_SOURCE_IDS.filter((id) => !byId.has(id));
-  const rejected = REQUIRED_STRUCTURAL_SOURCE_IDS
-    .map((id) => byId.get(id))
-    .filter((source) => source && source.reviewStatus !== 'approved');
-  if (missing.length || rejected.length) {
-    throw new Error(`结构规则尚未复核：${[...missing, ...rejected.map((item) => item.id)].join(', ')}`);
-  }
+export function assertProjectEnabledRulePack(manifest: RulePackManifest): void {
+  const matched = manifest.reviews.filter((review) => review.outcome === 'matched');
+  const reviewerIds = new Set(matched.map((review) => review.reviewerId));
+  const runIds = new Set(matched.map((review) => review.independentRunId));
+  const sameArtifact = matched.every((review) => review.artifactHash === manifest.artifactHash);
+  const hasDisputed = manifest.reviews.some((review) => review.outcome === 'disputed');
+  if (
+    manifest.runtimeStatus !== 'project-enabled'
+    || manifest.verificationLevel === 'unverified'
+    || reviewerIds.size < 2
+    || runIds.size < 2
+    || !sameArtifact
+    || hasDisputed
+  ) throw new Error('结构规则包未通过项目运行门');
 }
 ```
 
-`docs/domain/wenwang-najia-v2-review.md` 逐项记录 64 卦名、八宫次序、世应、内外卦纳甲、六亲参照、飞伏表的来源 URL、定位、提取日期、两人复核结论和 SHA-256。复核结论未通过前测试 fixture 可运行，但默认 context 不得标 `approved`。
+测试必须覆盖：单个审阅者、重复 reviewerId、重复 runId、不同 artifactHash、任一 disputed 均拒绝；两名独立自动审阅针对同一 hash 一致时允许运行，但 manifest 明确保持 `verificationLevel='independent-automated'`，不得出现“人工复核”字样。
 
-审查通过后，把文档中的实际 source ID、URL、定位和 SHA-256 写入 `default-context.ts`，由 `BASE_RULE_CONTEXT` 派生并深冻结 `DEFAULT_RULE_CONTEXT`。缺少任一 `REQUIRED_STRUCTURAL_SOURCE_IDS` 都必须失败。
+`docs/domain/wenwang-najia-v2-review.md` 逐项记录 64 卦名、八宫次序、世应、内外卦纳甲、六亲参照、宫首卦同位伏神候选的来源 URL、固定修订、提取日期、规范化表 SHA-256 和两次独立复核记录。先实现最终表并冻结 artifact，再由两个独立审阅者核同一 hash；审阅旧代码不能替代最终 artifact 审阅。
+
+审查通过后，把实际 source 与 manifest 写入规则包，导出深冻结 `DEFAULT_RULE_CONTEXT`。`BASE_RULE_CONTEXT` 继续保持 `fixture-only` 语义。运行门针对规则包及 artifact，而不是只检查 context 中是否出现几个 source ID。
 
 - [ ] **Step 4: 从现有实现迁移结构表并逐表校验**
 
-将当前 `src/lib/divination.ts` 中卦名、八宫、世应、纳甲干支迁入 `wenwang-najia-v2.ts`，不复制当前派生布尔值。实现顺序固定为：六爻阴阳→上下卦→64 卦→宫与世应→本卦纳甲→完整变卦纳甲→两种六亲参照→伏神→六神。
+将当前 `src/lib/divination.ts` 中卦名、八宫、世应、纳甲干支迁入 `wenwang-najia-v2.ts`，不复制当前派生布尔值。实现顺序固定为：六爻阴阳→上下卦→64 卦→宫与世应→本卦纳甲→完整变卦纳甲→两种六亲参照→潜在伏神候选。
+
+本任务同步修正 V2 契约：删除 `LineFacetV2.growthByPillar`、`PlateLineV2.beast`、`transition.growthIntoChanged`、`HexagramSideV2.harmonyForm` 和 `PlateV2.ruleContextHash`；把 `HiddenSpiritV2/hiddenSpirits` 改为带 `status:'potential'` 的 `HiddenSpiritCandidateV2/hiddenSpiritCandidates`；Plate 仅保存 `{ id, version, artifactHash }` 的 `rulePackRef`。不得用空对象、默认长生或假哈希填补任务顺序。
 
 `buildPlateV2` 的签名不得有隐式时间和 ID：
 
@@ -438,14 +450,15 @@ export function buildPlateV2(input: {
 
 - [ ] **Step 5: 加入三组独立验证**
 
-1. `golden-hexagrams.ts` 明列 64 卦的上下卦、宫、世应、游归魂、六合/六冲。
+1. `golden-hexagrams.ts` 明列 64 卦的上下卦、宫、世应与游归魂；六合/六冲归 Task 5 facts，不进入结构盘。
 2. `golden-najia.ts` 明列 64×6 的本卦纳甲，并抽取 16 个动变用例验证 `relationToBasePalace/relationToOwnPalace`。
-3. 八宫各至少一个伏神用例，验证宿主行、伏神六亲和来源首卦。
+3. 八宫各至少一个潜在伏神用例，验证宿主行、来源爻位、六亲、来源首卦和 `status:'potential'`；何时启用留给 Task 7。
+4. 穷举 4096 组投币并验证本变卦组合唯一、仅动爻翻转、静爻仍按完整变卦重新装甲；加入乾六动变坤，防止两种六亲参照被同宫样例掩盖。
 
 - [ ] **Step 6: 验证**
 
 Run: `cmd /c npx vitest run src/domain/liuyao/plate.test.ts && npm run build:domain && npm run typecheck`
-Expected: 全部 PASS；4096 循环无随机差异；规则审查文档不存在空字段。
+Expected: 全部 PASS；4096 循环无随机差异；规则审查文档不存在空字段；Plate JSON 不存在长生、六神、六合/六冲或 context hash 占位。
 
 - [ ] **Step 7: 提交**
 
@@ -483,8 +496,8 @@ it('derives directional element facts and symmetric branch facts', () => {
 });
 
 it('keeps fact ids and ordering stable', () => {
-  const first = deriveFacts({ plate: FIXTURE_PLATE, ruleContext: APPROVED_CONTEXT });
-  const second = deriveFacts({ plate: structuredClone(FIXTURE_PLATE), ruleContext: APPROVED_CONTEXT });
+  const first = deriveFacts({ plate: FIXTURE_PLATE, ruleContext: DEFAULT_RULE_CONTEXT });
+  const second = deriveFacts({ plate: structuredClone(FIXTURE_PLATE), ruleContext: DEFAULT_RULE_CONTEXT });
   expect(first).toEqual(second);
   expect(new Set(first.map((fact) => fact.id)).size).toBe(first.length);
   expect(first.map((fact) => fact.id)).toEqual([...first.map((fact) => fact.id)].sort());
@@ -552,11 +565,11 @@ git commit -m "feat(domain): 建立可追溯六爻关系事实图"
 
 ```ts
 it('records raw clash and classifies dark-moving/day-break only with strength conditions', () => {
-  const strong = deriveCalendarEffects(strongStaticLineFixture(), CALENDAR, APPROVED_CONTEXT);
+  const strong = deriveCalendarEffects(strongStaticLineFixture(), CALENDAR, DEFAULT_RULE_CONTEXT);
   expect(strong.map((fact) => fact.relation)).toContain('is-dark-moving');
   expect(strong.map((fact) => fact.relation)).not.toContain('is-day-break');
 
-  const weak = deriveCalendarEffects(weakStaticLineFixture(), CALENDAR, APPROVED_CONTEXT);
+  const weak = deriveCalendarEffects(weakStaticLineFixture(), CALENDAR, DEFAULT_RULE_CONTEXT);
   expect(weak.map((fact) => fact.relation)).toContain('is-day-break');
   expect(weak.find((fact) => fact.relation === 'is-day-break')?.certainty).toBe('conditional');
 });
@@ -571,12 +584,12 @@ it.each([
   ['木', '水', 'returns-generate'],
   ['木', '金', 'returns-control'],
 ])('classifies changed line relation', (baseElement, changedElement, relation) => {
-  expect(deriveMovingEffects(movingFixture(baseElement, changedElement), APPROVED_CONTEXT))
+  expect(deriveMovingEffects(movingFixture(baseElement, changedElement), DEFAULT_RULE_CONTEXT))
     .toEqual(expect.arrayContaining([expect.objectContaining({ relation })]));
 });
 
 it('does not form a three-harmony fact without the configured completion conditions', () => {
-  expect(deriveFormations(incompleteThreeHarmonyPlate(), APPROVED_CONTEXT))
+  expect(deriveFormations(incompleteThreeHarmonyPlate(), DEFAULT_RULE_CONTEXT))
     .not.toEqual(expect.arrayContaining([expect.objectContaining({ relation: 'forms-three-harmony' })]));
 });
 ```
@@ -592,7 +605,7 @@ Expected: FAIL，三个模块不存在。
 
 `moving-effects.ts` 只处理动爻；静爻 `transition === null` 时返回空数组。进退、化墓绝以受审表和 profile 计算，不用字符串包含判断。
 
-`formations.ts` 对三合、六合六冲、反吟伏吟分别产出 facts；“形成某结构”和“该结构对本占吉凶”分开。
+`formations.ts` 对三合、六合六冲、反吟伏吟分别产出 facts；六合/六冲静态分类表在本任务登记，不回写 `HexagramSideV2`。“形成某结构”和“该结构对本占吉凶”分开。
 
 - [ ] **Step 5: 加入来源和条件断言**
 
@@ -623,14 +636,13 @@ git commit -m "feat(domain): 派生日月动变与卦局条件事实"
 **Files:**
 - Create: `src/domain/liuyao/facts/growth-shensha.ts`
 - Create: `src/domain/liuyao/facts/growth-shensha.test.ts`
-- Modify: `src/domain/liuyao/plate.ts`
 - Modify: `src/domain/liuyao/facts/derive.ts`
 - Modify: `src/domain/liuyao/rules/tables.ts`
 - Modify: `src/domain/liuyao/rules/registry.ts`
 
 **Interfaces:**
 - Consumes: 爻五行、四柱地支、动爻化支、`growthProfile/shenShaProfile`。
-- Produces: 每个 `LineFacetV2.growthByPillar`、动爻 `growthIntoChanged`、`is-growth-stage/is-shen-sha` facts。
+- Produces: 全部 `is-growth-stage`、动爻化支长生、`is-six-beast` 与 `is-shen-sha` facts；不修改结构 Plate。
 
 - [ ] **Step 1: 写五行×十二支轮转红灯测试**
 
@@ -663,6 +675,13 @@ it('emits only the configured four shen-sha as secondary facts', () => {
     .toEqual(new Set(['tianyi', 'lushen', 'yima', 'tianxi']));
   expect(facts.every((fact) => fact.authority === 'secondary')).toBe(true);
 });
+
+it('emits one six-beast fact per base line from the day stem', () => {
+  const facts = deriveSixBeasts(SHEN_SHA_FIXTURE.plate, DEFAULT_RULE_CONTEXT);
+  expect(facts).toHaveLength(6);
+  expect(facts.every((fact) => fact.relation === 'is-six-beast')).toBe(true);
+  expect(facts.every((fact) => fact.authority === 'secondary')).toBe(true);
+});
 ```
 
 - [ ] **Step 3: 运行红灯**
@@ -674,12 +693,14 @@ Expected: FAIL。
 
 `twelveStage` 完整返回 12 阶段；`is-growth-stage` facts 全部可供 UI 展示。默认 profile 只给长生、帝旺、墓、绝写入 `values.interpretationWeight = 'primary'`，其余写 `'display-only'`。这体现来源差异，不删除用户要求的十二长生。
 
+固定输出本卦六爻和变卦六爻分别对年/月/日/时四柱的 48 条长生 facts；每个动爻另输出一条 `scope='transition'` 的化支长生 fact。六神按日干起例输出 6 条 `is-six-beast` facts，和神煞同属辅助层，但使用不同 relation，不能混成神煞或写入 Plate。
+
 神煞规则按 profile 的 `enabled` 逐项计算，未启用项不运行。神煞 fact 的 `scope='auxiliary'`、`authority='secondary'`、`certainty='conditional'` 固定不可覆盖。
 
 - [ ] **Step 5: 验证与提交**
 
 Run: `cmd /c npx vitest run src/domain/liuyao/facts/growth-shensha.test.ts src/domain/liuyao/plate.test.ts && npm run typecheck`
-Expected: PASS；Plate 快照每个本/变 facet 都有四柱长生。
+Expected: PASS；固定盘有 48 条本变四柱长生 facts、每个动爻 1 条 transition 长生 fact、6 条六神 facts，Plate 无这些派生字段。
 
 ```bash
 git add src/domain/liuyao
@@ -712,7 +733,7 @@ it('asks for clarification instead of returning 学业功名 as a use god', () =
     category: 'study',
     explicitIntentId: null,
     plate: STUDY_PLATE,
-    ruleContext: APPROVED_CONTEXT,
+    ruleContext: DEFAULT_RULE_CONTEXT,
   });
   expect(selection.status).toBe('needs-user-input');
   expect(selection.primary).toBeNull();
@@ -732,7 +753,7 @@ it.each([
     category: 'study',
     explicitIntentId: intentId,
     plate: singleCandidatePlate(relation),
-    ruleContext: APPROVED_CONTEXT,
+    ruleContext: DEFAULT_RULE_CONTEXT,
   });
   expect(selection.status).toBe('resolved');
   expect(selection.primary).toMatchObject({
@@ -832,7 +853,7 @@ git commit -m "feat(domain): 按问意选择具体用神与元忌仇"
 
 **Interfaces:**
 - Consumes: `buildDivinationCase(input, ports)`，其中时间、ID 和 SHA-256 均显式注入。
-- Produces: `DivinationCaseV2`、`factSetHash`、`migrateLegacySession(legacy, input): LegacyMigrationResult`。
+- Produces: `DivinationCaseV2`、`ruleContextHash`、`factSetHash`、`migrateLegacySession(legacy, input): LegacyMigrationResult`。
 
 - [ ] **Step 1: 写纯度、哈希与深冻结红灯测试**
 
@@ -846,13 +867,14 @@ const input = {
   castAt: '2026-07-11T04:00:00.000Z',
   builtAt: '2026-07-12T00:00:00.000Z',
   tossValues: [9, 7, 7, 7, 7, 7],
-  ruleContext: APPROVED_CONTEXT,
+  ruleContext: DEFAULT_RULE_CONTEXT,
 } as const;
 
 it('is deeply deterministic for the same input and hash port', () => {
   const first = buildDivinationCase(input, { sha256: TEST_SHA256 });
   const second = buildDivinationCase(structuredClone(input), { sha256: TEST_SHA256 });
   expect(first).toEqual(second);
+  expect(first.ruleContextHash).toBe(second.ruleContextHash);
   expect(first.factSetHash).toBe(second.factSetHash);
   expect(Object.isFrozen(first.facts)).toBe(true);
 });
@@ -868,6 +890,8 @@ it('changes hash when a profile changes but not when builtAt changes', () => {
     { sha256: TEST_SHA256 },
   );
   expect(rebuiltLater.factSetHash).toBe(base.factSetHash);
+  expect(rebuiltLater.ruleContextHash).toBe(base.ruleContextHash);
+  expect(changedProfile.ruleContextHash).not.toBe(base.ruleContextHash);
   expect(changedProfile.factSetHash).not.toBe(base.factSetHash);
 });
 ```
@@ -913,7 +937,7 @@ export function hashCasePayload(payload: unknown, port: HashPort): string {
 }
 ```
 
-哈希 payload 包含 question、intent、tosses、castAt、RuleContext、PlateV2、UseGodSelection、facts；明确排除 `builtAt` 和旧 analysis。
+先单独计算 `ruleContextHash = sha256(canonicalStringify(ruleContext))` 并写入 `DivinationCaseV2`。`factSetHash` payload 包含 question、intent、tosses、castAt、RuleContext、PlateV2、UseGodSelection、facts；明确排除 `builtAt` 和旧 analysis。两个哈希都不写入结构 Plate。
 
 - [ ] **Step 5: 实现 Case 编排和 legacy 纯迁移**
 
@@ -1241,7 +1265,7 @@ Expected: FAIL。
 
 1. `CaseHeader`：日期、占问、意图、时区、rule pack/profile。
 2. `PillarGrid`：四柱各显示干、支、元素、旬、旬空。
-3. `HexagramComparison`：领域数组反转为上爻到初爻显示；本/变各六行对齐；变卦静爻也显示；区分 `relationToBasePalace` 与 `relationToOwnPalace` 的标题。
+3. `HexagramComparison`：领域数组反转为上爻到初爻显示；本/变各六行对齐；变卦静爻也显示；区分 `relationToBasePalace` 与 `relationToOwnPalace` 的标题。通过纯 selector 按 line/hexagram entity 聚合 `is-growth-stage/is-six-beast/is-six-harmony/is-six-clash` facts，不能假设这些字段存在于 Plate。
 4. `UseGodPanel`：显示状态、具体候选 line/伏神、取用规则；需澄清时调用 `reading.buildCase({ sessionId, intentId })`。
 5. `FactExplorer`：按 structural/profile-dependent/secondary 分组，条件与来源可展开。
 6. `AnalysisReportV2`：按 section 排序 claims，每条可展开 fact/rule/evidence。

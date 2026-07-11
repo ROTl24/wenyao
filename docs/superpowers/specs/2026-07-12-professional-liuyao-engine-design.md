@@ -23,7 +23,7 @@
 
 ## 2. 经典来源与使用边界
 
-默认规则配置以公开电子文本为起点，但电子文本不是免复核的权威数据库。进入 `approved` 的静态表必须记录版本、提取人、复核人和内容哈希。
+默认规则配置以公开电子文本为起点，但电子文本不是免复核的权威数据库。来源可信度与本项目是否允许运行是两件事：静态规则包必须记录固定来源、最终规范化表哈希与真实审阅类型；两次独立自动校验可以把规则包标为 `project-enabled + independent-automated`，但不能冒充人工底本复核。只有实际人工复核后才能标为 `human-reviewed`。
 
 - [《增删卜易·六亲歌章》](https://zh.wikisource.org/zh-hans/增删卜易/5)：六亲按本宫五行生克装配，变爻六亲仍以正卦宫五行为参照。
 - [《增删卜易·用神章》](https://zh.wikisource.org/zh-hans/增删卜易/8)：父母、官鬼、兄弟、妻财、子孙所主事项。它说明“功名”可取官鬼，“文书、书馆、文契”等可取父母，不能把宽泛的“学业功名”直接当用神。
@@ -90,7 +90,28 @@ export interface RuleSourceRef {
   url: string;
   locator: string;
   contentHash: string;
-  reviewStatus: 'draft' | 'reviewed' | 'approved';
+}
+
+export type VerificationLevel = 'unverified' | 'independent-automated' | 'human-reviewed';
+export type RulePackRuntimeStatus = 'fixture-only' | 'project-enabled';
+
+export interface RuleReviewRecord {
+  reviewerId: string;
+  reviewerKind: 'automated-agent' | 'human';
+  independentRunId: string;
+  reviewedAt: string;
+  artifactHash: string;
+  outcome: 'matched' | 'disputed';
+}
+
+export interface RulePackManifest {
+  rulePackId: 'wenwang_najia_v2';
+  version: string;
+  artifactHash: string;
+  verificationLevel: VerificationLevel;
+  runtimeStatus: RulePackRuntimeStatus;
+  reviews: readonly RuleReviewRecord[];
+  sourceRefs: readonly string[];
 }
 
 export interface RuleContext {
@@ -186,7 +207,6 @@ export interface HexagramSideV2 {
   generation: string;
   shiLine: 1 | 2 | 3 | 4 | 5 | 6;
   yingLine: 1 | 2 | 3 | 4 | 5 | 6;
-  harmonyForm: 'six-harmony' | 'six-clash' | 'neither';
 }
 
 export interface LineFacetV2 {
@@ -199,18 +219,19 @@ export interface LineFacetV2 {
   relationToBasePalace: SixRelation;
   relationToOwnPalace: SixRelation;
   role: '世' | '应' | null;
-  growthByPillar: Record<PillarKind, TwelveStage>;
 }
 
-export interface HiddenSpiritV2 {
+export interface HiddenSpiritCandidateV2 {
   id: string;
   hostLineId: string;
+  sourceLine: 1 | 2 | 3 | 4 | 5 | 6;
   relation: SixRelation;
   stem: Stem;
   branch: Branch;
   ganZhi: string;
   element: Element;
   sourceHexagram: string;
+  status: 'potential';
 }
 
 export interface PlateLineV2 {
@@ -218,15 +239,13 @@ export interface PlateLineV2 {
   position: 1 | 2 | 3 | 4 | 5 | 6;
   tossValue: 6 | 7 | 8 | 9;
   moving: boolean;
-  beast: '青龙' | '朱雀' | '勾陈' | '腾蛇' | '白虎' | '玄武';
   base: LineFacetV2;
   changed: LineFacetV2;
   transition: null | {
     fromLineId: string;
     toLineId: string;
-    growthIntoChanged: TwelveStage;
   };
-  hiddenSpirits: readonly HiddenSpiritV2[];
+  hiddenSpiritCandidates: readonly HiddenSpiritCandidateV2[];
 }
 
 export interface PlateV2 {
@@ -235,7 +254,11 @@ export interface PlateV2 {
   sessionId: string;
   castAt: string;
   calendar: CalendarSnapshot;
-  ruleContextHash: string;
+  rulePackRef: {
+    id: 'wenwang_najia_v2';
+    version: string;
+    artifactHash: string;
+  };
   rawTosses: readonly [6 | 7 | 8 | 9, 6 | 7 | 8 | 9, 6 | 7 | 8 | 9, 6 | 7 | 8 | 9, 6 | 7 | 8 | 9, 6 | 7 | 8 | 9];
   baseHexagram: HexagramSideV2;
   changedHexagram: HexagramSideV2;
@@ -248,8 +271,9 @@ export interface PlateV2 {
 
 - `changed` 对静爻也始终存在，所以变卦能完整显示六行。
 - `relationToBasePalace` 用于动爻化爻分析；`relationToOwnPalace` 仅用于把变卦作为完整卦体查看。UI 必须用明确列名区分，不能把两者混成一个“变卦六亲”。
-- 伏神按受审规则包生成，缺失就是空数组，不由 AI 补齐。
-- 十二长生完整计算，但“展示一个阶段”和“据此下吉凶结论”是两件事。
+- `hiddenSpiritCandidates` 只表示“本卦缺少某六亲时，从本宫首卦同位得到的潜在伏神位置”；何时启用、是否优先于变爻属于 Task 7 的配置规则，不由结构盘偷做解释。
+- `PlateV2` 只保存结构真值。十二长生、六神、六合/六冲均通过版本化 facts 计算并由 UI selector 投影，结构盘不允许填未计算占位值。
+- `rulePackRef` 绑定实际生成本盘的规则表 artifact；`RuleContext` 和 facts 的稳定哈希在完整 Case 组装时一次计算。
 
 ### 4.4 DerivedFact 事实图
 
@@ -270,7 +294,7 @@ export type FactRelation =
   | 'returns-generate' | 'returns-control' | 'returns-clash' | 'returns-combine'
   | 'advances' | 'retreats' | 'forms-three-harmony'
   | 'is-six-harmony' | 'is-six-clash' | 'is-fan-yin' | 'is-fu-yin'
-  | 'is-growth-stage' | 'is-shen-sha'
+  | 'is-growth-stage' | 'is-six-beast' | 'is-shen-sha'
   | 'is-source-spirit' | 'is-avoid-spirit' | 'is-enemy-spirit'
   | 'flying-generates-hidden' | 'flying-controls-hidden'
   | 'holds-shi' | 'holds-ying';
@@ -373,6 +397,7 @@ export interface DivinationCaseV2 {
   question: string;
   category: string;
   ruleContext: RuleContext;
+  ruleContextHash: string;
   plate: PlateV2;
   useGod: UseGodSelection;
   facts: readonly DerivedFact[];
@@ -381,7 +406,7 @@ export interface DivinationCaseV2 {
 }
 ```
 
-`builtAt` 由调用方传入，只用于审计，不参与领域判断。`factSetHash` 覆盖问题、意图、投币、起卦时刻、RuleContext、PlateV2、UseGodSelection 和有序 facts。
+`builtAt` 由调用方传入，只用于审计，不参与领域判断。`ruleContextHash` 覆盖完整 `RuleContext`；`factSetHash` 覆盖问题、意图、投币、起卦时刻、RuleContext、PlateV2、UseGodSelection 和有序 facts。
 
 ## 5. 规则配置与争议管理
 
@@ -396,11 +421,11 @@ export interface RuleDefinition {
   authority: RuleAuthority;
   description: string;
   sourceRefs: readonly string[];
-  reviewStatus: 'draft' | 'reviewed' | 'approved';
+  verificationLevel: VerificationLevel;
 }
 ```
 
-运行时只允许加载 `approved` 的结构性规则。`reviewed` 的解释性规则可以展示，但事实标为 `conditional`；`draft` 不能进入正式报告。
+运行时结构表只允许从 registry 中 `runtimeStatus='project-enabled'` 的规则包加载。registry 必须验证：至少两次不同审阅身份和独立运行、结论均为 `matched`、全部指向当前同一 `artifactHash`；`verificationLevel` 如实显示为 `independent-automated` 或 `human-reviewed`。解释性规则仍按 `conditional/disputed` 标记，`unverified + fixture-only` 不能进入正式报告。
 
 ### 5.2 明确隔离的口径
 
