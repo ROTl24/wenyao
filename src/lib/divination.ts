@@ -270,7 +270,11 @@ function voidBranches(dayGanZhi: string): [string, string] {
   return [BRANCHES[voidStart], BRANCHES[(voidStart + 1) % 12]];
 }
 
-export function buildPlate(values: readonly LineValue[], castAt: Date): DivinationPlate {
+export function buildPlate(
+  values: readonly LineValue[],
+  castAt: Date,
+  plateId: string = crypto.randomUUID(),
+): DivinationPlate {
   if (values.length !== 6) throw new Error('排盘需要六次已确认爻值');
   const tosses = values.map((value) => {
     const faces: Record<LineValue, CoinFace[]> = {
@@ -306,7 +310,7 @@ export function buildPlate(values: readonly LineValue[], castAt: Date): Divinati
   });
 
   return {
-    id: crypto.randomUUID(),
+    id: plateId,
     castAt: castAt.toISOString(),
     dayGanZhi,
     monthGanZhi,

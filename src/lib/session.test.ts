@@ -13,7 +13,7 @@ describe('起卦会话', () => {
 
   it('同一 tossId 只能确认一次', () => {
     const prepared = prepareToss(createSession('考试是否通过', 'study'), createToss(['text', 'text', 'reverse']), 'seed-a');
-    const transaction = { at: '2026-07-12T00:00:01.000Z' };
+    const transaction = { at: '2026-07-12T00:00:01.000Z', plateId: 'unused-plate' };
     const first = advanceCurrentToss(prepared, prepared.currentToss!.id, transaction);
     const repeated = advanceCurrentToss(first, prepared.currentToss!.id, transaction);
     expect(first.tosses).toHaveLength(1);
@@ -22,7 +22,10 @@ describe('起卦会话', () => {
 
   it('过期 tossId 返回原会话对象', () => {
     const prepared = prepareToss(createSession('考试是否通过', 'study'), createToss(['text', 'text', 'reverse']), 'seed-a');
-    const advanced = advanceCurrentToss(prepared, 'stale-toss-id', { at: '2026-07-12T00:00:01.000Z' });
+    const advanced = advanceCurrentToss(prepared, 'stale-toss-id', {
+      at: '2026-07-12T00:00:01.000Z',
+      plateId: 'unused-plate',
+    });
     expect(advanced).toBe(prepared);
     expect(advanced.tosses).toHaveLength(0);
   });
@@ -32,6 +35,7 @@ describe('起卦会话', () => {
     const nextToss = createToss(['text', 'reverse', 'reverse']);
     const advanced = advanceCurrentToss(prepared, prepared.currentToss!.id, {
       at: '2026-07-12T00:00:01.000Z',
+      plateId: 'unused-plate',
       next: { toss: nextToss, visualSeed: 'seed-b', id: 'next-toss-id' },
     });
     expect(advanced.tosses).toHaveLength(1);
@@ -48,6 +52,7 @@ describe('起卦会话', () => {
     const prepared = prepareToss(createSession('考试是否通过', 'study'), createToss(['text', 'text', 'reverse']), 'seed-a');
     const transaction = {
       at: '2026-07-12T00:00:01.000Z',
+      plateId: 'unused-plate',
       next: { toss: nextToss, visualSeed: 'seed-b', id: 'deterministic-next' },
     };
     const first = advanceCurrentToss(prepared, prepared.currentToss!.id, transaction);
@@ -69,6 +74,7 @@ describe('起卦会话', () => {
       prepared.currentToss!.id,
       {
         at: '2026-07-12T00:00:06.000Z',
+        plateId: 'sixth-plate-id',
         next: {
           toss: createToss(['reverse', 'reverse', 'reverse']),
           visualSeed: 'seed-6',
@@ -79,6 +85,36 @@ describe('起卦会话', () => {
     expect(completed.status).toBe('complete');
     expect(completed.tosses).toHaveLength(6);
     expect(completed.currentToss).toBeUndefined();
+  });
+
+  it('第六爻使用同一 transaction 重放会生成完全相同的排盘身份', () => {
+    let session = createSession('完成路径纯度', 'other', new Date('2026-07-12T00:00:00.000Z'));
+    for (let index = 0; index < 5; index += 1) {
+      session = confirmCurrentToss(
+        prepareToss(session, createToss(['text', 'text', 'reverse']), `seed-${index}`),
+        `2026-07-12T00:00:0${index + 1}.000Z`,
+      );
+    }
+    const prepared = prepareToss(
+      session,
+      createToss(['reverse', 'reverse', 'reverse']),
+      'seed-six',
+      { id: 'sixth-toss', at: '2026-07-12T00:00:06.000Z' },
+    );
+    const transaction = {
+      at: '2026-07-12T00:00:07.000Z',
+      plateId: 'deterministic-plate-id',
+      next: {
+        toss: createToss(['text', 'reverse', 'reverse']),
+        visualSeed: 'ignored-next',
+        id: 'ignored-next-id',
+      },
+    };
+
+    const first = advanceCurrentToss(prepared, 'sixth-toss', transaction);
+    const replay = advanceCurrentToss(prepared, 'sixth-toss', transaction);
+    expect(replay).toEqual(first);
+    expect(first.plate?.id).toBe('deterministic-plate-id');
   });
 
   it('confirms exactly six lines then creates an immutable plate', () => {

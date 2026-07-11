@@ -26,18 +26,24 @@ type Screen = 'home' | 'casting' | 'result';
 interface ConfirmCommitCommand {
   id: string;
   session: DivinationSession;
+  owner: SessionOwner;
+}
+
+interface SessionOwner {
+  sessionId: string;
+  epoch: number;
 }
 
 interface AppFlowState {
   screen: Screen;
   session: DivinationSession | null;
   pendingConfirmCommit: ConfirmCommitCommand | null;
+  epoch: number;
 }
 
 type AppFlowAction =
-  | { type: 'SET_SCREEN'; screen: Screen }
-  | { type: 'SET_SESSION'; session: DivinationSession | null }
   | { type: 'OPEN_SESSION'; screen: Screen; session: DivinationSession | null }
+  | { type: 'APPLY_OWNED_SESSION'; owner: SessionOwner; session: DivinationSession }
   | {
     type: 'ADVANCE_TOSS';
     expectedTossId: string;
@@ -49,20 +55,51 @@ const initialAppFlowState: AppFlowState = {
   screen: 'home',
   session: null,
   pendingConfirmCommit: null,
+  epoch: 0,
 };
+
+function ownerMatches(state: AppFlowState, owner: SessionOwner): boolean {
+  return state.epoch === owner.epoch && state.session?.id === owner.sessionId;
+}
+
+function sessionProgress(session: DivinationSession): number {
+  return session.tosses.length * 100
+    + (session.status === 'complete' ? 50 : 0)
+    + (session.analysis ? 10 : 0)
+    + session.messages.length;
+}
+
+export function mergeSavedSession(
+  history: DivinationSession[],
+  saved: DivinationSession,
+): DivinationSession[] {
+  const existing = history.find((item) => item.id === saved.id);
+  if (
+    existing
+    && (
+      existing.updatedAt > saved.updatedAt
+      || (
+        existing.updatedAt === saved.updatedAt
+        && sessionProgress(existing) > sessionProgress(saved)
+      )
+    )
+  ) return history;
+  return [saved, ...history.filter((item) => item.id !== saved.id)];
+}
 
 export function appFlowReducer(state: AppFlowState, action: AppFlowAction): AppFlowState {
   switch (action.type) {
-    case 'SET_SCREEN':
-      return state.screen === action.screen ? state : { ...state, screen: action.screen };
-    case 'SET_SESSION':
-      return state.session === action.session ? state : { ...state, session: action.session };
     case 'OPEN_SESSION':
       return {
         ...state,
         screen: action.screen,
         session: action.session,
+        epoch: state.epoch + 1,
       };
+    case 'APPLY_OWNED_SESSION':
+      return ownerMatches(state, action.owner)
+        ? { ...state, session: action.session }
+        : state;
     case 'ADVANCE_TOSS': {
       if (state.screen !== 'casting' || !state.session) return state;
       const next = advanceCurrentToss(
@@ -78,6 +115,7 @@ export function appFlowReducer(state: AppFlowState, action: AppFlowAction): AppF
         pendingConfirmCommit: {
           id: action.expectedTossId,
           session: next,
+          owner: { sessionId: state.session.id, epoch: state.epoch },
         },
       };
     }
@@ -118,29 +156,62 @@ export function App() {
   const [analysisError, setAnalysisError] = useState('');
   const [chatting, setChatting] = useState(false);
   const handledConfirmCommands = useRef(new Set<string>());
+  const deletedSessionIds = useRef(new Set<string>());
+  const epochRef = useRef(0);
+  const activeOwnerRef = useRef<SessionOwner | null>(null);
 
-  const setScreen = (next: Screen) => dispatchFlow({ type: 'SET_SCREEN', screen: next });
-  const setSession = (next: DivinationSession | null) => {
-    dispatchFlow({ type: 'SET_SESSION', session: next });
+  const isOwnerCurrent = (owner: SessionOwner): boolean => (
+    activeOwnerRef.current?.sessionId === owner.sessionId
+    && activeOwnerRef.current.epoch === owner.epoch
+  );
+
+  const resetAsyncUi = () => {
+    setEvidence([]);
+    setRetrievalDiagnostics(null);
+    setAnalyzing(false);
+    setAnalysisError('');
+    setChatting(false);
+  };
+
+  const openFlow = (
+    next: DivinationSession | null,
+    nextScreen: Screen,
+  ): SessionOwner | null => {
+    const epoch = epochRef.current + 1;
+    epochRef.current = epoch;
+    const owner = next
+      ? { sessionId: next.id, epoch }
+      : null;
+    activeOwnerRef.current = owner;
+    dispatchFlow({ type: 'OPEN_SESSION', screen: nextScreen, session: next });
+    resetAsyncUi();
+    return owner;
   };
 
   useEffect(() => {
     void desktop.sessions.list().then((sessions) => {
-      setHistory(sessions.map((saved) => saved.plate ? { ...saved, plate: upgradePlate(saved.plate) } : saved));
+      const loaded = sessions
+        .filter((saved) => !deletedSessionIds.current.has(saved.id))
+        .map((saved) => saved.plate ? { ...saved, plate: upgradePlate(saved.plate) } : saved);
+      setHistory((current) => loaded.reduceRight(mergeSavedSession, current));
     });
   }, []);
 
   const saveSession = async (next: DivinationSession) => {
     try {
       const saved = await desktop.sessions.save(next);
-      setHistory((current) => [saved, ...current.filter((item) => item.id !== saved.id)]);
+      if (deletedSessionIds.current.has(saved.id)) {
+        await desktop.sessions.delete(saved.id);
+        return;
+      }
+      setHistory((current) => mergeSavedSession(current, saved));
     } catch (error) {
       console.error('Failed to persist session', error);
     }
   };
 
-  const persist = async (next: DivinationSession) => {
-    setSession(next);
+  const persistOwned = async (next: DivinationSession, owner: SessionOwner) => {
+    dispatchFlow({ type: 'APPLY_OWNED_SESSION', owner, session: next });
     await saveSession(next);
   };
 
@@ -156,44 +227,52 @@ export function App() {
     return { evidence: result.evidence, diagnostics: result.diagnostics };
   };
 
-  const runAnalysis = async (target: DivinationSession) => {
-    if (!target.plate) return;
+  const runAnalysis = async (target: DivinationSession, owner: SessionOwner) => {
+    if (!target.plate || !isOwnerCurrent(owner)) return;
     setAnalyzing(true);
     setAnalysisError('');
     try {
       const found = await evidenceFor(target);
+      if (!isOwnerCurrent(owner)) return;
       setEvidence(found.evidence);
       setRetrievalDiagnostics(found.diagnostics);
       const result = await desktop.ai.analyze({ question: target.question, category: target.category, plate: target.plate, evidence: found.evidence, retrievalDiagnostics: found.diagnostics || undefined });
+      if (!isOwnerCurrent(owner)) return;
       if (result.ok && result.report) {
-        await persist(withAnalysis(target, result.report));
+        await persistOwned(withAnalysis(target, result.report), owner);
       } else if (desktop.platform === 'browser') {
-        await persist(withAnalysis(target, createBrowserLocalReport(target, found.evidence)));
+        await persistOwned(withAnalysis(target, createBrowserLocalReport(target, found.evidence)), owner);
       } else {
         setAnalysisError(`${result.error?.message || 'AI 分析失败'} ${result.error?.nextAction || ''}`.trim());
       }
     } catch (error) {
-      setAnalysisError(error instanceof Error ? error.message : '检索或分析服务暂时不可用。');
-    } finally { setAnalyzing(false); }
+      if (isOwnerCurrent(owner)) {
+        setAnalysisError(error instanceof Error ? error.message : '检索或分析服务暂时不可用。');
+      }
+    } finally {
+      if (isOwnerCurrent(owner)) setAnalyzing(false);
+    }
   };
 
   const start = () => {
     if (!category || !isValidQuestion(question)) return;
     const next = prepareNext(createSession(question, category));
-    dispatchFlow({ type: 'OPEN_SESSION', screen: 'casting', session: next });
-    void saveSession(next);
+    const owner = openFlow(next, 'casting');
+    if (owner) void saveSession(next);
   };
 
   const confirm = (expectedTossId: string) => {
     const nextToss = randomToss();
     const nextVisualSeed = crypto.randomUUID();
     const nextTossId = crypto.randomUUID();
+    const plateId = crypto.randomUUID();
     const transitionAt = new Date().toISOString();
     dispatchFlow({
       type: 'ADVANCE_TOSS',
       expectedTossId,
       transaction: {
         at: transitionAt,
+        plateId,
         next: {
           toss: nextToss,
           visualSeed: nextVisualSeed,
@@ -210,50 +289,55 @@ export function App() {
     dispatchFlow({ type: 'CONSUME_CONFIRM_COMMIT', id: command.id });
     void (async () => {
       await saveSession(command.session);
-      if (command.session.status === 'complete') await runAnalysis(command.session);
+      if (command.session.status === 'complete' && isOwnerCurrent(command.owner)) {
+        await runAnalysis(command.session, command.owner);
+      }
     })();
   }, [flow.pendingConfirmCommit]);
 
   const openSession = async (saved: DivinationSession) => {
     let next = saved.plate ? { ...saved, plate: upgradePlate(saved.plate) } : saved;
     if (saved.status === 'casting') next = prepareNext(next);
-    setSession(next);
+    const owner = openFlow(next, next.status === 'complete' ? 'result' : 'casting');
+    if (!owner) return;
     setQuestion(next.question);
     setCategory(next.category);
     setHistoryOpen(false);
     if (next.status === 'complete') {
       const found = await evidenceFor(next);
+      if (!isOwnerCurrent(owner)) return;
       setEvidence(found.evidence);
       setRetrievalDiagnostics(found.diagnostics);
-      setScreen('result');
-      if (!next.analysis) void runAnalysis(next);
+      if (!next.analysis) void runAnalysis(next, owner);
     } else {
-      setScreen('casting');
-      void persist(next);
+      void saveSession(next);
     }
   };
 
   const deleteSession = async (id: string) => {
-    await desktop.sessions.delete(id);
+    deletedSessionIds.current.add(id);
     setHistory((current) => current.filter((item) => item.id !== id));
-    if (session?.id === id) {
-      dispatchFlow({ type: 'OPEN_SESSION', screen: 'home', session: null });
-    }
+    if (activeOwnerRef.current?.sessionId === id) openFlow(null, 'home');
+    await desktop.sessions.delete(id);
   };
 
   const followUp = async (followQuestion: string) => {
     if (!session || !session.plate) return;
+    const owner = activeOwnerRef.current;
+    if (!owner || owner.sessionId !== session.id) return;
     setChatting(true);
     let next = withMessage(session, { id: crypto.randomUUID(), role: 'user', content: followQuestion, createdAt: new Date().toISOString() });
-    await persist(next);
+    await persistOwned(next, owner);
+    if (!isOwnerCurrent(owner)) return;
     const result = await desktop.ai.followUp({ question: followQuestion, session: next, evidence });
+    if (!isOwnerCurrent(owner)) return;
     const answer = result.ok && result.answer ? result.answer : {
       content: desktop.platform === 'browser' ? '浏览器预览不会发送 AI 请求；桌面应用会沿用本次排盘和古籍证据继续回答。' : `${result.error?.message || '追问失败'} ${result.error?.nextAction || ''}`,
       evidenceIds: [],
     };
     next = withMessage(next, { id: crypto.randomUUID(), role: 'assistant', content: answer.content, evidenceIds: answer.evidenceIds, createdAt: new Date().toISOString() });
-    await persist(next);
-    setChatting(false);
+    await persistOwned(next, owner);
+    if (isOwnerCurrent(owner)) setChatting(false);
   };
 
   const appTitle = useMemo(() => screen === 'home' ? '问爻' : screen === 'casting' ? '六爻起卦' : '排盘与解读', [screen]);
@@ -268,7 +352,7 @@ export function App() {
       </header>
       {screen === 'home' && <HomeScreen question={question} category={category} onQuestionChange={setQuestion} onCategoryChange={setCategory} onStart={start} />}
       {screen === 'casting' && session?.currentToss && <RitualScreen session={session} onConfirm={confirm} />}
-      {screen === 'result' && session?.plate && <ResultScreen session={session} evidence={evidence} retrievalDiagnostics={retrievalDiagnostics} analyzing={analyzing} analysisError={analysisError} chatting={chatting} onAnalyze={() => void runAnalysis(session)} onFollowUp={followUp} onBack={() => { dispatchFlow({ type: 'OPEN_SESSION', screen: 'home', session: null }); setQuestion(''); setCategory(null); }} />}
+      {screen === 'result' && session?.plate && <ResultScreen session={session} evidence={evidence} retrievalDiagnostics={retrievalDiagnostics} analyzing={analyzing} analysisError={analysisError} chatting={chatting} onAnalyze={() => { const owner = activeOwnerRef.current; if (owner) void runAnalysis(session, owner); }} onFollowUp={followUp} onBack={() => { openFlow(null, 'home'); setQuestion(''); setCategory(null); }} />}
       {historyOpen && <HistoryPanel sessions={history} onClose={() => setHistoryOpen(false)} onOpen={(saved) => void openSession(saved)} onDelete={(id) => void deleteSession(id)} />}
       {settingsOpen && <SettingsPanel onClose={() => setSettingsOpen(false)} />}
     </div>

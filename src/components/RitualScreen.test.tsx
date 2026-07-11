@@ -17,6 +17,8 @@ const sceneHarness = vi.hoisted(() => ({
   suspend: false,
   pending: null as Promise<void> | null,
   resolvePending: null as (() => void) | null,
+  mounts: 0,
+  unmounts: 0,
   callbacks: new Map<string, (value: typeof rig) => void>(),
 }));
 
@@ -51,6 +53,10 @@ vi.mock('./CoinScene', async () => {
       useEffect(() => {
         if (!sceneHarness.deferReady) props.onRigReady(rig);
       }, [props.onRigReady, props.tossId]);
+      useEffect(() => {
+        sceneHarness.mounts += 1;
+        return () => { sceneHarness.unmounts += 1; };
+      }, []);
       if (sceneHarness.suspend && sceneHarness.pending) throw sceneHarness.pending;
       if (sceneHarness.throwError) throw new Error('WebGL context unavailable');
       return (
@@ -162,6 +168,8 @@ beforeEach(() => {
   sceneHarness.deferReady = false;
   sceneHarness.throwError = false;
   sceneHarness.suspend = false;
+  sceneHarness.mounts = 0;
+  sceneHarness.unmounts = 0;
   sceneHarness.pending = new Promise<void>((resolve) => {
     sceneHarness.resolvePending = resolve;
   });
@@ -231,6 +239,25 @@ describe('RitualScreen 原子动画与确认', () => {
     fireEvent.click(stage());
     expect(screen.getByRole('button', { name: '定此爻' })).toBeEnabled();
     expect(screen.getByTestId('coin-scene-stub')).toHaveAttribute('data-toss-id', 'toss-b');
+  });
+
+  it('正常跨爻更新复用同一 CoinScene/Canvas 实例，不重建 WebGL 上下文', async () => {
+    const { rerender } = render(
+      <RitualScreen session={preparedSession('stable-canvas-a')} onConfirm={vi.fn()} />,
+    );
+    await screen.findByTestId('coin-scene-stub');
+    await waitFor(() => expect(sceneHarness.mounts).toBe(1));
+
+    rerender(
+      <RitualScreen session={preparedSession('stable-canvas-b', 2)} onConfirm={vi.fn()} />,
+    );
+    await waitFor(() => expect(screen.getByTestId('coin-scene-stub')).toHaveAttribute(
+      'data-toss-id',
+      'stable-canvas-b',
+    ));
+
+    expect(sceneHarness.mounts).toBe(1);
+    expect(sceneHarness.unmounts).toBe(0);
   });
 
   it('拒绝旧 lazy rig 迟到回调，同一 tick 双击确认只提交一次 expectedTossId', async () => {

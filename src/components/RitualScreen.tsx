@@ -43,6 +43,7 @@ interface Props {
 interface SceneBoundaryProps {
   children: ReactNode;
   fallback: ReactNode;
+  resetKey: string;
 }
 
 interface SceneBoundaryState {
@@ -58,6 +59,12 @@ class CoinSceneErrorBoundary extends Component<SceneBoundaryProps, SceneBoundary
 
   componentDidCatch(error: unknown, info: ErrorInfo): void {
     console.error('CoinScene failed; using the static ritual fallback.', error, info);
+  }
+
+  componentDidUpdate(previous: SceneBoundaryProps): void {
+    if (this.state.failed && previous.resetKey !== this.props.resetKey) {
+      this.setState({ failed: false });
+    }
   }
 
   render(): ReactNode {
@@ -174,7 +181,7 @@ export function RitualScreen({ session, onConfirm }: Props) {
               toss={current}
             />
           )}
-          key={current.id}
+          resetKey={current.id}
         >
           <Suspense
             fallback={(

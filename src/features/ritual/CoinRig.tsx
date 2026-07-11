@@ -105,18 +105,25 @@ export function CoinRig({
   const renderer = useThree((state) => state.gl);
   const requestRender = useThree((state) => state.invalidate);
   const [resources, setResources] = useState<SharedCoinResources | null>(null);
+  const [resourceError, setResourceError] = useState<Error | null>(null);
 
   useEffect(() => {
     let cancelled = false;
     let created: SharedCoinResources | null = null;
     setResources(null);
+    setResourceError(null);
 
-    void Promise.resolve().then(() => {
-      if (cancelled) return;
-      created = createSharedCoinResources(renderer, quality);
-      if (cancelled) created.dispose();
-      else setResources(created);
-    });
+    void Promise.resolve()
+      .then(() => {
+        if (cancelled) return;
+        created = createSharedCoinResources(renderer, quality);
+        if (cancelled) created.dispose();
+        else setResources(created);
+      })
+      .catch((error: unknown) => {
+        if (cancelled) return;
+        setResourceError(error instanceof Error ? error : new Error(String(error)));
+      });
 
     return () => {
       cancelled = true;
@@ -124,6 +131,7 @@ export function CoinRig({
     };
   }, [quality, renderer]);
 
+  if (resourceError) throw resourceError;
   if (!resources) return null;
   return (
     <MountedCoinRig

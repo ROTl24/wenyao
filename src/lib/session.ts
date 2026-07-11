@@ -19,6 +19,7 @@ export interface PreparedToss extends Toss {
 
 export interface AdvanceCurrentTossTransaction {
   at: string;
+  plateId: string;
   next?: {
     toss: Toss;
     visualSeed: string;
@@ -93,6 +94,7 @@ export function prepareToss(
 export function confirmCurrentToss(
   session: DivinationSession,
   confirmedAt = new Date().toISOString(),
+  plateId?: string,
 ): DivinationSession {
   if (session.status === 'complete' || !session.currentToss) return session;
   const confirmed: TossRecord = {
@@ -106,7 +108,9 @@ export function confirmCurrentToss(
     tosses,
     currentToss: undefined,
     status: complete ? 'complete' : 'casting',
-    plate: complete ? buildPlate(tosses.map((item) => item.value), new Date(session.castAt)) : undefined,
+    plate: complete
+      ? buildPlate(tosses.map((item) => item.value), new Date(session.castAt), plateId)
+      : undefined,
     updatedAt: confirmedAt,
   };
 }
@@ -118,7 +122,7 @@ export function advanceCurrentToss(
 ): DivinationSession {
   if (session.currentToss?.id !== expectedTossId) return session;
 
-  const confirmed = confirmCurrentToss(session, transaction.at);
+  const confirmed = confirmCurrentToss(session, transaction.at, transaction.plateId);
   if (confirmed.status === 'complete' || !transaction.next) return confirmed;
 
   return prepareToss(
