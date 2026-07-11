@@ -36,6 +36,16 @@ function distance(
   return Math.hypot(left[0] - right[0], left[1] - right[1], left[2] - right[2]);
 }
 
+function localMaxima(values: readonly number[]): number[] {
+  return values.filter(
+    (value, index) =>
+      index > 0
+      && index < values.length - 1
+      && value > values[index - 1]
+      && value > values[index + 1],
+  );
+}
+
 describe('确定性古钱轨迹', () => {
   it('同种子逐帧一致，新 tossId 会重播但最终面不变', () => {
     const input = {
@@ -74,26 +84,95 @@ describe('确定性古钱轨迹', () => {
     );
   });
 
-  it('以毫秒公开三枚币的 seeded 接触错峰', () => {
-    const tracks = createCoinTracks({
-      tossId: 'stagger',
-      visualSeed: 'seed',
-      lineIndex: 3,
-      faces: ['text', 'text', 'reverse'],
+  it('不同 visualSeed 产生不同且仍受毫秒边界约束的 seeded 接触错峰', () => {
+    const impactSeries = ['seed-a', 'seed-b', 'seed-c', 'seed-d'].map((visualSeed) => {
+      const tracks = createCoinTracks({
+        tossId: 'stagger',
+        visualSeed,
+        lineIndex: 3,
+        faces: ['text', 'text', 'reverse'],
+      });
+      const impacts = tracks.map((track) => track.impactAtMs);
+
+      expect(tracks[0].impactProgress).toBeCloseTo(0.72, 12);
+      for (const gap of [impacts[1] - impacts[0], impacts[2] - impacts[1]]) {
+        expect(gap).toBeGreaterThanOrEqual(60);
+        expect(gap).toBeLessThanOrEqual(140);
+      }
+
+      return impacts;
     });
 
-    expect(tracks[0].impactProgress).toBeCloseTo(0.72, 12);
-    expect(tracks[0].impactAtMs).toBeLessThan(tracks[1].impactAtMs);
-    expect(tracks[1].impactAtMs).toBeLessThan(tracks[2].impactAtMs);
+    expect(
+      new Set(impactSeries.map((impacts) => JSON.stringify(impacts))).size,
+    ).toBeGreaterThanOrEqual(2);
+  });
 
-    const gaps = [
-      tracks[1].impactAtMs - tracks[0].impactAtMs,
-      tracks[2].impactAtMs - tracks[1].impactAtMs,
-    ];
-    for (const gap of gaps) {
-      expect(gap).toBeGreaterThanOrEqual(60);
-      expect(gap).toBeLessThanOrEqual(140);
+  it('贝塞尔飞行中点明显高于两端且位置持续变化', () => {
+    const tracks = createCoinTracks({
+      tossId: 'flight-shape',
+      visualSeed: 'phase-coverage',
+      lineIndex: 2,
+      faces: ['text', 'reverse', 'text'],
+    });
+
+    for (const track of tracks) {
+      const start = sampleCoinTrack(track, 0);
+      const midpoint = sampleCoinTrack(track, track.impactProgress / 2);
+      const impact = sampleCoinTrack(track, track.impactProgress);
+      expect(midpoint.position[1]).toBeGreaterThan(
+        Math.max(start.position[1], impact.position[1]) + 0.15,
+      );
+
+      const flightSamples = [0, 0.2, 0.4, 0.6, 0.8, 1].map((fraction) =>
+        sampleCoinTrack(track, track.impactProgress * fraction).position);
+      for (let index = 1; index < flightSamples.length; index += 1) {
+        expect(distance(flightSamples[index - 1], flightSamples[index])).toBeGreaterThan(0.03);
+      }
     }
+  });
+
+  it('首次接触后出现至少两次严格衰减的反弹峰', () => {
+    const tracks = createCoinTracks({
+      tossId: 'bounce-shape',
+      visualSeed: 'phase-coverage',
+      lineIndex: 2,
+      faces: ['text', 'reverse', 'text'],
+    });
+
+    for (const track of tracks) {
+      const heights = Array.from({ length: 401 }, (_, index) => {
+        const progress = track.impactProgress
+          + (0.9 - track.impactProgress) * (index / 400);
+        return sampleCoinTrack(track, progress).position[1];
+      });
+      const peaks = localMaxima(heights);
+
+      expect(peaks.length).toBeGreaterThanOrEqual(2);
+      for (let index = 1; index < peaks.length; index += 1) {
+        expect(peaks[index]).toBeLessThan(peaks[index - 1]);
+      }
+    }
+  });
+
+  it('摇摆阶段偏离落定朝向且末帧精确回归最终四元数', () => {
+    const faces = ['text', 'reverse', 'text'] as const;
+    const tracks = createCoinTracks({
+      tossId: 'wobble-shape',
+      visualSeed: 'phase-coverage',
+      lineIndex: 2,
+      faces,
+    });
+
+    tracks.forEach((track, index) => {
+      const settled = sampleCoinTrack(track, 1);
+      const wobbling = sampleCoinTrack(track, 0.925);
+
+      expect(wobbling.quaternion).not.toEqual(settled.quaternion);
+      expect(settled.quaternion).toEqual(
+        faces[index] === 'text' ? TEXT_QUATERNION : REVERSE_QUATERNION,
+      );
+    });
   });
 
   it('contact 是达到首次接触后的持续状态，且 progress 会钳制到边界', () => {

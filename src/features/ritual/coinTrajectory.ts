@@ -190,7 +190,7 @@ function createTrack(
   ];
   const secondControlPoint: Vector3Tuple = [
     impactPosition[0] + randomBetween(random, -0.55, 0.55),
-    randomBetween(random, 1.65, 2.25),
+    startPosition[1] + randomBetween(random, 0.85, 1.25),
     impactPosition[2] + randomBetween(random, -0.45, 0.45),
   ];
   const spinAxis = normalizeVector([
