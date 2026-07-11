@@ -122,12 +122,12 @@ function TestCoinScene(props: CoinSceneProps) {
     <div className="coin-test-stage" data-toss-id={props.tossId}>
       {props.faces.map((face, index) => (
         <span
-          aria-label={`乾隆古币 ${index + 1}：${face === 'text' ? '汉字面' : '背面'}`}
+          aria-hidden="true"
           data-coin-index={index}
           data-face={face}
           key={index}
         >
-          {face}
+          {props.active ? '旋' : face}
         </span>
       ))}
     </div>

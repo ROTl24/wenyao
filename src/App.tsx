@@ -1,5 +1,5 @@
 import { History, Settings2 } from 'lucide-react';
-import { useEffect, useMemo, useState } from 'react';
+import { useEffect, useMemo, useReducer, useRef, useState } from 'react';
 import { HistoryPanel } from './components/HistoryPanel';
 import { HomeScreen } from './components/HomeScreen';
 import { ResultScreen } from './components/ResultScreen';
@@ -10,17 +10,83 @@ import { randomToss, upgradePlate } from './lib/divination';
 import { createBrowserLocalReport } from './lib/localAnalysis';
 import type { EvidenceEntry, RetrievalDiagnostics } from './lib/retrieval';
 import {
-  confirmCurrentToss,
+  advanceCurrentToss,
   createSession,
   isValidQuestion,
   prepareToss,
   withAnalysis,
   withMessage,
+  type AdvanceCurrentTossTransaction,
   type DivinationSession,
   type SessionCategory,
 } from './lib/session';
 
 type Screen = 'home' | 'casting' | 'result';
+
+interface ConfirmCommitCommand {
+  id: string;
+  session: DivinationSession;
+}
+
+interface AppFlowState {
+  screen: Screen;
+  session: DivinationSession | null;
+  pendingConfirmCommit: ConfirmCommitCommand | null;
+}
+
+type AppFlowAction =
+  | { type: 'SET_SCREEN'; screen: Screen }
+  | { type: 'SET_SESSION'; session: DivinationSession | null }
+  | { type: 'OPEN_SESSION'; screen: Screen; session: DivinationSession | null }
+  | {
+    type: 'ADVANCE_TOSS';
+    expectedTossId: string;
+    transaction: AdvanceCurrentTossTransaction;
+  }
+  | { type: 'CONSUME_CONFIRM_COMMIT'; id: string };
+
+const initialAppFlowState: AppFlowState = {
+  screen: 'home',
+  session: null,
+  pendingConfirmCommit: null,
+};
+
+export function appFlowReducer(state: AppFlowState, action: AppFlowAction): AppFlowState {
+  switch (action.type) {
+    case 'SET_SCREEN':
+      return state.screen === action.screen ? state : { ...state, screen: action.screen };
+    case 'SET_SESSION':
+      return state.session === action.session ? state : { ...state, session: action.session };
+    case 'OPEN_SESSION':
+      return {
+        ...state,
+        screen: action.screen,
+        session: action.session,
+      };
+    case 'ADVANCE_TOSS': {
+      if (state.screen !== 'casting' || !state.session) return state;
+      const next = advanceCurrentToss(
+        state.session,
+        action.expectedTossId,
+        action.transaction,
+      );
+      if (next === state.session) return state;
+      return {
+        ...state,
+        screen: next.status === 'complete' ? 'result' : 'casting',
+        session: next,
+        pendingConfirmCommit: {
+          id: action.expectedTossId,
+          session: next,
+        },
+      };
+    }
+    case 'CONSUME_CONFIRM_COMMIT':
+      return state.pendingConfirmCommit?.id === action.id
+        ? { ...state, pendingConfirmCommit: null }
+        : state;
+  }
+}
 
 const categoryTerms: Record<SessionCategory, string[]> = {
   career: ['事业', '功名', '官禄', '仕宦', '求名', '官鬼', '世爻', '父母'],
@@ -39,10 +105,10 @@ function prepareNext(session: DivinationSession): DivinationSession {
 }
 
 export function App() {
-  const [screen, setScreen] = useState<Screen>('home');
+  const [flow, dispatchFlow] = useReducer(appFlowReducer, initialAppFlowState);
+  const { screen, session } = flow;
   const [question, setQuestion] = useState('');
   const [category, setCategory] = useState<SessionCategory | null>(null);
-  const [session, setSession] = useState<DivinationSession | null>(null);
   const [history, setHistory] = useState<DivinationSession[]>([]);
   const [evidence, setEvidence] = useState<EvidenceEntry[]>([]);
   const [retrievalDiagnostics, setRetrievalDiagnostics] = useState<RetrievalDiagnostics | null>(null);
@@ -51,6 +117,12 @@ export function App() {
   const [analyzing, setAnalyzing] = useState(false);
   const [analysisError, setAnalysisError] = useState('');
   const [chatting, setChatting] = useState(false);
+  const handledConfirmCommands = useRef(new Set<string>());
+
+  const setScreen = (next: Screen) => dispatchFlow({ type: 'SET_SCREEN', screen: next });
+  const setSession = (next: DivinationSession | null) => {
+    dispatchFlow({ type: 'SET_SESSION', session: next });
+  };
 
   useEffect(() => {
     void desktop.sessions.list().then((sessions) => {
@@ -58,14 +130,18 @@ export function App() {
     });
   }, []);
 
-  const persist = async (next: DivinationSession) => {
-    setSession(next);
+  const saveSession = async (next: DivinationSession) => {
     try {
       const saved = await desktop.sessions.save(next);
       setHistory((current) => [saved, ...current.filter((item) => item.id !== saved.id)]);
     } catch (error) {
       console.error('Failed to persist session', error);
     }
+  };
+
+  const persist = async (next: DivinationSession) => {
+    setSession(next);
+    await saveSession(next);
   };
 
   const evidenceFor = async (target: DivinationSession) => {
@@ -104,20 +180,39 @@ export function App() {
   const start = () => {
     if (!category || !isValidQuestion(question)) return;
     const next = prepareNext(createSession(question, category));
-    void persist(next);
-    setScreen('casting');
+    dispatchFlow({ type: 'OPEN_SESSION', screen: 'casting', session: next });
+    void saveSession(next);
   };
 
-  const confirm = () => {
-    if (!session) return;
-    let next = confirmCurrentToss(session);
-    if (next.status === 'casting') next = prepareNext(next);
-    void persist(next);
-    if (next.status === 'complete') {
-      setScreen('result');
-      void runAnalysis(next);
-    }
+  const confirm = (expectedTossId: string) => {
+    const nextToss = randomToss();
+    const nextVisualSeed = crypto.randomUUID();
+    const nextTossId = crypto.randomUUID();
+    const transitionAt = new Date().toISOString();
+    dispatchFlow({
+      type: 'ADVANCE_TOSS',
+      expectedTossId,
+      transaction: {
+        at: transitionAt,
+        next: {
+          toss: nextToss,
+          visualSeed: nextVisualSeed,
+          id: nextTossId,
+        },
+      },
+    });
   };
+
+  useEffect(() => {
+    const command = flow.pendingConfirmCommit;
+    if (!command || handledConfirmCommands.current.has(command.id)) return;
+    handledConfirmCommands.current.add(command.id);
+    dispatchFlow({ type: 'CONSUME_CONFIRM_COMMIT', id: command.id });
+    void (async () => {
+      await saveSession(command.session);
+      if (command.session.status === 'complete') await runAnalysis(command.session);
+    })();
+  }, [flow.pendingConfirmCommit]);
 
   const openSession = async (saved: DivinationSession) => {
     let next = saved.plate ? { ...saved, plate: upgradePlate(saved.plate) } : saved;
@@ -141,7 +236,9 @@ export function App() {
   const deleteSession = async (id: string) => {
     await desktop.sessions.delete(id);
     setHistory((current) => current.filter((item) => item.id !== id));
-    if (session?.id === id) { setSession(null); setScreen('home'); }
+    if (session?.id === id) {
+      dispatchFlow({ type: 'OPEN_SESSION', screen: 'home', session: null });
+    }
   };
 
   const followUp = async (followQuestion: string) => {
@@ -171,7 +268,7 @@ export function App() {
       </header>
       {screen === 'home' && <HomeScreen question={question} category={category} onQuestionChange={setQuestion} onCategoryChange={setCategory} onStart={start} />}
       {screen === 'casting' && session?.currentToss && <RitualScreen session={session} onConfirm={confirm} />}
-      {screen === 'result' && session?.plate && <ResultScreen session={session} evidence={evidence} retrievalDiagnostics={retrievalDiagnostics} analyzing={analyzing} analysisError={analysisError} chatting={chatting} onAnalyze={() => void runAnalysis(session)} onFollowUp={followUp} onBack={() => { setSession(null); setQuestion(''); setCategory(null); setScreen('home'); }} />}
+      {screen === 'result' && session?.plate && <ResultScreen session={session} evidence={evidence} retrievalDiagnostics={retrievalDiagnostics} analyzing={analyzing} analysisError={analysisError} chatting={chatting} onAnalyze={() => void runAnalysis(session)} onFollowUp={followUp} onBack={() => { dispatchFlow({ type: 'OPEN_SESSION', screen: 'home', session: null }); setQuestion(''); setCategory(null); }} />}
       {historyOpen && <HistoryPanel sessions={history} onClose={() => setHistoryOpen(false)} onOpen={(saved) => void openSession(saved)} onDelete={(id) => void deleteSession(id)} />}
       {settingsOpen && <SettingsPanel onClose={() => setSettingsOpen(false)} />}
     </div>

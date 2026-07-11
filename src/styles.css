@@ -61,19 +61,25 @@ button:focus-visible, input:focus-visible, textarea:focus-visible { outline: 2px
 .coin-canvas, .coin-test-stage { position: absolute !important; inset: 0; width: 100%; height: 100%; z-index: 4; }
 .coin-scene-loading { position: absolute; z-index: 4; inset: 0; display: grid; place-items: center; color: #77746b; font: 14px var(--serif); letter-spacing: .14em; }
 .coin-test-stage { display: flex; align-items: center; justify-content: center; gap: 20px; }
-.ink-hands { position: absolute; inset: -3%; z-index: 2; overflow: hidden; background: #ded7c9 url('/images/ritual-hands-closed.png') center/cover no-repeat; transition: transform 1.2s cubic-bezier(.18,.82,.16,1), filter 1s ease; will-change: transform, filter; }
-.ink-hands::before { content: ""; position: absolute; inset: 0; background: url('/images/ritual-hands.png') center/cover no-repeat; opacity: 0; transform: scale(1.025); transition: opacity .82s cubic-bezier(.2,.7,.18,1), transform 1.2s cubic-bezier(.18,.82,.16,1); }
-.ink-hands--closed { transform: scale(1.015); filter: saturate(.62) contrast(1.08) brightness(.76); }
-.ink-hands--open { transform: scale(1); filter: saturate(.86) contrast(1.02) brightness(1); }
-.ink-hands--open::before { opacity: 1; transform: scale(1); }
-.ink-hands::after { content: ""; position: absolute; inset: 0; pointer-events: none; background: radial-gradient(circle at 50% 55%, rgba(244,238,221,.08) 0 17%, transparent 44%), linear-gradient(180deg, rgba(224,215,196,.22), transparent 24% 74%, rgba(30,28,24,.08)); }
+.ink-hands-runtime { position: absolute; inset: -3%; z-index: 2; overflow: hidden; background: #ded7c9; pointer-events: none; }
+.ink-hands-runtime > img, .ink-hands-runtime > video { position: absolute; inset: 0; width: 100%; height: 100%; object-fit: cover; object-position: center; filter: saturate(.82) contrast(1.04); will-change: opacity; }
+.ink-hands-runtime__cover { position: absolute; z-index: 2; inset: -8%; pointer-events: none; background: radial-gradient(ellipse at 50% 52%, #171916 0 16%, rgba(24,27,23,.98) 32%, rgba(36,38,32,.9) 51%, transparent 72%); filter: blur(8px); will-change: opacity; }
 .paper-vignette { position: absolute; inset: 0; z-index: 5; pointer-events: none; box-shadow: inset 0 0 150px rgba(28,25,20,.26); background: radial-gradient(circle at 50% 54%, transparent 0 24%, rgba(220,212,195,.04) 44%, rgba(211,203,188,.28) 86%); }
 .coin-accessible-results { position: absolute; z-index: 8; left: 50%; bottom: 165px; transform: translateX(-50%); display: flex; gap: 18px; }
 .coin-accessible-results span { width: 34px; height: 34px; display: grid; place-items: center; border: 1px solid rgba(54,44,29,.36); border-radius: 50%; background: rgba(229,220,198,.72); font: 13px var(--serif); }
-.line-result { position: absolute; z-index: 8; bottom: 112px; left: 50%; transform: translateX(-50%); display: flex; flex-direction: column; gap: 5px; }
+.line-result { position: absolute; z-index: 8; bottom: 112px; left: 50%; min-width: 260px; transform: translateX(-50%); display: flex; flex-direction: column; gap: 5px; }
 .line-result strong { font: 24px var(--serif); letter-spacing: .16em; color: var(--cinnabar); }
 .line-result span { color: #73736c; font-size: 12px; letter-spacing: .12em; }
-.ritual-confirm { position: absolute; z-index: 9; left: 50%; bottom: 35px; transform: translateX(-50%); margin: 0; }
+.ritual-confirm-slot { position: absolute; z-index: 9; left: 50%; bottom: 35px; transform: translateX(-50%); }
+.ritual-confirm { position: relative; margin: 0; transform: none; }
+.ritual-confirm-slot .ritual-confirm:hover:not(:disabled) { transform: translateY(-1px); }
+.ritual-confirm-slot .ritual-confirm:active:not(:disabled) { transform: translateY(0) scale(.99); }
+.coin-static-fallback { position: absolute; z-index: 4; inset: 0; display: grid; place-items: center; pointer-events: none; }
+.coin-static-fallback__notice { position: absolute; top: 102px; color: #765f50; font: 11px var(--serif); letter-spacing: .08em; }
+.coin-static-fallback__coins { display: flex; gap: 24px; perspective: 700px; }
+.coin-static-fallback__coins > span { position: relative; width: 92px; height: 92px; display: grid; place-items: center; border: 5px ridge #8b622f; border-radius: 50%; color: #402b18; background: radial-gradient(circle, #d1a45d 0 19%, #9f7137 21% 64%, #6f4925 100%); box-shadow: 0 16px 24px rgba(36,25,15,.24), inset 0 0 0 2px rgba(237,198,117,.34); font: 24px var(--serif); will-change: transform; }
+.coin-static-fallback__coins i { width: 24px; height: 24px; border: 3px inset #69441f; background: #30271d; box-shadow: inset 0 0 5px rgba(0,0,0,.65), 0 0 0 2px rgba(215,166,84,.25); }
+.coin-static-fallback__coins b { position: absolute; top: 7px; right: 10px; font: 18px var(--serif); }
 .casting-progress { position: absolute; left: 34px; bottom: 36px; z-index: 8; display: flex; flex-direction: column; gap: 12px; align-items: flex-start; color: #5d5f59; }
 .progress-title { font: 12px var(--serif); letter-spacing: .16em; }
 .hexagram-lines { display: flex; flex-direction: column; gap: 10px; width: 122px; }

@@ -13,15 +13,16 @@ describe('起卦会话', () => {
 
   it('同一 tossId 只能确认一次', () => {
     const prepared = prepareToss(createSession('考试是否通过', 'study'), createToss(['text', 'text', 'reverse']), 'seed-a');
-    const first = advanceCurrentToss(prepared, prepared.currentToss!.id);
-    const repeated = advanceCurrentToss(first, prepared.currentToss!.id);
+    const transaction = { at: '2026-07-12T00:00:01.000Z' };
+    const first = advanceCurrentToss(prepared, prepared.currentToss!.id, transaction);
+    const repeated = advanceCurrentToss(first, prepared.currentToss!.id, transaction);
     expect(first.tosses).toHaveLength(1);
     expect(repeated).toBe(first);
   });
 
   it('过期 tossId 返回原会话对象', () => {
     const prepared = prepareToss(createSession('考试是否通过', 'study'), createToss(['text', 'text', 'reverse']), 'seed-a');
-    const advanced = advanceCurrentToss(prepared, 'stale-toss-id');
+    const advanced = advanceCurrentToss(prepared, 'stale-toss-id', { at: '2026-07-12T00:00:01.000Z' });
     expect(advanced).toBe(prepared);
     expect(advanced.tosses).toHaveLength(0);
   });
@@ -29,21 +30,32 @@ describe('起卦会话', () => {
   it('同时收到下一爻结果和视觉种子时一次完成确认与准备', () => {
     const prepared = prepareToss(createSession('考试是否通过', 'study'), createToss(['text', 'text', 'reverse']), 'seed-a');
     const nextToss = createToss(['text', 'reverse', 'reverse']);
-    const advanced = advanceCurrentToss(prepared, prepared.currentToss!.id, nextToss, 'seed-b');
+    const advanced = advanceCurrentToss(prepared, prepared.currentToss!.id, {
+      at: '2026-07-12T00:00:01.000Z',
+      next: { toss: nextToss, visualSeed: 'seed-b', id: 'next-toss-id' },
+    });
     expect(advanced.tosses).toHaveLength(1);
     expect(advanced.currentToss).toMatchObject({
       ...nextToss,
+      id: 'next-toss-id',
       lineIndex: 2,
       visualSeed: 'seed-b',
     });
   });
 
-  it('缺少任一下一爻参数时原子推进不产生中间态', () => {
+  it('相同会话与 transaction 重放得到完全一致的身份和确认时间', () => {
     const nextToss = createToss(['text', 'reverse', 'reverse']);
-    const withoutSeed = prepareToss(createSession('考试是否通过', 'study'), createToss(['text', 'text', 'reverse']), 'seed-a');
-    const withoutToss = prepareToss(createSession('考试是否通过', 'study'), createToss(['text', 'text', 'reverse']), 'seed-a');
-    expect(advanceCurrentToss(withoutSeed, withoutSeed.currentToss!.id, nextToss)).toBe(withoutSeed);
-    expect(advanceCurrentToss(withoutToss, withoutToss.currentToss!.id, undefined, 'seed-b')).toBe(withoutToss);
+    const prepared = prepareToss(createSession('考试是否通过', 'study'), createToss(['text', 'text', 'reverse']), 'seed-a');
+    const transaction = {
+      at: '2026-07-12T00:00:01.000Z',
+      next: { toss: nextToss, visualSeed: 'seed-b', id: 'deterministic-next' },
+    };
+    const first = advanceCurrentToss(prepared, prepared.currentToss!.id, transaction);
+    const replay = advanceCurrentToss(prepared, prepared.currentToss!.id, transaction);
+    expect(replay).toEqual(first);
+    expect(first.tosses[0].confirmedAt).toBe(transaction.at);
+    expect(first.currentToss?.id).toBe('deterministic-next');
+    expect(first.updatedAt).toBe(transaction.at);
   });
 
   it('第六爻确认成卦后忽略下一爻参数', () => {
@@ -55,8 +67,14 @@ describe('起卦会话', () => {
     const completed = advanceCurrentToss(
       prepared,
       prepared.currentToss!.id,
-      createToss(['reverse', 'reverse', 'reverse']),
-      'seed-6',
+      {
+        at: '2026-07-12T00:00:06.000Z',
+        next: {
+          toss: createToss(['reverse', 'reverse', 'reverse']),
+          visualSeed: 'seed-6',
+          id: 'must-be-ignored',
+        },
+      },
     );
     expect(completed.status).toBe('complete');
     expect(completed.tosses).toHaveLength(6);

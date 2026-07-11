@@ -17,6 +17,15 @@ export interface PreparedToss extends Toss {
   visualSeed: string;
 }
 
+export interface AdvanceCurrentTossTransaction {
+  at: string;
+  next?: {
+    toss: Toss;
+    visualSeed: string;
+    id: string;
+  };
+}
+
 export interface ChatMessage {
   id: string;
   role: 'user' | 'assistant';
@@ -66,25 +75,29 @@ export function prepareToss(
   session: DivinationSession,
   toss: Toss,
   visualSeed: string,
+  identity: { id?: string; at?: string } = {},
 ): DivinationSession {
   if (session.status === 'complete' || session.tosses.length >= 6 || session.currentToss) return session;
   return {
     ...session,
     currentToss: {
       ...toss,
-      id: crypto.randomUUID(),
+      id: identity.id ?? crypto.randomUUID(),
       lineIndex: session.tosses.length + 1,
       visualSeed,
     },
-    updatedAt: new Date().toISOString(),
+    updatedAt: identity.at ?? new Date().toISOString(),
   };
 }
 
-export function confirmCurrentToss(session: DivinationSession): DivinationSession {
+export function confirmCurrentToss(
+  session: DivinationSession,
+  confirmedAt = new Date().toISOString(),
+): DivinationSession {
   if (session.status === 'complete' || !session.currentToss) return session;
   const confirmed: TossRecord = {
     ...session.currentToss,
-    confirmedAt: new Date().toISOString(),
+    confirmedAt,
   };
   const tosses = [...session.tosses, confirmed];
   const complete = tosses.length === 6;
@@ -94,23 +107,26 @@ export function confirmCurrentToss(session: DivinationSession): DivinationSessio
     currentToss: undefined,
     status: complete ? 'complete' : 'casting',
     plate: complete ? buildPlate(tosses.map((item) => item.value), new Date(session.castAt)) : undefined,
-    updatedAt: new Date().toISOString(),
+    updatedAt: confirmedAt,
   };
 }
 
 export function advanceCurrentToss(
   session: DivinationSession,
   expectedTossId: string,
-  nextToss?: Toss,
-  nextVisualSeed?: string,
+  transaction: AdvanceCurrentTossTransaction,
 ): DivinationSession {
   if (session.currentToss?.id !== expectedTossId) return session;
-  if ((nextToss === undefined) !== (nextVisualSeed === undefined)) return session;
 
-  const confirmed = confirmCurrentToss(session);
-  if (confirmed.status === 'complete' || nextToss === undefined || nextVisualSeed === undefined) return confirmed;
+  const confirmed = confirmCurrentToss(session, transaction.at);
+  if (confirmed.status === 'complete' || !transaction.next) return confirmed;
 
-  return prepareToss(confirmed, nextToss, nextVisualSeed);
+  return prepareToss(
+    confirmed,
+    transaction.next.toss,
+    transaction.next.visualSeed,
+    { id: transaction.next.id, at: transaction.at },
+  );
 }
 
 export function withAnalysis(session: DivinationSession, analysis: AnalysisReport): DivinationSession {

@@ -1,5 +1,6 @@
-import { act, fireEvent, render, screen, waitFor } from '@testing-library/react';
+import { act, fireEvent, render, screen, waitFor, within } from '@testing-library/react';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
+import { DEFAULT_RITUAL_HANDS_MANIFEST } from '../features/ritual/ritualAssets';
 import type { DivinationSession } from '../lib/session';
 import { RitualScreen } from './RitualScreen';
 
@@ -9,9 +10,30 @@ const rig = vi.hoisted(() => ({
   snapToEnd: vi.fn(),
   invalidate: vi.fn(),
 }));
+
 const sceneHarness = vi.hoisted(() => ({
   deferReady: false,
-  onRigReady: undefined as ((value: typeof rig) => void) | undefined,
+  throwError: false,
+  suspend: false,
+  pending: null as Promise<void> | null,
+  resolvePending: null as (() => void) | null,
+  callbacks: new Map<string, (value: typeof rig) => void>(),
+}));
+
+const timelineHarness = vi.hoisted(() => ({
+  controllers: [] as Array<{
+    tossId: string;
+    coinRig: typeof rig;
+    killed: boolean;
+    options: {
+      reducedMotion: boolean;
+      onPhase?(phase: 'release' | 'airborne' | 'landing' | 'reveal'): void;
+      onComplete?(): void;
+    };
+    complete(): void;
+    finish: ReturnType<typeof vi.fn>;
+    kill: ReturnType<typeof vi.fn>;
+  }>,
 }));
 
 vi.mock('./CoinScene', async () => {
@@ -23,14 +45,17 @@ vi.mock('./CoinScene', async () => {
       lineIndex: number;
       tossId: string;
       visualSeed: string;
-      onRigReady?(value: typeof rig): void;
+      onRigReady(value: typeof rig): void;
     }) => {
-      sceneHarness.onRigReady = props.onRigReady;
+      sceneHarness.callbacks.set(props.tossId, props.onRigReady);
       useEffect(() => {
-        if (!sceneHarness.deferReady) props.onRigReady?.(rig);
+        if (!sceneHarness.deferReady) props.onRigReady(rig);
       }, [props.onRigReady, props.tossId]);
+      if (sceneHarness.suspend && sceneHarness.pending) throw sceneHarness.pending;
+      if (sceneHarness.throwError) throw new Error('WebGL context unavailable');
       return (
         <div
+          aria-hidden="true"
           data-active={String(props.active)}
           data-faces={props.faces.join(',')}
           data-line-index={props.lineIndex}
@@ -43,93 +68,242 @@ vi.mock('./CoinScene', async () => {
   };
 });
 
-const session: DivinationSession = {
-  id: 'session-1',
-  question: '静态交接测试',
-  category: 'career',
-  castAt: '2026-07-12T00:00:00.000Z',
-  updatedAt: '2026-07-12T00:00:00.000Z',
-  status: 'casting',
-  tosses: [],
-  messages: [],
-  currentToss: {
-    id: 'toss-static-handoff',
-    visualSeed: 'ritual-screen-seed',
-    lineIndex: 1,
-    faces: ['text', 'reverse', 'text'],
-    value: 7,
-    label: '少阳',
-    moving: false,
-    baseYang: true,
-    changedYang: true,
-  },
-};
+vi.mock('../features/ritual/createRitualTimeline', () => {
+  const snap = (targets: {
+    closedHands: HTMLElement;
+    openHands: HTMLElement;
+    inkCover: HTMLElement;
+    coinRig: typeof rig;
+    setMediaProgress(progress: number): void;
+  }) => {
+    targets.closedHands.style.opacity = '0';
+    targets.openHands.style.opacity = '1';
+    targets.inkCover.style.opacity = '0';
+    targets.setMediaProgress(1);
+    targets.coinRig.setProgress(1);
+    targets.coinRig.invalidate();
+  };
+  return {
+    snapRitualTargetsToEnd: vi.fn(snap),
+    createRitualTimeline: vi.fn((targets, options) => {
+      let completed = false;
+      let progress = 0;
+      const controller = {
+        tossId: '',
+        coinRig: targets.coinRig,
+        killed: false,
+        options,
+        complete() {
+          if (controller.killed || completed) return;
+          completed = true;
+          progress = 1;
+          snap(targets);
+          options.onComplete?.();
+        },
+        play: vi.fn(() => {
+          if (options.reducedMotion) controller.complete();
+        }),
+        finish: vi.fn(() => controller.complete()),
+        restart: vi.fn(),
+        seek: vi.fn(),
+        seekProgress: vi.fn((next: number) => { progress = next; }),
+        kill: vi.fn(() => { controller.killed = true; }),
+        dispose: vi.fn(() => { controller.killed = true; }),
+        getProgress: vi.fn(() => progress),
+        getPlaybackDuration: vi.fn(() => options.reducedMotion ? 0.2 : 3.2),
+        getLabels: vi.fn(() => ({})),
+        isKilled: vi.fn(() => controller.killed),
+      };
+      timelineHarness.controllers.push(controller);
+      return controller;
+    }),
+  };
+});
 
-const nextSession: DivinationSession = {
-  ...session,
-  updatedAt: '2026-07-12T00:01:00.000Z',
-  tosses: [{
-    ...session.currentToss!,
-    confirmedAt: '2026-07-12T00:00:30.000Z',
-  }],
-  currentToss: {
-    ...session.currentToss!,
-    id: 'toss-static-handoff-next',
-    lineIndex: 2,
-  },
-};
+function preparedSession(
+  id = 'toss-a',
+  lineIndex = 1,
+  tosses: DivinationSession['tosses'] = [],
+): DivinationSession {
+  return {
+    id: 'session-1',
+    question: '静态交接测试',
+    category: 'career',
+    castAt: '2026-07-12T00:00:00.000Z',
+    updatedAt: '2026-07-12T00:00:00.000Z',
+    status: 'casting',
+    tosses,
+    messages: [],
+    currentToss: {
+      id,
+      visualSeed: `seed-${id}`,
+      lineIndex,
+      faces: ['text', 'reverse', 'text'],
+      value: 7,
+      label: '少阳',
+      moving: false,
+      baseYang: true,
+      changedYang: true,
+    },
+  };
+}
+
+function stage(): HTMLButtonElement {
+  return screen.getByRole('button', { name: /起卦动画/ });
+}
+
+function realControllers() {
+  return timelineHarness.controllers.filter((controller) => controller.coinRig === rig);
+}
 
 beforeEach(() => {
   vi.clearAllMocks();
+  timelineHarness.controllers.splice(0);
   sceneHarness.deferReady = false;
-  sceneHarness.onRigReady = undefined;
+  sceneHarness.throwError = false;
+  sceneHarness.suspend = false;
+  sceneHarness.pending = new Promise<void>((resolve) => {
+    sceneHarness.resolvePending = resolve;
+  });
+  sceneHarness.callbacks.clear();
+  globalThis.fetch = vi.fn().mockResolvedValue({
+    ok: true,
+    json: vi.fn().mockResolvedValue(DEFAULT_RITUAL_HANDS_MANIFEST),
+  });
+  window.matchMedia = vi.fn().mockReturnValue({
+    matches: false,
+    addEventListener: vi.fn(),
+    removeEventListener: vi.fn(),
+  });
 });
 
-describe('RitualScreen 到 CoinRig 的静态交接', () => {
-  it('传递本轮身份，settled 后只 snapToEnd 并把场景切到 demand', async () => {
-    render(<RitualScreen session={session} onConfirm={vi.fn()} />);
-    const scene = await screen.findByTestId('coin-scene-stub');
+describe('RitualScreen 原子动画与确认', () => {
+  it('末帧前持续锁定且不向可访问结果泄露币面，槽位与结果 DOM 始终存在', async () => {
+    render(<RitualScreen session={preparedSession()} onConfirm={vi.fn()} />);
 
-    expect(scene).toHaveAttribute('data-toss-id', 'toss-static-handoff');
-    expect(scene).toHaveAttribute('data-visual-seed', 'ritual-screen-seed');
-    expect(scene).toHaveAttribute('data-faces', 'text,reverse,text');
-    expect(scene).toHaveAttribute('data-line-index', '1');
-    expect(scene).toHaveAttribute('data-active', 'true');
+    const confirm = screen.getByRole('button', { name: '定此爻' });
+    const results = document.querySelector<HTMLElement>('.coin-accessible-results');
+    expect(confirm).toBeDisabled();
+    expect(results).not.toBeNull();
+    expect(document.querySelector('.ritual-confirm-slot > .ritual-confirm')).toBe(confirm);
+    expect(within(results!).queryByText('字')).not.toBeInTheDocument();
+    expect(within(results!).queryByText('背')).not.toBeInTheDocument();
+    expect(stage()).toHaveAttribute('aria-label', expect.stringContaining('准备'));
 
-    fireEvent.click(screen.getByRole('button', { name: '起卦动画，点击可直接查看结果' }));
-
-    await waitFor(() => expect(rig.snapToEnd).toHaveBeenCalledTimes(1));
-    expect(scene).toHaveAttribute('data-active', 'false');
-    expect(rig.setProgress).not.toHaveBeenCalled();
+    await waitFor(() => expect(realControllers()).toHaveLength(1));
+    act(() => realControllers()[0].complete());
+    expect(confirm).toBeEnabled();
+    expect(within(results!).getAllByText(/字|背/)).toHaveLength(3);
+    expect(stage()).toHaveAttribute('aria-label', expect.stringContaining('已落定'));
   });
 
-  it('用户先跳过动画、rig 后就绪时仍只落定一次', async () => {
+  it('rig 就绪前 skip 只挂起，rig 到达后先写 CoinRig 末帧再解锁按钮', async () => {
     sceneHarness.deferReady = true;
-    render(<RitualScreen session={session} onConfirm={vi.fn()} />);
-    await screen.findByTestId('coin-scene-stub');
+    render(<RitualScreen session={preparedSession('skip-before-rig')} onConfirm={vi.fn()} />);
+    fireEvent.click(stage());
 
-    fireEvent.click(screen.getByRole('button', { name: '起卦动画，点击可直接查看结果' }));
-    expect(rig.snapToEnd).not.toHaveBeenCalled();
+    const confirm = screen.getByRole('button', { name: '定此爻' });
+    expect(confirm).toBeDisabled();
+    expect(timelineHarness.controllers).toHaveLength(0);
 
-    act(() => sceneHarness.onRigReady?.(rig));
+    await waitFor(() => expect(sceneHarness.callbacks.has('skip-before-rig')).toBe(true));
+    act(() => sceneHarness.callbacks.get('skip-before-rig')?.(rig));
 
-    expect(rig.snapToEnd).toHaveBeenCalledTimes(1);
-    expect(rig.setProgress).not.toHaveBeenCalled();
+    await waitFor(() => expect(confirm).toBeEnabled());
+    expect(rig.setProgress).toHaveBeenLastCalledWith(1);
+    expect(rig.invalidate).toHaveBeenCalled();
+    expect(screen.getByTestId('coin-scene-stub')).toHaveAttribute('data-active', 'false');
   });
 
-  it('上一轮已 settled 时，新 tossId 不会继承旧轮末帧', async () => {
+  it('相同 faces 的新 tossId 会完整重新锁定，旧完成回调不能解锁新轮', async () => {
     const onConfirm = vi.fn();
-    const { rerender } = render(<RitualScreen session={session} onConfirm={onConfirm} />);
+    const { rerender } = render(<RitualScreen session={preparedSession('toss-a')} onConfirm={onConfirm} />);
+    await waitFor(() => expect(realControllers()).toHaveLength(1));
+    fireEvent.click(stage());
+    expect(screen.getByRole('button', { name: '定此爻' })).toBeEnabled();
+
+    rerender(<RitualScreen session={preparedSession('toss-b', 2)} onConfirm={onConfirm} />);
+    expect(screen.getByRole('button', { name: '定此爻' })).toBeDisabled();
+    await waitFor(() => expect(realControllers()).toHaveLength(2));
+    act(() => realControllers()[0].options.onComplete?.());
+    expect(screen.getByRole('button', { name: '定此爻' })).toBeDisabled();
+
+    fireEvent.click(stage());
+    expect(screen.getByRole('button', { name: '定此爻' })).toBeEnabled();
+    expect(screen.getByTestId('coin-scene-stub')).toHaveAttribute('data-toss-id', 'toss-b');
+  });
+
+  it('拒绝旧 lazy rig 迟到回调，同一 tick 双击确认只提交一次 expectedTossId', async () => {
+    sceneHarness.deferReady = true;
+    const onConfirm = vi.fn();
+    const { rerender } = render(<RitualScreen session={preparedSession('old-toss')} onConfirm={onConfirm} />);
+    await waitFor(() => expect(sceneHarness.callbacks.has('old-toss')).toBe(true));
+    const oldReady = sceneHarness.callbacks.get('old-toss')!;
+
+    rerender(<RitualScreen session={preparedSession('new-toss', 2)} onConfirm={onConfirm} />);
+    await waitFor(() => expect(sceneHarness.callbacks.has('new-toss')).toBe(true));
+    act(() => oldReady(rig));
+    expect(realControllers()).toHaveLength(0);
+    act(() => sceneHarness.callbacks.get('new-toss')?.(rig));
+    await waitFor(() => expect(realControllers()).toHaveLength(1));
+    fireEvent.click(stage());
+
+    const confirm = screen.getByRole('button', { name: '定此爻' });
+    act(() => {
+      fireEvent.click(confirm);
+      fireEvent.click(confirm);
+    });
+    expect(onConfirm).toHaveBeenCalledTimes(1);
+    expect(onConfirm).toHaveBeenCalledWith('new-toss');
+    expect(confirm).toBeDisabled();
+  });
+
+  it('reduced motion 仍经统一 controller 同步到末帧', async () => {
+    window.matchMedia = vi.fn().mockReturnValue({
+      matches: true,
+      addEventListener: vi.fn(),
+      removeEventListener: vi.fn(),
+    });
+    render(<RitualScreen session={preparedSession('reduced')} onConfirm={vi.fn()} />);
+
+    await waitFor(() => expect(screen.getByRole('button', { name: '定此爻' })).toBeEnabled());
+    expect(timelineHarness.controllers[0].options.reducedMotion).toBe(true);
+    expect(rig.setProgress).toHaveBeenLastCalledWith(1);
+  });
+
+  it('CoinScene/WebGL 失败时显示真实错误降级并用静态 rig 完成流程', async () => {
+    sceneHarness.throwError = true;
+    const consoleError = vi.spyOn(console, 'error').mockImplementation(() => undefined);
+    render(<RitualScreen session={preparedSession('webgl-fallback')} onConfirm={vi.fn()} />);
+
+    expect(await screen.findByRole('status')).toHaveTextContent('静态铜钱');
+    fireEvent.click(stage());
+    await waitFor(() => expect(screen.getByRole('button', { name: '定此爻' })).toBeEnabled());
+    expect(consoleError).toHaveBeenCalled();
+    consoleError.mockRestore();
+  });
+
+  it('lazy CoinScene 挂起时静态 rig 可 skip/confirm，真实 rig 后到仍同步末帧', async () => {
+    sceneHarness.suspend = true;
+    const onConfirm = vi.fn();
+    render(<RitualScreen session={preparedSession('lazy-pending')} onConfirm={onConfirm} />);
+
+    expect(await screen.findByText(/正在唤醒 3D 铜钱/)).toHaveAttribute('role', 'status');
+    fireEvent.click(stage());
+    const confirm = await screen.findByRole('button', { name: '定此爻' });
+    await waitFor(() => expect(confirm).toBeEnabled());
+    fireEvent.click(confirm);
+    expect(onConfirm).toHaveBeenCalledWith('lazy-pending');
+
+    rig.setProgress.mockClear();
+    sceneHarness.suspend = false;
+    await act(async () => {
+      sceneHarness.resolvePending?.();
+      await sceneHarness.pending;
+    });
+
     await screen.findByTestId('coin-scene-stub');
-    fireEvent.click(screen.getByRole('button', { name: '起卦动画，点击可直接查看结果' }));
-    await waitFor(() => expect(rig.snapToEnd).toHaveBeenCalledTimes(1));
-    rig.snapToEnd.mockClear();
-
-    rerender(<RitualScreen session={nextSession} onConfirm={onConfirm} />);
-
-    const scene = await screen.findByTestId('coin-scene-stub');
-    await waitFor(() => expect(scene).toHaveAttribute('data-active', 'true'));
-    expect(scene).toHaveAttribute('data-toss-id', 'toss-static-handoff-next');
-    expect(rig.snapToEnd).not.toHaveBeenCalled();
+    await waitFor(() => expect(rig.setProgress).toHaveBeenLastCalledWith(1));
+    expect(confirm).toBeDisabled();
   });
 });
