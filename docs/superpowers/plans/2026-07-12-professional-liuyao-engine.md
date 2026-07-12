@@ -849,13 +849,31 @@ git commit -m "feat(domain): 展示十二长生并约束辅助神煞"
 - Create: `src/domain/liuyao/use-god.test.ts`
 - Create: `src/domain/liuyao/facts/use-god-effects.ts`
 - Create: `src/domain/liuyao/facts/use-god-effects.test.ts`
+- Create: `src/domain/liuyao/rules/use-god-core-v1.ts`
+- Create: `src/domain/liuyao/rules/use-god-registry.ts`
+- Create: `docs/domain/use-god-core-v1-review.md`
+- Create: `docs/domain/reviews/use-god-core-v1-review-a.md`
+- Create: `docs/domain/reviews/use-god-core-v1-review-b.md`
+- Create: `scripts/review-use-god-candidate.mjs`
+- Modify: `src/domain/liuyao/model.ts`
 - Modify: `src/domain/liuyao/facts/derive.ts`
+- Modify: `src/domain/liuyao/rules/model.ts`
+- Modify: `src/domain/liuyao/rules/default-context.ts`
 - Modify: `src/domain/liuyao/rules/registry.ts`
+- Modify: `src/domain/liuyao/plate.test.ts`
 - Modify: `src/domain/liuyao/index.ts`
 
 **Interfaces:**
-- Consumes: `resolveUseGod({ question, category, explicitIntentId, plate, ruleContext })`。
-- Produces: `UseGodSelection`；只有 `resolved` 时才派生元神、忌神、仇神 facts。
+- Consumes: `resolveUseGod({ question, category, explicitIntentId, subjectRelation?, explicitTarget?, plate, ruleContext, facts })`。
+- Produces: 独立受审 `use_god_core_v1`、具体 `UseGodSelection`、完整飞伏 facts；只有单一 `resolved` 用神时才派生元神、忌神、仇神。
+
+**执行前决议：**
+
+- “学业功名/事业/感情”只能是类别或 intent 标签，`UseGodCandidate.relation` 永远是父母/官鬼/妻财/子孙/兄弟之一，`primary.entity` 永远是具体本卦爻、真实化爻或伏神。
+- 候选层级固定为本卦明爻 → 真实动爻化爻 → 宫首伏神；静爻 changed facet 永不参与，上一层非空就不查下一层。
+- 两现章的择旺、择动、避空破紧接着有反例，默认不得自动选唯一候选；删除 100/50 分数，改用非评价性的 `candidateSource/sourceTier/features`。同层一个才 resolved，两个以上 ambiguous。
+- 世应只在明确自占、疏远他人或双方互动时直接选；普通六亲两现不得因持世/应自动优先。世应互动用 pair 模式，不伪造单主用神。
+- 伏神可否直接采用存在书内冲突；默认只作为前两层全空时的 `disputed` 最后候选。伏神是否有力另生成条件 facts，不能反过来删除候选身份。
 
 - [ ] **Step 1: 写“学业功名不是用神”的红灯测试**
 
@@ -896,76 +914,113 @@ it.each([
 });
 ```
 
-- [ ] **Step 2: 写明现、伏藏、多现测试**
+- [ ] **Step 2: 写问意映射、世应与澄清测试**
+
+硬编码 oracle 至少覆盖：职位/功名→官鬼（兼看父母）；合同批文、学习文书→父母；考试名次→官鬼（兼看父母）；项目收益/钱财→妻财；女性传统配偶角色→妻财；男性传统配偶角色→官鬼；关系互动→世应 pair；本人健康/出行→世；失物钱财→妻财、文书车辆衣物→父母、动物→子孙。泛化“事业项目”“婚恋”“他人健康/行踪”“代占”“失物”“other.explicit 无 target”必须 `needs-user-input`，不得从类别、姓名或性别猜。
+
+- [ ] **Step 3: 写明现、真实化爻、伏藏与多现测试**
 
 ```ts
-it('uses a reviewed hidden spirit only when the target relation is absent from visible lines', () => {
-  const selection = resolveUseGod(useGodFixture({ visible: [], hidden: ['妻财'] }));
-  expect(selection.primary?.entity.type).toBe('hidden-spirit');
+it('uses only true changed lines before considering a hidden spirit', () => {
+  const selection = resolveUseGod(useGodFixture({
+    visible: [],
+    trueChanged: ['妻财'],
+    staticChanged: ['妻财'],
+    hidden: ['妻财'],
+  }));
+  expect(selection.primary).toMatchObject({ candidateSource: 'true-changed', sourceTier: 1 });
+  expect(selection.primary?.entity).toMatchObject({ type: 'line', side: 'changed' });
 });
 
-it('retains multiple candidates instead of letting AI silently choose', () => {
-  const selection = resolveUseGod(useGodFixture({ visible: ['官鬼', '官鬼'], hidden: [] }));
+it('retains multiple candidates regardless of moving/shi/void features', () => {
+  const selection = resolveUseGod(twoVisibleOfficialGhostsWithOppositeFeatures());
   expect(selection.status).toBe('ambiguous');
   expect(selection.primary).toBeNull();
   expect(selection.candidates).toHaveLength(2);
+  expect(selection.candidates.every((candidate) => !('score' in candidate))).toBe(true);
 });
 ```
 
-- [ ] **Step 3: 运行红灯**
+- [ ] **Step 4: 运行红灯**
 
 Run: `cmd /c npx vitest run src/domain/liuyao/use-god.test.ts src/domain/liuyao/facts/use-god-effects.test.ts`
 Expected: FAIL。
 
-- [ ] **Step 4: 实现先问意、后六亲、再具体爻**
+- [ ] **Step 5: 冻结独立 artifact 并完成双审**
+
+`use-god-core-v1` canonical artifact 固定：intent→`targetSelector` 映射与澄清规则；明爻/真实化爻/伏神候选层级；默认禁用“两现自动择旺择动”；伏神最后采用与“再占不用伏神”的书内分歧；五行元忌仇矩阵；飞伏五向关系；依赖 Task 3/4/5/6 artifact hashes；每项 authority/certainty/sourceRefs/version。
+
+来源固定《增删卜易》用神 `oldid=2100295`、六亲主事 `2100700`、用元忌仇 `2100299`、元忌有无力 `2100301`、相生 `2100315`、相克 `2100316`、整书飞伏/两现/行人 `2572918`，以及《卜筮正宗》固定本地 corpus/交叉定位。先保持 `unverified + fixture-only`，两个互不读结果的独立自动审阅核同一 hash 后才能 `independent-automated + project-enabled`。
+
+- [ ] **Step 6: 实现先问意、后 selector、再具体实体**
 
 `use-god.ts` 使用显式表，不返回自由文本 focus：
 
 ```ts
 const INTENT_RULES = {
   'study.learning-or-documents': {
-    primaryRelation: '父母',
+    targetSelector: { kind: 'six-relation', relation: '父母' },
     relatedRelations: ['官鬼'],
     ruleIds: ['use-god:study-documents:v1'],
   },
   'study.exam-rank-or-admission': {
-    primaryRelation: '官鬼',
+    targetSelector: { kind: 'six-relation', relation: '官鬼' },
     relatedRelations: ['父母'],
     ruleIds: ['use-god:study-rank:v1'],
   },
   'career.rank-or-office': {
-    primaryRelation: '官鬼',
+    targetSelector: { kind: 'six-relation', relation: '官鬼' },
     relatedRelations: ['父母'],
     ruleIds: ['use-god:career-office:v1'],
   },
-  'wealth.income-or-asset': {
-    primaryRelation: '妻财',
+  'health.self': {
+    targetSelector: { kind: 'role', role: '世' },
+    relatedRelations: ['官鬼', '子孙'],
+    ruleIds: ['use-god:health-self:v1'],
+  },
+  'relationship.relationship-dynamic': {
+    targetSelector: { kind: 'shi-ying-pair' },
+    relatedRelations: [],
+    ruleIds: ['use-god:relationship-pair:v1'],
+  },
+  'wealth.money-or-valuables': {
+    targetSelector: { kind: 'six-relation', relation: '妻财' },
     relatedRelations: ['子孙', '兄弟'],
     ruleIds: ['use-god:wealth:v1'],
   },
 } as const;
 ```
 
-`study` 没有 `explicitIntentId` 时必须澄清。明爻候选先于伏神；只有一个候选才 `resolved`；多个候选在没有已受审“两现”规则时 `ambiguous`。候选评分固定为明爻 100、伏神 50，只表达可见性优先级，不被包装成旺衰吉凶。
+关系 selector 按层级取候选：base 用 `relationToBasePalace`；changed 只遍历 `moving===true` 并同样用 `relationToBasePalace`；hidden 只在前两层空时取 palace-head candidate。role selector 只查本卦世/应。pair selector 返回 `selectionMode='shi-ying-pair'`、两个 `focusEntities`、`primary=null`。`other.explicit` 必须带可验证 explicitTarget；`travel.other-person/health.other-person` 必须带 subjectRelation 或 distant-other。
 
-- [ ] **Step 5: 派生元神、忌神、仇神**
+候选不含数值评分；稳定排序仅按 `sourceTier → line position → side → entity id`。features 记录动静、世应及相关 factIds，但不得参与默认唯一化。伏神唯一候选 certainty 为 disputed；无候选为 unresolved。
+
+- [ ] **Step 7: 生成完整飞伏事实与已决用神的元忌仇**
+
+所有潜在伏神都生成飞伏元素事实，不依赖是否选中：飞生伏、飞克伏、伏生飞、伏克飞、同元素。结构方向为 computed；“能否出伏/是否有力”用 supported/suppressed/mixed 条件事实表达，不能删除伏神候选，也不直接写吉凶。
 
 `use-god-effects.ts` 根据已选用神元素建立：
 
 - 生用神者 → `is-source-spirit`；
 - 克用神者 → `is-avoid-spirit`；
 - 生忌神且克元神者 → `is-enemy-spirit`；
-- 飞神与伏神 → `flying-generates-hidden/flying-controls-hidden`。
+- 伏生飞/伏克飞 → `hidden-generates-flying/hidden-controls-flying`。
 
-`needs-user-input/ambiguous` 不产出元忌仇事实，避免对多个候选混算。
+五种用神六亲的黄金矩阵固定为：父母→元官鬼/忌妻财/仇子孙；兄弟→元父母/忌官鬼/仇妻财；子孙→元兄弟/忌父母/仇官鬼；妻财→元子孙/忌兄弟/仇父母；官鬼→元妻财/忌子孙/仇兄弟。运行时只用五行关系计算，禁止维护第二套业务表。默认作用对象限本卦、真实化爻、月日柱及已选伏神；年时柱不提升为元忌仇。`needs-user-input/ambiguous/unresolved` 和 pair 模式不产出元忌仇；主用神若 disputed，后续 facts 继承 disputed。
 
-- [ ] **Step 6: 验证与提交**
+- [ ] **Step 8: 加入矩阵、门禁、稳定性与 AI 边界测试**
 
-Run: `cmd /c npx vitest run src/domain/liuyao/use-god.test.ts src/domain/liuyao/facts && npm run typecheck`
-Expected: PASS；任何 `UseGodSelection.primary` 都指向具体 line 或 hidden-spirit。
+测试全部 intent 映射/澄清；明爻 `n=0..6` 与真实化爻 `k=0..m`，静态 changed 永不参与；两现无论动静旺衰空破世应都不自动唯一化；伏神只在前两层空且唯一时采用；五元素与五六亲元忌仇双 oracle；飞伏 5×5；非 resolved 不生元忌仇；deep clone/候选输入顺序/ID 稳定；bundle/source/hash/profile/manifest 门禁。断言序列化结果永不含自由文本 `"relation":"学业功名"` 或 candidate score。
+
+AI/Case 契约测试预埋：AI 不能修改 selection；intent/subject context/explicitTarget/primary/profile 任一变化都必须进入 Task 8 case hash 输入。
+
+- [ ] **Step 9: 验证与提交**
+
+Run: `cmd /c npx vitest run src/domain/liuyao/use-god.test.ts src/domain/liuyao/facts/use-god-effects.test.ts src/domain/liuyao/plate.test.ts && npm run build:domain && npm run typecheck`
+Expected: PASS；任何 single resolved primary 都指向具体 base/changed line 或 hidden-spirit；其他状态没有伪造主用神，Task 3–6 hashes 不变。
 
 ```bash
-git add src/domain/liuyao
+git add src/domain/liuyao docs/domain/use-god-core-v1-review.md docs/domain/reviews/use-god-core-v1-review-a.md docs/domain/reviews/use-god-core-v1-review-b.md scripts/review-use-god-candidate.mjs
 git commit -m "feat(domain): 按问意选择具体用神与元忌仇"
 ```
 

@@ -189,8 +189,15 @@ export interface RuleContext {
   };
   useGodProfile: {
     id: 'explicit_intent_first_v1';
+    bundle: {
+      id: 'use_god_core_v1';
+      version: '1.0.0';
+      artifactHash: string;
+    };
     ambiguousIntent: 'ask-user';
-    multipleCandidates: 'retain-ranked-candidates';
+    candidateTiers: readonly ['base-visible', 'true-changed', 'palace-head-hidden'];
+    multipleCandidates: 'retain-all-without-auto-choice';
+    hiddenSpiritPolicy: 'yehe-last-resort-disputed-v1';
   };
   sources: readonly RuleSourceRef[];
 }
@@ -343,6 +350,7 @@ export type FactRelation =
   | 'is-growth-stage' | 'is-six-beast' | 'is-shen-sha'
   | 'is-source-spirit' | 'is-avoid-spirit' | 'is-enemy-spirit'
   | 'flying-generates-hidden' | 'flying-controls-hidden'
+  | 'hidden-generates-flying' | 'hidden-controls-flying'
   | 'holds-shi' | 'holds-ying';
 
 export interface DerivedFact {
@@ -390,14 +398,16 @@ export interface DerivedFact {
 ```ts
 export type QuestionIntentId =
   | 'career.rank-or-office'
-  | 'career.project-or-contract'
+  | 'career.contract-or-approval'
+  | 'career.project-profit'
   | 'study.learning-or-documents'
   | 'study.exam-rank-or-admission'
-  | 'wealth.income-or-asset'
+  | 'wealth.money-or-valuables'
   | 'relationship.female-partner'
   | 'relationship.male-partner'
   | 'relationship.relationship-dynamic'
   | 'health.self'
+  | 'health.other-person'
   | 'lost-item.money-or-valuables'
   | 'lost-item.documents-or-vehicle'
   | 'lost-item.animal'
@@ -405,22 +415,43 @@ export type QuestionIntentId =
   | 'travel.other-person'
   | 'other.explicit';
 
+export type UseGodTargetSelector =
+  | { kind: 'six-relation'; relation: SixRelation }
+  | { kind: 'role'; role: '世' | '应' }
+  | { kind: 'shi-ying-pair' }
+  | { kind: 'explicit-entity'; entity: UseGodEntityRef };
+
 export interface UseGodCandidate {
   entity: UseGodEntityRef;
   relation: SixRelation;
-  role: 'primary' | 'secondary' | 'supporting';
-  score: number;
+  candidateSource: 'base-visible' | 'true-changed' | 'palace-head-hidden';
+  sourceTier: 0 | 1 | 2;
+  features: Readonly<{
+    moving: boolean;
+    role: '世' | '应' | null;
+    factIds: readonly string[];
+  }>;
+  authority: RuleAuthority;
+  certainty: 'computed' | 'conditional' | 'disputed';
+  profileId: string;
+  sourceRefs: readonly string[];
+  conditions: readonly string[];
   reasonRuleIds: readonly string[];
 }
 
 export interface UseGodSelection {
-  status: 'resolved' | 'ambiguous' | 'needs-user-input';
+  status: 'resolved' | 'ambiguous' | 'needs-user-input' | 'unresolved';
+  selectionMode: 'single' | 'shi-ying-pair';
   intent: {
     id: QuestionIntentId;
     label: string;
     selectedBy: 'explicit-user-choice' | 'deterministic-rule';
+    subjectRelation?: SixRelation | 'distant-other';
+    explicitTarget?: UseGodTargetSelector;
   } | null;
+  targetSelector: UseGodTargetSelector | null;
   primary: UseGodCandidate | null;
+  focusEntities: readonly UseGodEntityRef[];
   candidates: readonly UseGodCandidate[];
   relatedRelations: readonly SixRelation[];
   clarification?: {
@@ -435,12 +466,13 @@ export interface UseGodSelection {
 
 1. 先确定“谁问谁、问什么结果”，再映射六亲；类别只能缩小意图范围，不能直接产出用神。
 2. `study` 至少区分“学习/文书”和“考试名次/录取”。前者候选父母，后者候选官鬼并兼看父母；用户只写“学业功名”时返回 `needs-user-input`。
-3. 在本卦明爻中寻找目标六亲；未现时按受审飞伏规则寻找伏神。
-4. 多现时保留所有候选和评分依据；没有足够受审规则拉开差异时返回 `ambiguous`，不能让 AI 猜一个。
-5. `primary.entity` 必须是具体 `line` 或 `hidden-spirit`；“官鬼”“父母”只是六亲类型，仍不能代替具体候选。
-6. AI 可以解释 `UseGodSelection`，不能修改它。
+3. 候选层级固定为本卦明爻 → 真实动爻的化爻 → 宫首伏神；静爻为了完整展示而存在的 changed facet 永不参与。只有上一层完全没有目标时才查下一层。
+4. 同层只有一个候选才 `resolved`；两个以上全部保留并返回 `ambiguous`。动静、旺衰、持世应、空破只能作为 features，不能用无一手依据的分数自动选唯一候选。
+5. `primary.entity` 必须是具体 line/hidden-spirit；世应互动则使用 `selectionMode='shi-ying-pair' + focusEntities`，不能伪造一个单主用神。
+6. 伏神候选本身与伏神有无力量分离；默认允许在前两层皆空时列唯一伏神，但因原书同时有“再占不用伏神”的主张，必须标 `disputed`。
+7. AI 可以解释 `UseGodSelection`，不能新增、更换或替用户从多候选中挑一个。
 
-宽泛类别的默认处理：婚恋未说明所问对象时，在妻财、官鬼与世应观察之间请求澄清；寻物未说明钱财、文书车服或动物时请求澄清；问他人行踪未说明与问卦者的关系时请求澄清；自占健康和自身出行以世爻作为具体候选，不把世爻强行改写成某个固定六亲。
+宽泛类别的默认处理：事业必须区分职位、合同批文或项目收益；婚恋未说明角色时在妻财、官鬼与世应互动之间澄清；寻物未说明钱财、文书车服或动物时澄清；代占、他人健康或行踪未说明关系时澄清；自占健康和自身出行以世爻作为具体候选，不把世爻强行改写成固定六亲。`other.explicit` 必须同时提交 `explicitTarget`，单有 intent ID 仍不足。
 
 ### 4.6 DivinationCaseV2
 
