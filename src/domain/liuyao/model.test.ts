@@ -2,6 +2,8 @@ import { describe, expect, it } from 'vitest';
 import {
   BASE_RULE_CONTEXT,
   DEFAULT_RULE_CONTEXT,
+  EFFECTS_SOURCE_EVIDENCE_CAPSULES,
+  LIUYAO_EFFECTS_V1_ARTIFACT_HASH,
   GROWTH_SHENSHA_CORE_V1_ARTIFACT_HASH,
   GROWTH_SHENSHA_SOURCE_EVIDENCE_CAPSULES,
   REGISTERED_RULE_SOURCES,
@@ -30,6 +32,20 @@ describe('V2 domain contract', () => {
         harmPolicy: 'liuren-six-harms-v1',
         breakPolicy: 'cross-source-common-four-breaks-v1',
         punishmentPolicy: 'liuren-directional-core-v1',
+      },
+      effectsProfile: {
+        id: 'yehe_effects_v1',
+        bundle: {
+          id: 'liuyao_effects_v1',
+          version: '1.0.0',
+          artifactHash: LIUYAO_EFFECTS_V1_ARTIFACT_HASH,
+        },
+        monthStrengthPolicy: 'yehe-month-status-v1',
+        dayClashPolicy: 'yehe-static-strength-aware-v1',
+        advanceRetreatPolicy: 'yehe-seven-pair-v1',
+        transitionGrowthPolicy: 'five-element-forward-earth-follows-water-v1',
+        threeHarmonyPolicy: 'yehe-restricted-members-day-and-transition-tomb-v1',
+        fanFuPolicy: 'yehe-corresponding-branches-v1',
       },
       growthProfile: {
         bundle: {
@@ -65,6 +81,8 @@ describe('V2 domain contract', () => {
 
   it('deep-freezes nested profiles and source arrays', () => {
     expect(Object.isFrozen(BASE_RULE_CONTEXT.calendarProfile)).toBe(true);
+    expect(Object.isFrozen(BASE_RULE_CONTEXT.effectsProfile)).toBe(true);
+    expect(Object.isFrozen(BASE_RULE_CONTEXT.effectsProfile.bundle)).toBe(true);
     expect(Object.isFrozen(BASE_RULE_CONTEXT.growthProfile.bundle)).toBe(true);
     expect(Object.isFrozen(BASE_RULE_CONTEXT.sixSpiritProfile)).toBe(true);
     expect(Object.isFrozen(BASE_RULE_CONTEXT.sixSpiritProfile.bundle)).toBe(true);
@@ -80,12 +98,15 @@ describe('V2 domain contract', () => {
       rulePackVersion: '2.0.0',
     });
     expect(DEFAULT_RULE_CONTEXT.sources).toEqual(REGISTERED_RULE_SOURCES);
-    expect(DEFAULT_RULE_CONTEXT.sources).toEqual([
+    const allSources = [
       ...RULE_SOURCE_EVIDENCE_CAPSULES.map(({ ref }) => ref),
       ...RELATION_SOURCE_EVIDENCE_CAPSULES.map(({ ref }) => ref),
       ...GROWTH_SHENSHA_SOURCE_EVIDENCE_CAPSULES.map(({ ref }) => ref),
-    ]);
-    expect(DEFAULT_RULE_CONTEXT.sources).toHaveLength(18);
+      ...EFFECTS_SOURCE_EVIDENCE_CAPSULES.map(({ ref }) => ref),
+    ];
+    expect(DEFAULT_RULE_CONTEXT.sources.map(({ id }) => id))
+      .toEqual([...new Set(allSources.map(({ id }) => id))]);
+    expect(DEFAULT_RULE_CONTEXT.sources).toHaveLength(26);
     expect(Object.isFrozen(DEFAULT_RULE_CONTEXT)).toBe(true);
     expect(Object.isFrozen(DEFAULT_RULE_CONTEXT.sources)).toBe(true);
     expect(DEFAULT_RULE_CONTEXT.sources.every(Object.isFrozen)).toBe(true);

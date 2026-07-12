@@ -53,6 +53,22 @@ export interface GrowthShenShaRuleBundleManifest {
   sourceRefs: readonly string[];
 }
 
+export interface EffectsRuleBundleManifest {
+  bundleId: 'liuyao_effects_v1';
+  version: '1.0.0';
+  artifactHash: string;
+  verificationLevel: VerificationLevel;
+  runtimeStatus: RulePackRuntimeStatus;
+  reviews: readonly RuleReviewRecord[];
+  sourceRefs: readonly string[];
+}
+
+export interface EffectsBundleRef {
+  id: 'liuyao_effects_v1';
+  version: '1.0.0';
+  artifactHash: string;
+}
+
 export interface GrowthShenShaBundleRef {
   id: 'growth_shensha_core_v1';
   version: '1.0.0';
@@ -97,11 +113,20 @@ export interface RuleContext {
       version: '1.0.0';
       artifactHash: string;
     };
-    dayClashPolicy: 'strength-aware';
     changedRelationReference: 'base-palace';
     harmPolicy: 'liuren-six-harms-v1';
     breakPolicy: 'cross-source-common-four-breaks-v1';
     punishmentPolicy: 'liuren-directional-core-v1';
+  };
+  effectsProfile: {
+    id: 'yehe_effects_v1';
+    bundle: EffectsBundleRef;
+    monthStrengthPolicy: 'yehe-month-status-v1';
+    dayClashPolicy: 'yehe-static-strength-aware-v1';
+    advanceRetreatPolicy: 'yehe-seven-pair-v1';
+    transitionGrowthPolicy: 'five-element-forward-earth-follows-water-v1';
+    threeHarmonyPolicy: 'yehe-restricted-members-day-and-transition-tomb-v1';
+    fanFuPolicy: 'yehe-corresponding-branches-v1';
   };
   growthProfile: {
     id: 'five-element-forward_v1';

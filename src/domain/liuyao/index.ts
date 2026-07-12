@@ -1,7 +1,36 @@
 export * from './calendar.js';
 export * from './facts/branch-relations.js';
-export * from './facts/derive.js';
+export {
+  deriveEffectsFacts,
+  deriveFacts,
+  enumerateFactComparisons,
+} from './facts/derive.js';
+export type {
+  DeriveEffectsFactsInput,
+  DeriveFactsInput,
+  FactComparison,
+  FactComparisonEntity,
+} from './facts/derive.js';
 export * from './facts/element-relations.js';
+export {
+  EFFECTS_SOURCE_EVIDENCE_CAPSULES,
+  LIUYAO_EFFECTS_V1_ARTIFACT,
+  LIUYAO_EFFECTS_V1_ARTIFACT_HASH,
+  LIUYAO_EFFECTS_V1_CANONICAL_PAYLOAD,
+  LIUYAO_EFFECTS_V1_MANIFEST,
+} from './facts/effects-core-v1.js';
+export type {
+  EffectsSourceEvidenceCapsule,
+  MonthStatus,
+} from './facts/effects-core-v1.js';
+export {
+  EFFECTS_REVIEW_CHECKED_CLAIMS,
+  EFFECTS_REVIEW_REPORT_PATHS,
+} from './facts/effects-manifest-expectations.js';
+export {
+  assertProjectEnabledEffectsBundle,
+  assertProjectEnabledEffectsContext,
+} from './facts/effects-registry.js';
 export {
   deriveGrowthShenShaFacts,
   shenShaBranches,
@@ -36,4 +65,5 @@ export {
   BASE_RULE_CONTEXT,
   DEFAULT_RULE_CONTEXT,
   REGISTERED_RULE_SOURCES,
+  mergeRuleSourceRefs,
 } from './rules/default-context.js';

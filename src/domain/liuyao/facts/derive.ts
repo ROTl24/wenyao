@@ -12,6 +12,10 @@ import { deepFreeze, type LinePosition } from '../rules/tables.js';
 import { branchRelationMatches } from './branch-relations.js';
 import { elementRelation, type ElementRelation } from './element-relations.js';
 import { deriveGrowthShenShaFacts } from './growth-shensha.js';
+import { deriveCalendarEffectsFromTrustedFacts } from './calendar-effects.js';
+import { deriveMovingEffectsFromTrustedFacts } from './moving-effects.js';
+import { deriveFormationsFromTrustedFacts } from './formations.js';
+import { assertProjectEnabledEffectsContext } from './effects-registry.js';
 import { createFactId, stableFacts } from './model.js';
 import {
   assertProjectEnabledRelationContext,
@@ -39,6 +43,11 @@ export interface DeriveFactsInput {
   readonly plate: PlateV2;
   readonly ruleContext: RuleContext;
   readonly useGod?: UseGodSelection;
+}
+
+export interface DeriveEffectsFactsInput {
+  readonly plate: PlateV2;
+  readonly ruleContext: RuleContext;
 }
 
 const PILLAR_ORDER = ['year', 'month', 'day', 'hour'] as const;
@@ -234,19 +243,100 @@ function deriveRelationFactsValidated(input: DeriveFactsInput): readonly Derived
   return stableFacts(facts);
 }
 
+/** @internal 仅供同一领域内核的受信编排；不得经 barrel 或 IPC 暴露。 */
+export function deriveRelationFactsForInternalPipeline(
+  plate: PlateV2,
+  ruleContext: RuleContext,
+): readonly DerivedFact[] {
+  assertPlateV2RuntimeShape(plate);
+  assertProjectEnabledRelationContext(ruleContext);
+  return deriveRelationFactsValidated({ plate, ruleContext });
+}
+
+function deriveEffectsFromTrustedFacts(
+  plate: PlateV2,
+  ruleContext: RuleContext,
+  relationFacts: readonly DerivedFact[],
+  growthFacts: readonly DerivedFact[],
+): readonly DerivedFact[] {
+  const calendarFacts = deriveCalendarEffectsFromTrustedFacts(
+    plate,
+    ruleContext,
+    relationFacts,
+  );
+  const movingFacts = deriveMovingEffectsFromTrustedFacts(
+    plate,
+    ruleContext,
+    relationFacts,
+    growthFacts,
+  );
+  const formationFacts = deriveFormationsFromTrustedFacts(
+    plate,
+    ruleContext,
+    calendarFacts,
+    movingFacts,
+    growthFacts,
+  );
+  return stableFacts([...calendarFacts, ...movingFacts, ...formationFacts]);
+}
+
+interface TrustedFactPipeline {
+  readonly relationFacts: readonly DerivedFact[];
+  readonly growthFacts: readonly DerivedFact[];
+  readonly effectsFacts: readonly DerivedFact[];
+}
+
+function deriveTrustedFactPipeline(
+  plate: PlateV2,
+  ruleContext: RuleContext,
+): TrustedFactPipeline {
+  const relationFacts = deriveRelationFactsForInternalPipeline(plate, ruleContext);
+  const growthFacts = deriveGrowthShenShaFacts({ plate, ruleContext });
+  const effectsFacts = deriveEffectsFromTrustedFacts(
+    plate,
+    ruleContext,
+    relationFacts,
+    growthFacts,
+  );
+  return { relationFacts, growthFacts, effectsFacts };
+}
+
+function assertEffectsInput(input: unknown): asserts input is DeriveEffectsFactsInput {
+  if (input === null || typeof input !== 'object' || Array.isArray(input)) {
+    throw new Error('日月动变派生输入无效');
+  }
+  const keys = Reflect.ownKeys(input);
+  if (
+    keys.length !== 2
+    || !keys.includes('plate')
+    || !keys.includes('ruleContext')
+    || keys.some((key) => key !== 'plate' && key !== 'ruleContext')
+  ) throw new Error('日月动变派生输入无效');
+}
+
+export function deriveEffectsFacts(input: DeriveEffectsFactsInput): readonly DerivedFact[];
+export function deriveEffectsFacts(input: unknown): readonly DerivedFact[] {
+  assertEffectsInput(input);
+  assertPlateV2RuntimeShape(input.plate);
+  assertProjectEnabledEffectsContext(input.ruleContext);
+  return deriveTrustedFactPipeline(input.plate, input.ruleContext).effectsFacts;
+}
+
 export function deriveFacts(input: DeriveFactsInput): readonly DerivedFact[];
 export function deriveFacts(input: unknown): readonly DerivedFact[] {
   const candidate = input !== null && typeof input === 'object' && !Array.isArray(input)
     ? input as Partial<DeriveFactsInput>
     : {};
   assertPlateV2RuntimeShape(candidate.plate);
-  assertProjectEnabledRelationContext(candidate.ruleContext);
+  assertProjectEnabledEffectsContext(candidate.ruleContext);
   const validated = candidate as DeriveFactsInput;
+  const pipeline = deriveTrustedFactPipeline(
+    validated.plate,
+    validated.ruleContext,
+  );
   return stableFacts([
-    ...deriveRelationFactsValidated(validated),
-    ...deriveGrowthShenShaFacts({
-      plate: validated.plate,
-      ruleContext: validated.ruleContext,
-    }),
+    ...pipeline.relationFacts,
+    ...pipeline.growthFacts,
+    ...pipeline.effectsFacts,
   ]);
 }

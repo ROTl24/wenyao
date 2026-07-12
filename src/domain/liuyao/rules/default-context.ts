@@ -6,15 +6,40 @@ import {
   GROWTH_SHENSHA_CORE_V1_ARTIFACT_HASH,
   GROWTH_SHENSHA_SOURCE_EVIDENCE_CAPSULES,
 } from '../facts/growth-shensha-core-v1.js';
-import type { RuleContext } from './model.js';
+import {
+  EFFECTS_SOURCE_EVIDENCE_CAPSULES,
+  LIUYAO_EFFECTS_V1_ARTIFACT_HASH,
+} from '../facts/effects-core-v1.js';
+import type { RuleContext, RuleSourceRef } from './model.js';
 import { deepFreeze } from './tables.js';
 import { RULE_SOURCE_EVIDENCE_CAPSULES } from './wenwang-najia-v2.js';
 
-export const REGISTERED_RULE_SOURCES = deepFreeze([
-  ...RULE_SOURCE_EVIDENCE_CAPSULES.map(({ ref }) => ref),
-  ...RELATION_SOURCE_EVIDENCE_CAPSULES.map(({ ref }) => ref),
-  ...GROWTH_SHENSHA_SOURCE_EVIDENCE_CAPSULES.map(({ ref }) => ref),
-] as const);
+export function mergeRuleSourceRefs(
+  ...groups: readonly (readonly RuleSourceRef[])[]
+): readonly RuleSourceRef[] {
+  const merged = new Map<string, RuleSourceRef>();
+  for (const source of groups.flat()) {
+    const existing = merged.get(source.id);
+    if (!existing) {
+      merged.set(source.id, source);
+      continue;
+    }
+    if (
+      existing.title !== source.title
+      || existing.url !== source.url
+      || existing.locator !== source.locator
+      || existing.contentHash !== source.contentHash
+    ) throw new Error(`规则来源 ID 冲突：${source.id}`);
+  }
+  return [...merged.values()];
+}
+
+export const REGISTERED_RULE_SOURCES = deepFreeze(mergeRuleSourceRefs(
+  RULE_SOURCE_EVIDENCE_CAPSULES.map(({ ref }) => ref),
+  RELATION_SOURCE_EVIDENCE_CAPSULES.map(({ ref }) => ref),
+  GROWTH_SHENSHA_SOURCE_EVIDENCE_CAPSULES.map(({ ref }) => ref),
+  EFFECTS_SOURCE_EVIDENCE_CAPSULES.map(({ ref }) => ref),
+));
 
 export const BASE_RULE_CONTEXT = deepFreeze({
   schemaVersion: '2.0.0',
@@ -35,11 +60,24 @@ export const BASE_RULE_CONTEXT = deepFreeze({
       version: '1.0.0',
       artifactHash: RELATION_CORE_V1_ARTIFACT_HASH,
     },
-    dayClashPolicy: 'strength-aware',
     changedRelationReference: 'base-palace',
     harmPolicy: 'liuren-six-harms-v1',
     breakPolicy: 'cross-source-common-four-breaks-v1',
     punishmentPolicy: 'liuren-directional-core-v1',
+  },
+  effectsProfile: {
+    id: 'yehe_effects_v1',
+    bundle: {
+      id: 'liuyao_effects_v1',
+      version: '1.0.0',
+      artifactHash: LIUYAO_EFFECTS_V1_ARTIFACT_HASH,
+    },
+    monthStrengthPolicy: 'yehe-month-status-v1',
+    dayClashPolicy: 'yehe-static-strength-aware-v1',
+    advanceRetreatPolicy: 'yehe-seven-pair-v1',
+    transitionGrowthPolicy: 'five-element-forward-earth-follows-water-v1',
+    threeHarmonyPolicy: 'yehe-restricted-members-day-and-transition-tomb-v1',
+    fanFuPolicy: 'yehe-corresponding-branches-v1',
   },
   growthProfile: {
     id: 'five-element-forward_v1',

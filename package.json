@@ -18,6 +18,7 @@
     "build:knowledge": "node scripts/build-knowledge.mjs",
     "eval:retrieval": "node scripts/evaluate-retrieval.cjs",
     "build:vectors": "node scripts/build-vectors.cjs",
+    "review:effects": "npm run build:domain && node scripts/review-effects-candidate.mjs",
     "verify:models": "node scripts/verify-stack.cjs",
     "verify:retrieval": "node scripts/verify-retrieval.cjs",
     "verify:analysis": "node scripts/verify-analysis.cjs",

@@ -148,10 +148,10 @@ export interface RuleContext {
       artifactHash: string;
     };
     monthStrengthPolicy: 'yehe-month-status-v1';
-    dayClashPolicy: 'yehe-strength-aware-v1';
+    dayClashPolicy: 'yehe-static-strength-aware-v1';
     advanceRetreatPolicy: 'yehe-seven-pair-v1';
     transitionGrowthPolicy: 'five-element-forward-earth-follows-water-v1';
-    threeHarmonyPolicy: 'yehe-restricted-members-v1';
+    threeHarmonyPolicy: 'yehe-restricted-members-day-and-transition-tomb-v1';
     fanFuPolicy: 'yehe-corresponding-branches-v1';
   };
   growthProfile: {

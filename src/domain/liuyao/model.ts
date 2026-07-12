@@ -115,9 +115,10 @@ export type UseGodEntityRef = Extract<EntityRef, { type: 'line' | 'hidden-spirit
 export type FactRelation =
   | 'generates' | 'controls' | 'same-element'
   | 'clashes' | 'combines' | 'punishes' | 'harms' | 'breaks'
-  | 'is-void' | 'is-month-break' | 'is-day-break' | 'is-dark-moving'
+  | 'has-month-status' | 'is-void' | 'is-month-break' | 'is-day-break' | 'is-dark-moving'
   | 'returns-generate' | 'returns-control' | 'returns-clash' | 'returns-combine'
-  | 'advances' | 'retreats' | 'forms-three-harmony'
+  | 'advances' | 'retreats' | 'changes-to-tomb' | 'changes-to-absolute'
+  | 'forms-three-harmony' | 'has-three-harmony-candidate'
   | 'is-six-harmony' | 'is-six-clash' | 'is-fan-yin' | 'is-fu-yin'
   | 'is-growth-stage' | 'is-six-beast' | 'is-shen-sha'
   | 'is-source-spirit' | 'is-avoid-spirit' | 'is-enemy-spirit'

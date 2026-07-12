@@ -4,6 +4,7 @@ import { describe, expect, it } from 'vitest';
 import { GOLDEN_HEXAGRAMS, GOLDEN_TRIGRAM_BITS, type GoldenHexagram } from './__fixtures__/golden-hexagrams.js';
 import { GOLDEN_CHANGED_RELATION_CASES, GOLDEN_NAJIA } from './__fixtures__/golden-najia.js';
 import { GROWTH_SHENSHA_SOURCE_EVIDENCE_CAPSULES } from './facts/growth-shensha-core-v1.js';
+import { EFFECTS_SOURCE_EVIDENCE_CAPSULES } from './facts/effects-core-v1.js';
 import { RELATION_SOURCE_EVIDENCE_CAPSULES } from './facts/relation-core-v1.js';
 import type { PlateV2, SixRelation } from './model.js';
 import { buildPlateV2 } from './plate.js';
@@ -341,6 +342,7 @@ describe('buildPlateV2', () => {
       ...RULE_SOURCE_EVIDENCE_CAPSULES.map(({ ref }) => ref),
       ...RELATION_SOURCE_EVIDENCE_CAPSULES.map(({ ref }) => ref),
       ...GROWTH_SHENSHA_SOURCE_EVIDENCE_CAPSULES.map(({ ref }) => ref),
+      ...EFFECTS_SOURCE_EVIDENCE_CAPSULES.map(({ ref }) => ref),
     ]));
 
     const structuralOnlyContext = {
@@ -428,6 +430,10 @@ describe('buildPlateV2', () => {
     ['relation', (context: RuleContext) => ({
       ...context,
       relationProfile: { ...context.relationProfile, changedRelationReference: 'changed-palace' },
+    })],
+    ['effects', (context: RuleContext) => ({
+      ...context,
+      effectsProfile: { ...context.effectsProfile, dayClashPolicy: 'forged' },
     })],
     ['growth', (context: RuleContext) => ({
       ...context,
