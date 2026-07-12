@@ -3,7 +3,23 @@
   "version": "0.1.0",
   "private": true,
   "author": "WenYao",
-  "description": "水墨六爻占卜 Windows 桌面应用",
+  "description": "可追溯、可复核、证据驱动的水墨六爻 Windows 桌面应用",
+  "homepage": "https://github.com/ROTl24/wenyao#readme",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/ROTl24/wenyao.git"
+  },
+  "bugs": {
+    "url": "https://github.com/ROTl24/wenyao/issues"
+  },
+  "keywords": [
+    "liuyao",
+    "iching",
+    "divination",
+    "electron",
+    "threejs",
+    "qwen"
+  ],
   "main": "electron/main.cjs",
   "type": "module",
   "scripts": {

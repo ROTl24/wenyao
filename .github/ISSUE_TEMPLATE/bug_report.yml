@@ -1,0 +1,47 @@
+name: 缺陷报告
+description: 报告可复现的排盘、动画、界面或数据问题
+title: "[Bug] "
+labels: [bug]
+body:
+  - type: markdown
+    attributes:
+      value: 感谢反馈。涉及排盘差异时，请尽量附上完整六次投币值、起卦时间和采用的规则来源。
+  - type: textarea
+    id: description
+    attributes:
+      label: 问题描述
+      description: 实际发生了什么？你原本期待什么？
+    validations:
+      required: true
+  - type: textarea
+    id: steps
+    attributes:
+      label: 复现步骤
+      placeholder: |
+        1. 输入占问……
+        2. 连续投掷……
+        3. 打开结果页……
+    validations:
+      required: true
+  - type: input
+    id: version
+    attributes:
+      label: 问爻版本或提交号
+  - type: input
+    id: windows
+    attributes:
+      label: Windows 版本
+  - type: textarea
+    id: evidence
+    attributes:
+      label: 截图、日志或规则出处
+      description: 请先移除 API 密钥、个人占问和其他敏感信息。
+  - type: checkboxes
+    id: checks
+    attributes:
+      label: 提交前确认
+      options:
+        - label: 我已搜索现有 Issue，没有找到相同问题。
+          required: true
+        - label: 我已移除密钥和个人敏感信息。
+          required: true

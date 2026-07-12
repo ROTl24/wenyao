@@ -1,0 +1,36 @@
+name: 功能建议
+description: 提出产品、规则、证据或交互改进
+title: "[Feature] "
+labels: [enhancement]
+body:
+  - type: textarea
+    id: problem
+    attributes:
+      label: 你希望解决什么问题？
+      description: 请先描述场景和问题，不必急着指定实现方式。
+    validations:
+      required: true
+  - type: textarea
+    id: proposal
+    attributes:
+      label: 建议方案
+    validations:
+      required: true
+  - type: textarea
+    id: sources
+    attributes:
+      label: 规则来源或参考产品
+      description: 涉及六爻规则时，请附书名、版本、章节、页码或可复核链接。
+  - type: dropdown
+    id: scope
+    attributes:
+      label: 主要范围
+      options:
+        - 排盘与历法
+        - 用神与关系事实
+        - 古籍与证据检索
+        - AI 解读
+        - 动画与视觉
+        - 桌面端与工程体验
+    validations:
+      required: true
