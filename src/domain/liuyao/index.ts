@@ -1,7 +1,11 @@
 export * from './calendar.js';
+export * from './canonical.js';
+export * from './case.js';
+export * from './legacy.js';
 export { resolveUseGod } from './use-god.js';
 export type { ResolveUseGodInput } from './use-god.js';
 export * from './facts/branch-relations.js';
+export * from './facts/fact-index.js';
 export {
   deriveEffectsFacts,
   deriveFacts,

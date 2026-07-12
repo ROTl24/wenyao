@@ -6,7 +6,7 @@ export interface AnalysisClaim {
   confidence: Confidence;
 }
 
-export interface AnalysisReport {
+interface AnalysisReportCore {
   mode: 'cloud' | 'local';
   summary: string;
   focus: string;
@@ -25,3 +25,15 @@ export interface AnalysisReport {
     warnings: string[];
   };
 }
+
+export interface UnversionedAnalysisReport extends AnalysisReportCore {
+  validation?: never;
+}
+
+export interface LegacyUnverifiedAnalysisReport extends AnalysisReportCore {
+  validation: {
+    status: 'legacy-unverified';
+  };
+}
+
+export type AnalysisReport = UnversionedAnalysisReport | LegacyUnverifiedAnalysisReport;

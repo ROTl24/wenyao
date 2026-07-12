@@ -301,8 +301,9 @@ export interface DivinationCaseV2 {
   schemaVersion: '2.0.0';
   sessionId: string;
   question: string;
-  category: string;
+  category: QuestionCategory;
   ruleContext: RuleContext;
+  ruleContextHash: string;
   plate: PlateV2;
   useGod: UseGodSelection;
   facts: readonly DerivedFact[];

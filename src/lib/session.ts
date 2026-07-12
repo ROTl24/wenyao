@@ -1,4 +1,6 @@
 import { buildPlate, type DivinationPlate, type Toss } from './divination';
+import type { DivinationCaseV2 } from '../domain/liuyao/model';
+import type { RuleContext } from '../domain/liuyao/rules/model';
 import type { AnalysisReport } from './types';
 
 export type SessionCategory = 'career' | 'wealth' | 'relationship' | 'health' | 'study' | 'lost_item' | 'travel' | 'other';
@@ -45,6 +47,10 @@ export interface DivinationSession {
   tosses: TossRecord[];
   currentToss?: PreparedToss;
   plate?: DivinationPlate;
+  caseSnapshot?: DivinationCaseV2;
+  ruleContext?: RuleContext;
+  migrationVersion?: 2;
+  migrationState?: 'clean' | 'needs-review';
   analysis?: AnalysisReport;
   messages: ChatMessage[];
 }
