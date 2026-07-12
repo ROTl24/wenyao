@@ -55,6 +55,8 @@ test('main startup loads canonical evidence fail-closed, migrates before Store a
   assert.match(main, /domain:\s*domainRuntime,\s*\n\s*reportV2,/);
   assert.match(main, /evidenceCatalog,\s*\n\s*searchCorpus/);
   assert.match(main, /ruleIds:\s*Array\.isArray\(payload\.ruleIds\)\s*\?\s*payload\.ruleIds\s*:\s*\[\]/);
+  assert.match(main, /return\s*\{\s*candidateRefs:\s*found\.candidateRefs,\s*diagnostics:\s*found\.diagnostics,?\s*\}/);
+  assert.doesNotMatch(main, /return\s*\{[^}]*evidence:\s*found\.evidence/s);
   assert.doesNotMatch(main, /function\s+(?:loadCorpus|hashCorpus)\b/);
   assert.doesNotMatch(main, /\b(?:createLocalReport|validateCloudReport|analyzeCloud|followUpCloud)\b/);
   assert.doesNotMatch(main, /ipcMain\.handle\(['"](?:ai:|retrieval:search)/);

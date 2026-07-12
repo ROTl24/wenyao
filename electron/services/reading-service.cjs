@@ -218,10 +218,26 @@ function createReadingService({
     );
   }
 
-  async function assertCurrentRequestedRuleIds(retrievalDiagnostics, contract, reportV2) {
+  async function assertCurrentRetrievalDiagnostics(retrievalDiagnostics, contract, reportV2) {
     const context = await retrievalContextFor(contract, reportV2);
     if (!isDeepStrictEqual(retrievalDiagnostics.requestedRuleIds, context.ruleIds)) {
       throw new Error('retrievalDiagnostics.requestedRuleIds 与当前 Case 规则上下文不一致');
+    }
+    const supportedRuleIds = new Set(evidenceCatalog.entries.flatMap((entry) => entry.supportsRuleIds));
+    const expectedMatchedRuleIds = context.ruleIds.filter((ruleId) => supportedRuleIds.has(ruleId));
+    if (!isDeepStrictEqual(retrievalDiagnostics.matchedRuleIds, expectedMatchedRuleIds)) {
+      throw new Error('retrievalDiagnostics.matchedRuleIds 与当前 canonical catalog 不一致');
+    }
+    if (expectedMatchedRuleIds.length > 0 && !retrievalDiagnostics.ruleCandidateIds?.length) {
+      throw new Error('retrievalDiagnostics 缺少规则证据候选');
+    }
+    const canonicalById = new Map(evidenceCatalog.entries.map((entry) => [entry.id, entry]));
+    for (const evidenceId of retrievalDiagnostics.ruleCandidateIds || []) {
+      const canonical = canonicalById.get(evidenceId);
+      if (
+        !canonical
+        || !canonical.supportsRuleIds.some((ruleId) => expectedMatchedRuleIds.includes(ruleId))
+      ) throw new Error('retrievalDiagnostics.ruleCandidateIds 与当前 canonical catalog 不一致');
     }
     return context;
   }
@@ -231,7 +247,7 @@ function createReadingService({
       value,
       analysisBundleOptions(domain, contract.modelContract.caseHash),
     );
-    await assertCurrentRequestedRuleIds(outer.retrievalDiagnostics, contract, reportV2);
+    await assertCurrentRetrievalDiagnostics(outer.retrievalDiagnostics, contract, reportV2);
     const canonicalEvidence = hydratePersistedEvidence(outer.canonicalEvidence);
     if (typeof reportV2.validateAnalysisReportV2 !== 'function') {
       throw new Error('ReadingService 缺少 validateAnalysisReportV2');
@@ -266,7 +282,7 @@ function createReadingService({
       value,
       followUpBundleOptions(domain, contract.modelContract.caseHash),
     );
-    await assertCurrentRequestedRuleIds(outer.retrievalDiagnostics, contract, reportV2);
+    await assertCurrentRetrievalDiagnostics(outer.retrievalDiagnostics, contract, reportV2);
     const canonicalEvidence = hydratePersistedEvidence(outer.canonicalEvidence);
     if (typeof reportV2.validateFollowUpV2 !== 'function') {
       throw new Error('ReadingService 缺少 validateFollowUpV2');
@@ -330,9 +346,7 @@ function createReadingService({
     if (!isRecord(found) || !isRecord(found.diagnostics)) {
       throw new Error('检索服务没有返回有效 diagnostics');
     }
-    if (!isDeepStrictEqual(found.diagnostics.requestedRuleIds, context.ruleIds)) {
-      throw new Error('检索 diagnostics 未精确回显当前请求 ruleIds');
-    }
+    await assertCurrentRetrievalDiagnostics(found.diagnostics, contract, reportV2);
     const hydrated = evidenceCatalog.hydrate(found.candidateRefs, 8);
     return {
       canonicalEvidence: hydrated.evidence,
@@ -451,7 +465,7 @@ function createReadingService({
       );
       if (cached) {
         const latest = store.getSession(sessionId);
-        const latestCase = assertCurrentCase(latest, expectedFactSetHash);
+        assertCurrentCase(latest, expectedFactSetHash);
         const latestCached = await maybeCoherentAnalysisBundle(
           latest.analysisBundle,
           contract,
@@ -459,9 +473,14 @@ function createReadingService({
           reportV2,
         );
         if (latestCached) {
+          const finalSession = store.getSession(sessionId);
+          const finalCase = assertCurrentCase(finalSession, expectedFactSetHash);
+          if (!isDeepStrictEqual(finalSession.analysisBundle, latest.analysisBundle)) {
+            throw new Error('权威分析缓存状态已变化');
+          }
           return {
-            caseSnapshot: structuredClone(latestCase),
-            runtimeTrust: latest.caseRuntimeTrust || 'authoritative',
+            caseSnapshot: structuredClone(finalCase),
+            runtimeTrust: finalSession.caseRuntimeTrust || 'authoritative',
             analysisBundle: latestCached,
           };
         }

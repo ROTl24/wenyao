@@ -162,7 +162,7 @@ async function searchCorpus(payload) {
   const settings = store.getRawSettings();
   const apiKey = getApiKey();
   const client = apiKey ? createAlibabaClient({ apiKey, baseUrl: validateBaseUrl(settings.baseUrl), rerankUrl: settings.rerankUrl }) : null;
-  return hybridSearch({
+  const found = await hybridSearch({
     corpus,
     query: String(payload.query || ''),
     domainTerms: Array.isArray(payload.domainTerms) ? payload.domainTerms : [],
@@ -171,6 +171,10 @@ async function searchCorpus(payload) {
     vectorSearch: client && vectorIndex?.vectors ? async (query) => vectorIndex.search((await client.embed([query], { model: settings.embeddingModel, dimensions: 1024, signal: AbortSignal.timeout(30000) }))[0], 40) : undefined,
     rerank: client && settings.rerankUrl ? async (query, documents) => client.rerank(query, documents, { model: settings.rerankModel, topN: 12, signal: AbortSignal.timeout(60000) }) : undefined,
   });
+  return {
+    candidateRefs: found.candidateRefs,
+    diagnostics: found.diagnostics,
+  };
 }
 
 function cloudProviderConfigured() {
@@ -326,7 +330,13 @@ app.whenReady().then(async () => {
   if (process.argv.includes('--verify-hybrid-retrieval')) {
     void searchCorpus({ query: '近期事业升迁是否有机会', domainTerms: ['事业', '功名', '官鬼', '世爻'], limit: 8 })
       .then((result) => {
-        process.stdout.write(`${JSON.stringify({ diagnostics: result.diagnostics, evidence: result.evidence.map((item) => ({ id: item.id, source: item.source, kind: item.knowledgeKind })) })}\n`);
+        const hydrated = evidenceCatalog.hydrate(result.candidateRefs, 8);
+        process.stdout.write(`${JSON.stringify({
+          diagnostics: result.diagnostics,
+          evidence: hydrated.evidence.map((item) => ({
+            id: item.id, source: item.source, kind: item.knowledgeKind,
+          })),
+        })}\n`);
         app.quit();
       })
       .catch((error) => { process.stderr.write(`${error.message}\n`); app.exit(1); });

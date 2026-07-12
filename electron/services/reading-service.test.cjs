@@ -89,7 +89,7 @@ function canonicalEvidence(overrides = {}) {
     tags: ['事业'],
     knowledgeKind: 'rule',
     topics: ['事业'],
-    supportsRuleIds: [],
+    supportsRuleIds: ['six-spirit-by-day-stem/v1'],
     ...overrides,
   });
 }
@@ -151,10 +151,18 @@ function harness(store, overrides = {}) {
     searchCorpus: async (input) => {
       state.searches += 1;
       state.searchInputs.push(structuredClone(input));
+      const supported = new Set(evidenceCatalog.entries.flatMap((entry) => entry.supportsRuleIds));
+      const matchedRuleIds = input.ruleIds.filter((ruleId) => supported.has(ruleId));
       return {
         candidateRefs: [{ id: 'evidence:career', rank: 1 }],
         evidence: [{ id: 'evidence:career', text: '搜索层伪造正文', supportsRuleIds: ['forged'] }],
-        diagnostics: diagnostics({ requestedRuleIds: input.ruleIds }),
+        diagnostics: diagnostics({
+          requestedRuleIds: input.ruleIds,
+          overrides: {
+            matchedRuleIds,
+            ruleCandidateIds: matchedRuleIds.length ? ['evidence:career'] : [],
+          },
+        }),
       };
     },
     analyzeCloudV2: async () => {
@@ -209,7 +217,7 @@ test('buildCase late persistence cannot recreate a deleted session', async () =>
   await started.promise;
   store.deleteSession('deleted-during-build');
   gate.resolve();
-  await assert.rejects(pending, /会话已删除/);
+  await assert.rejects(pending, /会话(?:已删除|不存在)/);
   assert.equal(store.getSession('deleted-during-build'), null);
 });
 
@@ -346,6 +354,18 @@ test('cache revalidation rejects wrong case/corpus, semantic forgery and same-ID
     (bundle) => { bundle.corpusRef.hash = 'e'.repeat(64); },
     (bundle) => { bundle.retrievalDiagnostics.requestedRuleIds = []; },
     (bundle) => {
+      bundle.retrievalDiagnostics.matchedRuleIds = [];
+      bundle.retrievalDiagnostics.ruleCandidateIds = [];
+    },
+    (bundle) => {
+      bundle.retrievalDiagnostics.matchedRuleIds = [
+        bundle.retrievalDiagnostics.requestedRuleIds.find((ruleId) => (
+          ruleId !== 'six-spirit-by-day-stem/v1'
+        )),
+      ];
+      bundle.retrievalDiagnostics.ruleCandidateIds = [];
+    },
+    (bundle) => {
       const summary = bundle.report.claims.find((claim) => claim.section === 'summary');
       summary.text = '本卦坤为地，变卦坤为地。';
     },
@@ -366,6 +386,40 @@ test('cache revalidation rejects wrong case/corpus, semantic forgery and same-ID
     assert.equal(state.searches, before + 1);
     assert.deepEqual(rebuilt.analysisBundle, initial.analysisBundle);
   }
+});
+
+test('cache hit cannot return a session deleted during its final semantic revalidation', async () => {
+  const store = createCompletedStore({ id: 'deleted-cache-hit' });
+  const initial = harness(store);
+  const built = await build(initial.service, 'deleted-cache-hit');
+  await initial.service.analyze({
+    sessionId: 'deleted-cache-hit', expectedFactSetHash: built.caseSnapshot.factSetHash,
+  });
+
+  const gate = deferred();
+  const started = deferred();
+  let validations = 0;
+  const delayedReportV2 = {
+    ...domain,
+    async validateAnalysisReportV2(...args) {
+      validations += 1;
+      if (validations === 2) {
+        started.resolve();
+        await gate.promise;
+      }
+      return domain.validateAnalysisReportV2(...args);
+    },
+  };
+  const cached = harness(store, { reportV2: delayedReportV2 });
+  const pending = cached.service.analyze({
+    sessionId: 'deleted-cache-hit', expectedFactSetHash: built.caseSnapshot.factSetHash,
+  });
+  await started.promise;
+  store.deleteSession('deleted-cache-hit');
+  gate.resolve();
+  await assert.rejects(pending, /会话(?:已删除|不存在)/);
+  assert.equal(cached.state.searches, 0);
+  assert.equal(store.getSession('deleted-cache-hit'), null);
 });
 
 test('analysis search/provider/validator/CAS/delete failures are zero-write', async () => {
@@ -391,7 +445,17 @@ test('analysis search/provider/validator/CAS/delete failures are zero-write', as
           diagnostics: diagnostics({ requestedRuleIds: [], candidateCount: 0 }),
         }),
       },
-      error: /diagnostics|ruleIds/,
+      error: /diagnostics|ruleIds/i,
+    },
+    {
+      name: 'forged-matched-rules',
+      overrides: {
+        searchCorpus: async (input) => ({
+          candidateRefs: [],
+          diagnostics: diagnostics({ requestedRuleIds: input.ruleIds, candidateCount: 0 }),
+        }),
+      },
+      error: /matchedRuleIds|规则证据候选|canonical catalog/,
     },
     {
       name: 'validator',
