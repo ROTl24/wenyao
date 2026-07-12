@@ -614,11 +614,14 @@ export interface AnalysisClaimV2 {
   confidence: 'high' | 'medium' | 'low';
 }
 
-export interface AnalysisReportV2 {
+export interface RawAnalysisReportV2 {
   schemaVersion: '2.0.0';
   caseHash: string;
   claims: readonly AnalysisClaimV2[];
   uncertainties: readonly string[];
+}
+
+export interface AnalysisReportV2 extends RawAnalysisReportV2 {
   validation: {
     status: 'validated';
     factCheckPassed: true;
@@ -630,14 +633,19 @@ export interface AnalysisReportV2 {
 
 校验规则：
 
+- raw 输出递归 strict：拒绝额外字段、稀疏/重复数组、空白或重复 ID、非法枚举、超长文本和模型自带的 `validation/generatedAt/mode/pipeline`；
 - `caseHash` 必须等于当前重建 case；
 - 每条非纯行动建议 claim 至少有一个 `factId`；
-- `factId/ruleId/evidenceId` 必须存在于本次 allowlist；
+- `factId/ruleId/evidenceId` 必须存在于本次 allowlist，而且 ruleId 必须由该 claim 引用的 facts 或当前 UseGodSelection 实际支持，不能只在全局存在；
 - 涉及古籍规则、占例或义理的 claim 至少有一个 `evidenceId`；
-- 报告中的当前卦名、爻位、干支、旬空、六亲、世应和动静词元，只能来自该 claim 引用的 facts，不能因为它出现在某条古例 evidence 中就被放行；
+- evidence 先由主进程按 ID 从 corpus 重新 hydrate，renderer 同 ID 的伪正文一律丢弃。知识索引为规则证据增加受构建流程维护的 `supportsRuleIds`；规则 claim 的 evidence 必须与 ruleId 相交，不能只证明“引用存在”；
+- 每个 claim 分别从其引用 facts 建立 token envelope。报告中的当前卦名、爻位、干支、旬空、六亲、世应和动静词元，只能来自本 claim envelope，不能借另一 claim 或古例 evidence 洗白；
+- 引用 disputed fact 的 confidence 只能 low，conditional 最高 medium，只引用 secondary 神煞不得 high；
+- `needs-user-input/unresolved` 只能生成澄清/缺失说明；`ambiguous` 必须列全部同层候选；`shi-ying-pair` 必须同时引用世应两端；hidden disputed 用神不能 high。非 single resolved 不得声称已定单一用神或派生元忌仇；
+- `uncertainties` 不得含具体当前卦事实，或以后升级为同样带引用的 claim；零 fact 的 guidance 一旦出现当前卦词元也必须拒绝；
 - `factCheckPassed/citationCheckPassed` 由校验器产生，输入模型不能设置；
 - 任一失败返回结构化错误，原始模型文本只进诊断日志，不能显示为“已校验”；
-- 本地报告也由同一 facts 和模板生成，删除渲染端与主进程中重复的 `CATEGORY_FOCUS/focusByCategory`。
+- 云端与本地报告都先产生 `RawAnalysisReportV2`，共用同一 FactContract、token extractor、confidence ceiling 与 validator。删除 renderer/main 中重复的 `CATEGORY_FOCUS/focusByCategory/categoryTerms`；本地模板不得把 evidence 原文复制成当前卦判断。
 
 ## 8. 旧会话迁移
 

@@ -1291,10 +1291,15 @@ git commit -m "feat(electron): 主进程权威重建排盘与事实"
 ### Task 10: 重写 AI 事实契约、逐条引用校验与本地报告
 
 **Files:**
+- Create: `electron/services/report-v2.cjs`
+- Create: `electron/services/report-v2.test.cjs`
 - Modify: `electron/services/ai.cjs`
 - Modify: `electron/services/ai.test.cjs`
+- Modify: `electron/services/retrieval.cjs`
+- Modify: `electron/services/retrieval.test.cjs`
 - Modify: `electron/services/reading-service.cjs`
 - Modify: `electron/services/reading-service.test.cjs`
+- Modify: `resources/knowledge-index.json`
 - Modify: `src/lib/types.ts`
 - Delete: `src/lib/localAnalysis.ts`
 - Modify: `src/App.tsx`
@@ -1303,7 +1308,7 @@ git commit -m "feat(electron): 主进程权威重建排盘与事实"
 - Consumes: `analyzeCloudV2({ caseSnapshot, evidence, ... })`、`validateAnalysisReportV2(raw, contract, evidence, validatedAt)`。
 - Produces: `AnalysisReportV2`；每条 claim 引用 fact/rule/evidence；`validation` 只能由 validator 创建。
 
-- [ ] **Step 1: 写伪造事实与古例干支泄漏红灯测试**
+- [ ] **Step 1: 写伪造引用、跨 claim 洗白与古例干支泄漏红灯测试**
 
 ```js
 test('rejects fabricated fact and rule ids', () => {
@@ -1335,9 +1340,11 @@ test('model cannot self-assert validation flags', () => {
 });
 ```
 
-- [ ] **Step 2: 写“用神必须引用 UseGodSelection”的红灯测试**
+再测：合法 factId + 不相关 ruleId；claim A 借 claim B 的事实词元；合法 evidenceId + renderer 伪正文；evidence prompt injection；伪造旬空、世应、月破/日破、动爻；uncertainties 注入当前卦断言；guidance 无 facts 却写具体干支，均拒绝。
 
-用神 claim 引用 `fact:line:...` 和 `use-god:...` 规则才能通过；`caseSnapshot.useGod.status !== 'resolved'` 时禁止模型声称“以某爻为用神”，报告只能产生澄清 claim。
+- [ ] **Step 2: 写所有用神状态与 confidence ceiling 红灯测试**
+
+用神 claim 引用具体 entity facts 和当前 `reasonRuleIds` 才能通过：`needs-user-input/unresolved` 只允许程序澄清或缺失说明；`ambiguous` 必须覆盖全部同层候选；`shi-ying-pair` 必须覆盖两个 focusEntities；single resolved 才能声称已定用神和解释元忌仇；hidden disputed 禁止 high。另测 disputed fact→只能 low、conditional→最高 medium、仅 secondary 神煞→不得 high。
 
 - [ ] **Step 3: 运行红灯**
 
@@ -1346,7 +1353,7 @@ Expected: FAIL。
 
 - [ ] **Step 4: 用 claim 数组替换自由段落**
 
-严格 JSON schema：
+模型只输出 `RawAnalysisReportV2`，严格 JSON schema：
 
 ```js
 const REPORT_V2_SCHEMA = {
@@ -1381,22 +1388,24 @@ const REPORT_V2_SCHEMA = {
 };
 ```
 
-模型不能输出 `validation/generatedAt`。validator 建立有效 ID 集合，逐 claim 校验；当前卦词元只允许来自该 claim 引用 facts 的结构化 values，不再合并 evidence 的干支。
+模型不能输出 `validation/generatedAt/mode/pipeline`。validator 先递归拒绝额外字段、稀疏数组、重复/空白 ID、非法枚举和超限文本；再建立 `factById/ruleIdsByFact/useGodRuleIds/evidenceById`。ruleId 必须由本 claim 引用 facts 或 selection 支持，不能只在全局存在。当前卦词元 envelope 每 claim 单独从 source/target entity 与 facts 构建，不能合并另一 claim 或 evidence 的干支。`validation` 最后由 validator 注入并深冻结。
 
 - [ ] **Step 5: 本地报告使用同一事实图**
 
-实现 `createLocalReportV2(contract, evidence, validatedAt)`，用固定模板把结构化 facts 渲染成 claims。删除 `CATEGORY_FOCUS`、`focusByCategory` 和 `src/lib/localAnalysis.ts`；云端/本地共用 `UseGodSelection`，不再维护两套取用表。
+实现 `createLocalRawReportV2(contract, evidence)`，用固定模板把结构化 facts 渲染成 raw claims，再走与云端完全相同的 token extractor、confidence ceiling 和 validator。删除 `CATEGORY_FOCUS`、`focusByCategory`、`categoryTerms` 和 `src/lib/localAnalysis.ts`；云端/本地共用 `UseGodSelection`，不再维护两套取用表，也不把 evidence 原文复制成当前判断。
 
 当 `useGod.status='needs-user-input'` 时，本地报告只说明需澄清并回传选项；当 facts 不足时把 claim confidence 设为 low，不写“已完成专业综合判断”。
 
-- [ ] **Step 6: ReadingService 在主进程检索**
+- [ ] **Step 6: ReadingService 在主进程检索并 canonical hydrate evidence**
 
-检索词由 question、intent、primary/related relations、moving facts 和 rule IDs 生成；renderer 不再先检索再把 evidence 发回，也不能提供 evidence 正文。`reading.analyze` 返回 `{ caseSnapshot, report, evidence, retrievalDiagnostics }` 并一次持久化。移除公开 `ai:analyze/ai:follow-up/retrieval:search` 业务 channel，只保留 ReadingService 内部调用；Store 拒绝 renderer 写 validated report。
+检索词由 question、intent、targetSelector、primary/related relations、moving facts 和 rule IDs 生成；检索结果先只取 ID，再由主进程 corpus map 重新 hydrate、去重、排序、限量和深冻结。renderer 同 ID 的伪造 text/source/location 一律忽略。`knowledge-index.json` 增加由构建流程维护的 `supportsRuleIds`；古籍规则 claim 的 evidence 必须与 claim.ruleIds 相交，不能用自由 tag 或模型判断替代。
+
+`reading.analyze` 原子返回并持久化 `{ caseSnapshot, report, evidence, retrievalDiagnostics }`，写入前再核 session version/caseHash，防迟到覆盖。移除公开 `ai:analyze/ai:follow-up/retrieval:search` 业务 channel，只保留 ReadingService 内部调用；Store 拒绝 renderer 写 validated report。follow-up 同样从 Store 重读 case/report 与 canonical evidence，并执行当前事实 token 校验。
 
 - [ ] **Step 7: 验证与提交**
 
-Run: `cmd /c npm run test:electron && npm run test:unit && npm run typecheck`
-Expected: PASS；测试中不存在硬编码 `factCheckPassed: true` 的生产路径。
+Run: `cmd /c node --test electron/services/report-v2.test.cjs electron/services/ai.test.cjs electron/services/retrieval.test.cjs electron/services/reading-service.test.cjs && npm run test:unit && npm run typecheck`
+Expected: PASS；22 类伪造/状态/置信度攻击均被拒绝；测试中不存在硬编码 `factCheckPassed: true` 的生产路径，raw 云端输出永不直接显示或持久化为 validated。
 
 ```bash
 git add electron src/App.tsx src/lib/types.ts src/lib/localAnalysis.ts
