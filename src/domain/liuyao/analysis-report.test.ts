@@ -715,6 +715,151 @@ describe('analysis report v2 contract', () => {
     }
   });
 
+  it('carries an active 元神忌神仇神 role across long comma clauses and binds its asserted location', () => {
+    const caseSnapshot = buildCase();
+    const contract = createFactContractV2(caseSnapshot);
+    for (const [label, relation] of [
+      ['元神', 'is-source-spirit'], ['忌神', 'is-avoid-spirit'], ['仇神', 'is-enemy-spirit'],
+    ] as const) {
+      const fact = contract.modelContract.facts.find((candidate) => candidate.relation === relation)!;
+      const sourcePosition = fact.source?.type === 'line' ? Number(fact.source.id.split(':').at(-1)) : 1;
+      const raw = mutableRaw(caseSnapshot);
+      const claim = raw.claims.find(({ section }) => section === 'use-god')!;
+      claim.text = `${label}依据对应事实，经过多层综合研判之后，其具体位置落于本卦${POSITION_TEXT[sourcePosition]}。`;
+      claim.factIds = [...claim.factIds, fact.id, `contract:entity:line:line:${sourcePosition}:base`];
+      claim.ruleIds = [...fact.ruleIds];
+      expect(() => validateAnalysisReportV2(raw, contract, [], VALIDATED_AT), `correct:${label}`).not.toThrow();
+
+      claim.text = `${label}依据对应事实，经过多层综合研判之后，其具体位置落于本卦上爻。`;
+      if (!claim.factIds.includes('contract:entity:line:line:6:base')) {
+        claim.factIds.push('contract:entity:line:line:6:base');
+      }
+      if (sourcePosition === 6) claim.text = `${label}依据对应事实，经过多层综合研判之后，其具体位置落于本卦初爻。`;
+      expect(() => validateAnalysisReportV2(raw, contract, [], VALIDATED_AT), `wrong:${label}`).toThrow(/具体位置|实体|元神|忌神|仇神/);
+
+      claim.text = `${label}依据对应事实，同时本卦上爻只列在旁支说明中。`;
+      expect(() => validateAnalysisReportV2(raw, contract, [], VALIDATED_AT), `incidental:${label}`).not.toThrow();
+    }
+
+    const mixedCase = buildCase({ tossValues: [9, 7, 7, 7, 7, 9] });
+    const mixedContract = createFactContractV2(mixedCase);
+    const sourceSpirit = mixedContract.modelContract.facts.find(({ relation }) => relation === 'is-source-spirit')!;
+    const sourcePosition = sourceSpirit.source?.type === 'line'
+      ? Number(sourceSpirit.source.id.split(':').at(-1))
+      : 2;
+    const connector = mixedContract.modelContract.facts.find((fact) => {
+      const source = fact.source?.type === 'line' ? Number(fact.source.id.split(':').at(-1)) : null;
+      const target = fact.target?.type === 'line' ? Number(fact.target.id.split(':').at(-1)) : null;
+      return (source === sourcePosition && target === 6) || (source === 6 && target === sourcePosition);
+    })!;
+    const mixed = mutableRaw(mixedCase);
+    const mixedClaim = mixed.claims.find(({ section }) => section === 'use-god')!;
+    mixedClaim.factIds = [
+      ...mixedClaim.factIds,
+      sourceSpirit.id,
+      connector.id,
+      `contract:entity:line:line:${sourcePosition}:base`,
+      'contract:entity:line:line:6:base',
+    ];
+    mixedClaim.ruleIds = [...sourceSpirit.ruleIds];
+    mixedClaim.confidence = connector.certainty === 'disputed'
+      ? 'low'
+      : connector.certainty === 'conditional' ? 'medium' : 'high';
+    mixedClaim.text = `元神在本卦上爻且本卦${POSITION_TEXT[sourcePosition]}仅作旁证。`;
+    expect(() => validateAnalysisReportV2(mixed, mixedContract, [], VALIDATED_AT)).toThrow(/元神.*实体|source|具体位置/);
+    mixedClaim.text = `元神在本卦${POSITION_TEXT[sourcePosition]}且本卦上爻发动。`;
+    expect(() => validateAnalysisReportV2(mixed, mixedContract, [], VALIDATED_AT)).not.toThrow();
+  });
+
+  it('rejects bare negative 生克冲合刑害破 while preserving positive and symmetric semantics', () => {
+    const caseSnapshot = buildCase();
+    const contract = createFactContractV2(caseSnapshot);
+    for (const [relation, word] of [
+      ['generates', '生'], ['controls', '克'], ['clashes', '冲'], ['combines', '合'],
+      ['punishes', '刑'], ['harms', '害'], ['breaks', '破'],
+    ] as const) {
+      const fact = contract.modelContract.facts.find((candidate) => (
+        candidate.relation === relation
+        && candidate.sourceLabels.some((label) => label.length >= 2)
+        && candidate.targetLabels.some((label) => label.length >= 2)
+      ))!;
+      const source = fact.sourceLabels.find((label) => label.length >= 2)!;
+      const target = fact.targetLabels.find((label) => label.length >= 2 && label !== source)!;
+      const raw = mutableRaw(caseSnapshot);
+      raw.claims[0] = {
+        ...raw.claims[0], text: `${source}${word}${target}。`, factIds: [fact.id],
+        ruleIds: [], evidenceIds: [],
+        confidence: fact.certainty === 'disputed' ? 'low' : fact.certainty === 'conditional' ? 'medium' : 'high',
+      };
+      expect(() => validateAnalysisReportV2(raw, contract, [], VALIDATED_AT), `positive:${word}`).not.toThrow();
+      raw.claims[0].text = `${source}不${word}${target}。`;
+      expect(() => validateAnalysisReportV2(raw, contract, [], VALIDATED_AT), `negative:${word}`).toThrow(/负向|未建模|否定/);
+    }
+    const ordinary = mutableRaw(caseSnapshot);
+    ordinary.claims.find(({ section }) => section === 'guidance')!.text = '遇事不害怕，核验现实信息后再行动。';
+    expect(() => validateAnalysisReportV2(ordinary, contract, [], VALIDATED_AT)).not.toThrow();
+    ordinary.claims[0] = {
+      ...ordinary.claims[0], text: '本卦初爻不害怕现实挑战。',
+      factIds: ['contract:entity:line:line:1:base'], ruleIds: [], evidenceIds: [], confidence: 'high',
+    };
+    expect(() => validateAnalysisReportV2(ordinary, contract, [], VALIDATED_AT)).not.toThrow();
+  });
+
+  it('accepts ambiguous candidate enumeration with 为/是 but rejects explicit selection from candidates', () => {
+    const caseSnapshot = buildCase({
+      category: 'wealth', explicitIntentId: 'wealth.money-or-valuables',
+      tossValues: [7, 6, 6, 6, 6, 6],
+    });
+    const contract = createFactContractV2(caseSnapshot);
+    for (const suffix of [
+      '候选用神为本卦初爻妻财与本卦五爻妻财。',
+      '其中一个候选用神是本卦初爻妻财。',
+    ]) {
+      const raw = structuredClone(createLocalRawReportV2(contract)) as unknown as MutableRaw;
+      raw.claims.find(({ section }) => section === 'use-god')!.text += suffix;
+      expect(() => validateAnalysisReportV2(raw, contract, [], VALIDATED_AT), suffix).not.toThrow();
+    }
+    const selected = structuredClone(createLocalRawReportV2(contract)) as unknown as MutableRaw;
+    selected.claims.find(({ section }) => section === 'use-god')!.text += '候选中已选定本卦初爻妻财为主用神。';
+    expect(() => validateAnalysisReportV2(selected, contract, [], VALIDATED_AT)).toThrow(/ambiguous|主用神|选定/);
+  });
+
+  it('supports optional copulas in labelled single attributes and all prefix growth-position verbs', () => {
+    const caseSnapshot = buildCase();
+    const contract = createFactContractV2(caseSnapshot);
+    const year = caseSnapshot.plate.calendar.pillars.year;
+    const calendarRaw = mutableRaw(caseSnapshot);
+    const calendar = calendarRaw.claims.find(({ section }) => section === 'calendar')!;
+    calendar.text = `年干${year.stem.value}，年支${year.branch.value}。`;
+    calendar.factIds = ['contract:plate:pillar:year'];
+    expect(() => validateAnalysisReportV2(calendarRaw, contract, [], VALIDATED_AT)).not.toThrow();
+    calendar.text = '年干甲，年支子。';
+    expect(() => validateAnalysisReportV2(calendarRaw, contract, [], VALIDATED_AT)).toThrow(/年干|年支|pillar|单值/);
+
+    const growth = contract.modelContract.facts.find((fact) => (
+      fact.relation === 'is-growth-stage'
+      && fact.target?.type === 'line'
+      && fact.target.id === 'line:1'
+      && fact.target.side === 'base'
+    ))!;
+    const wrongStage = growth.values.stage === '死' ? '墓' : '死';
+    for (const verb of ['临', '在', '落于', '见于', '居', '处于', '位于']) {
+      const raw = mutableRaw(caseSnapshot);
+      raw.claims[0] = {
+        ...raw.claims[0], text: `${String(growth.values.stage)}${verb}本卦初爻。`,
+        factIds: ['contract:entity:line:line:1:base', growth.id],
+        ruleIds: [], evidenceIds: [],
+        confidence: growth.certainty === 'disputed' ? 'low' : growth.certainty === 'conditional' ? 'medium' : 'high',
+      };
+      expect(() => validateAnalysisReportV2(raw, contract, [], VALIDATED_AT), `correct:${verb}`).not.toThrow();
+      raw.claims[0].text = `${String(wrongStage)}${verb}本卦初爻。`;
+      expect(() => validateAnalysisReportV2(raw, contract, [], VALIDATED_AT), `wrong:${verb}`).toThrow(/死|墓|长生|实体/);
+    }
+    const ordinary = mutableRaw(caseSnapshot);
+    ordinary.claims.find(({ section }) => section === 'guidance')!.text = '面对生死议题也应结合现实信息，不凭单句下结论。';
+    expect(() => validateAnalysisReportV2(ordinary, contract, [], VALIDATED_AT)).not.toThrow();
+  });
+
   it('validates standard and postposed relation direction while allowing symmetric reversal', () => {
     const caseSnapshot = buildCase();
     const contract = createFactContractV2(caseSnapshot);

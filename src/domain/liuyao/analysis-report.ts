@@ -1024,7 +1024,7 @@ function extractConcreteTokens(text: string, context: FactContractValidationCont
   );
   for (const match of text.matchAll(standaloneStage)) found.add(match[1]);
   const prefixedStage = new RegExp(
-    `(${stageAlternation})(?:临|在|落于|见于)(?:本卦|变卦)?(?:${positionAlternation})`,
+    `(${stageAlternation})(?:临|在|落于|见于|居|处于|位于)(?:本卦|变卦)?(?:${positionAlternation})`,
     'gu',
   );
   for (const match of text.matchAll(prefixedStage)) {
@@ -1161,6 +1161,26 @@ interface EntityAnchorMatch {
   readonly entityKeys: readonly string[];
 }
 
+function labelledAttributeValues(
+  text: string,
+  labels: readonly string[],
+  values: readonly string[],
+): readonly string[] {
+  const labelPattern = [...labels]
+    .sort((left, right) => right.length - left.length)
+    .map(escapeRegExp)
+    .join('|');
+  const valuePattern = [...values]
+    .sort((left, right) => right.length - left.length)
+    .map(escapeRegExp)
+    .join('|');
+  const pattern = new RegExp(
+    `(?:${labelPattern})(?:(?:为|是|属)|[:：])?\\s*(${valuePattern})`,
+    'gu',
+  );
+  return [...text.matchAll(pattern)].map((match) => match[1]);
+}
+
 function entityAnchorMatches(
   text: string,
   allFacts: readonly ContractFactV2[],
@@ -1208,19 +1228,12 @@ function entityAnchorMatches(
 }
 
 function facetTokens(text: string, context: FactContractValidationContextV2): readonly string[] {
-  const labelledSingles: string[] = [];
-  for (const match of text.matchAll(/(?:纳干|天干)(?:为|是|属)?([甲乙丙丁戊己庚辛壬癸])/gu)) {
-    labelledSingles.push(match[1]);
-  }
-  for (const match of text.matchAll(/(?:纳支|地支)(?:为|是|属)?([子丑寅卯辰巳午未申酉戌亥])/gu)) {
-    labelledSingles.push(match[1]);
-  }
-  for (const match of text.matchAll(/五行(?:为|是|属)?([木火土金水])/gu)) {
-    labelledSingles.push(match[1]);
-  }
-  for (const match of text.matchAll(/六亲(?:为|是|属)?(父母|兄弟|子孙|妻财|官鬼)/gu)) {
-    labelledSingles.push(match[1]);
-  }
+  const labelledSingles = [
+    ...labelledAttributeValues(text, ['纳干', '天干'], [...STEMS]),
+    ...labelledAttributeValues(text, ['纳支', '地支'], [...BRANCHES]),
+    ...labelledAttributeValues(text, ['五行'], ['木', '火', '土', '金', '水']),
+    ...labelledAttributeValues(text, ['六亲'], [...ALL_SIX_RELATIONS]),
+  ];
   const labelledSet = new Set(labelledSingles);
   return stableUnique([...extractConcreteTokens(text, context), ...labelledSingles]).filter((token) => (
     labelledSet.has(token)
@@ -1372,25 +1385,33 @@ function validateStructuralAssociations(
       fail(`${kindLabel}${facet === 'stem' ? '干' : '支'}单值 ${expected} 与当前 pillar fact 不匹配`);
     }
   };
-  for (const match of clause.text.matchAll(/([年月日时])(?:柱)?(?:天)?干(?:为|是|属)([甲乙丙丁戊己庚辛壬癸])/gu)) {
-    assertPillarSingle(match[1] as keyof typeof kindByLabel, 'stem', match[2], false);
-  }
-  for (const match of clause.text.matchAll(/([年月日时])(?:柱)?(?:地)?支(?:为|是|属)([子丑寅卯辰巳午未申酉戌亥])/gu)) {
-    assertPillarSingle(match[1] as keyof typeof kindByLabel, 'branch', match[2], false);
-  }
-  for (const match of clause.text.matchAll(/([年月日时])(?:柱)?(?:天)?干(?:的)?五行(?:为|是|属)([木火土金水])/gu)) {
-    assertPillarSingle(match[1] as keyof typeof kindByLabel, 'stem', match[2], true);
-  }
-  for (const match of clause.text.matchAll(/([年月日时])(?:柱)?(?:地)?支(?:的)?五行(?:为|是|属)([木火土金水])/gu)) {
-    assertPillarSingle(match[1] as keyof typeof kindByLabel, 'branch', match[2], true);
+  for (const kindLabel of ['年', '月', '日', '时'] as const) {
+    const stemLabels = [`${kindLabel}柱天干`, `${kindLabel}天干`, `${kindLabel}柱干`, `${kindLabel}干`];
+    const branchLabels = [`${kindLabel}柱地支`, `${kindLabel}地支`, `${kindLabel}柱支`, `${kindLabel}支`];
+    for (const value of labelledAttributeValues(clause.text, stemLabels, [...STEMS])) {
+      assertPillarSingle(kindLabel, 'stem', value, false);
+    }
+    for (const value of labelledAttributeValues(clause.text, branchLabels, [...BRANCHES])) {
+      assertPillarSingle(kindLabel, 'branch', value, false);
+    }
+    for (const value of labelledAttributeValues(
+      clause.text,
+      stemLabels.flatMap((label) => [`${label}五行`, `${label}的五行`]),
+      ['木', '火', '土', '金', '水'],
+    )) assertPillarSingle(kindLabel, 'stem', value, true);
+    for (const value of labelledAttributeValues(
+      clause.text,
+      branchLabels.flatMap((label) => [`${label}五行`, `${label}的五行`]),
+      ['木', '火', '土', '金', '水'],
+    )) assertPillarSingle(kindLabel, 'branch', value, true);
   }
   if (kind) {
     const kindLabel = ({ year: '年', month: '月', day: '日', hour: '时' } as const)[kind];
-    for (const match of clause.text.matchAll(/(?:其)?(?:天)?干(?:为|是|属)([甲乙丙丁戊己庚辛壬癸])/gu)) {
-      assertPillarSingle(kindLabel, 'stem', match[1], false);
+    for (const value of labelledAttributeValues(clause.text, ['其天干', '天干'], [...STEMS])) {
+      assertPillarSingle(kindLabel, 'stem', value, false);
     }
-    for (const match of clause.text.matchAll(/(?:其)?(?:地)?支(?:为|是|属)([子丑寅卯辰巳午未申酉戌亥])/gu)) {
-      assertPillarSingle(kindLabel, 'branch', match[1], false);
+    for (const value of labelledAttributeValues(clause.text, ['其地支', '地支'], [...BRANCHES])) {
+      assertPillarSingle(kindLabel, 'branch', value, false);
     }
   }
 }
@@ -1449,8 +1470,18 @@ function validateClauseAssociations(
 function validateRelationPredicates(
   claim: AnalysisClaimV2,
   referencedFacts: readonly ContractFactV2[],
+  allFacts: readonly ContractFactV2[],
   context: FactContractValidationContextV2,
 ): void {
+  const bareNegative = /不(?:相)?(?:生|克|冲|合|刑|害|破)/u.test(claim.text);
+  if (bareNegative) {
+    const mentionedEntityKeys = stableUnique(entityAnchorMatches(claim.text, allFacts)
+      .flatMap(({ entityKeys }) => entityKeys));
+    const elementNegative = /[木火土金水](?:行)?不(?:相)?(?:生|克)[木火土金水]/u.test(claim.text);
+    if (mentionedEntityKeys.length >= 2 || elementNegative) {
+      fail(`claim ${claim.id} 含事实契约尚未建模的 bare 不负向关系断言`);
+    }
+  }
   if (/(?:并非|不是|不属|不为|未|无|否认)(?:相)?(?:生|克|冲|合|刑|害|破|月破|日破|暗动|回头生|回头克|回头冲|回头合|进神|退神|化墓|化绝|元神|忌神|仇神)/u.test(claim.text)) {
     fail(`claim ${claim.id} 含事实契约尚未建模的负向关系断言`);
   }
@@ -1476,7 +1507,10 @@ function validateRelationPredicates(
     const specificNearbyLabels = nearbyLabels.filter((label) => !nearbyLabels.some((other) => (
       other.length > label.length && other.includes(label)
     )));
-    if (specificNearbyLabels.length > 0 && !candidates.some((predicate) => specificNearbyLabels.some((label) => (
+    const structuredSpiritRole = special.relations.some((relation) => (
+      relation === 'is-source-spirit' || relation === 'is-avoid-spirit' || relation === 'is-enemy-spirit'
+    ));
+    if (!structuredSpiritRole && specificNearbyLabels.length > 0 && !candidates.some((predicate) => specificNearbyLabels.some((label) => (
       predicate.sourceLabels.includes(label) || predicate.targetLabels.includes(label)
     )))) {
       fail(`claim ${claim.id} 的${special.label}关系实体不匹配`);
@@ -1532,7 +1566,9 @@ function structuredPrimaryAssertions(text: string): readonly string[] {
     /(?:以|取|定)([^。；，,]{1,48}?)(?:作为|作|为)(?:主)?用神/gu,
   ];
   for (const clause of clauses) {
-    if (/(?:候选用神|用神候选)(?:有|包括|包含|可见)/u.test(clause)) continue;
+    const candidateEnumeration = /(?:候选用神|用神候选)/u.test(clause);
+    const selectionSemantics = /(?:主用神|唯一|已选定|最终选定|首取|应取|确定选用)/u.test(clause);
+    if (candidateEnumeration && !selectionSemantics) continue;
     for (const pattern of patterns) {
       for (const match of clause.matchAll(pattern)) {
         const before = clause.slice(Math.max(0, match.index - 3), match.index);
@@ -1544,9 +1580,115 @@ function structuredPrimaryAssertions(text: string): readonly string[] {
   return [...assertions];
 }
 
+type SpiritRoleLabel = '元神' | '忌神' | '仇神';
+
+interface SpiritRoleEntityAssertion {
+  readonly role: SpiritRoleLabel;
+  readonly entityKeys: readonly string[];
+  readonly text: string;
+}
+
+function structuredSpiritRoleAssertions(
+  text: string,
+  allFacts: readonly ContractFactV2[],
+): readonly SpiritRoleEntityAssertion[] {
+  const result: SpiritRoleEntityAssertion[] = [];
+  const nearestAfter = (
+    anchors: readonly EntityAnchorMatch[],
+    start: number,
+    clause: string,
+  ): readonly EntityAnchorMatch[] => {
+    const conjunction = /(?:并且|同时|以及|而且|且|但|并)/u.exec(clause.slice(start));
+    const end = conjunction ? start + conjunction.index : clause.length;
+    const eligible = anchors.filter((anchor) => anchor.index >= start && anchor.index < end);
+    if (eligible.length === 0) return [];
+    const nearestIndex = Math.min(...eligible.map(({ index }) => index));
+    return eligible.filter(({ index }) => index === nearestIndex);
+  };
+  const nearestBefore = (
+    anchors: readonly EntityAnchorMatch[],
+    end: number,
+  ): readonly EntityAnchorMatch[] => {
+    const eligible = anchors.filter((anchor) => anchor.end <= end);
+    if (eligible.length === 0) return [];
+    const nearestEnd = Math.max(...eligible.map((anchor) => anchor.end));
+    return eligible.filter((anchor) => anchor.end === nearestEnd);
+  };
+  for (const sentence of text.split(/[。；;\n]+/u)) {
+    let activeRole: SpiritRoleLabel | null = null;
+    for (const rawClause of sentence.split(/[，,]+/u)) {
+      const clause = rawClause.trim();
+      if (!clause) continue;
+      const roleMatches = [...clause.matchAll(/(元神|忌神|仇神)/gu)];
+      if (roleMatches.length > 0) activeRole = roleMatches.at(-1)?.[1] as SpiritRoleLabel;
+      const anchors = entityAnchorMatches(clause, allFacts);
+      if (anchors.length === 0) continue;
+
+      let assertedRole: SpiritRoleLabel | null = null;
+      let assertedAnchors: readonly EntityAnchorMatch[] = [];
+      const locationMatch = /(?:其)?(?:具体)?(?:位置|所在)(?:落于|位于|在|就是|为|来自)|(?:落于|位于|来自)/u.exec(clause);
+      if (activeRole && locationMatch) {
+        assertedRole = activeRole;
+        assertedAnchors = nearestAfter(
+          anchors,
+          locationMatch.index + locationMatch[0].length,
+          clause,
+        );
+      }
+      for (const role of ['元神', '忌神', '仇神'] as const) {
+        const direct = new RegExp(`${role}[^。；，,]{0,40}(?:就是|为|是|在|位于|落于|来自)`, 'u').exec(clause);
+        if (direct) {
+          assertedRole = role;
+          assertedAnchors = nearestAfter(anchors, direct.index + direct[0].length, clause);
+        }
+        const reverse = new RegExp(`(?:就是|为|是|作为|当作)${role}`, 'u').exec(clause);
+        if (reverse) {
+          assertedRole = role;
+          assertedAnchors = nearestBefore(anchors, reverse.index);
+        }
+      }
+      if (!assertedRole || assertedAnchors.length === 0) continue;
+      result.push({
+        role: assertedRole,
+        entityKeys: stableUnique(assertedAnchors.flatMap(({ entityKeys }) => entityKeys)),
+        text: clause,
+      });
+    }
+  }
+  return result;
+}
+
+function validateSpiritRoleEntityAssertions(
+  claim: AnalysisClaimV2,
+  referencedFacts: readonly ContractFactV2[],
+  allFacts: readonly ContractFactV2[],
+  selection: UseGodSelection,
+): void {
+  const assertions = structuredSpiritRoleAssertions(claim.text, allFacts);
+  if (assertions.length === 0) return;
+  const relationByRole: Readonly<Record<SpiritRoleLabel, FactRelation>> = {
+    元神: 'is-source-spirit', 忌神: 'is-avoid-spirit', 仇神: 'is-enemy-spirit',
+  };
+  const primaryKey = selection.status === 'resolved' && selection.selectionMode === 'single'
+    ? entityRefKey(selection.primary.entity)
+    : null;
+  for (const assertion of assertions) {
+    const matchingFacts = referencedFacts.filter(({ relation }) => relation === relationByRole[assertion.role]);
+    const valid = assertion.entityKeys.some((assertedKey) => matchingFacts.some((fact) => (
+      entityRefKey(fact.source) === assertedKey
+      && primaryKey !== null
+      && entityRefKey(fact.target) === primaryKey
+    )));
+    if (!valid) {
+      fail(`${assertion.role}的具体位置或实体 assertion「${assertion.text}」与对应 spirit fact source/primary target 不匹配`);
+    }
+  }
+}
+
 function validateUseGodClaim(
   claim: AnalysisClaimV2,
   facts: readonly ContractFactV2[],
+  allFacts: readonly ContractFactV2[],
   selection: UseGodSelection,
 ): void {
   if (claim.section !== 'use-god') return;
@@ -1554,6 +1696,7 @@ function validateUseGodClaim(
   const selectionFactId = 'contract:use-god:selection';
   if (!factIds.has(selectionFactId)) fail(`claim ${claim.id} 必须引用用神选择事实`);
   const primaryAssertions = structuredPrimaryAssertions(claim.text);
+  validateSpiritRoleEntityAssertions(claim, facts, allFacts, selection);
 
   if (selection.status === 'needs-user-input') {
     if (claim.confidence !== 'low') fail('needs-user-input 用神 claim 只能为 low');
@@ -1725,8 +1868,18 @@ function validateClaim(
     contract.modelContract.facts,
     contract.validationContext,
   );
-  validateRelationPredicates(claim, facts, contract.validationContext);
-  validateUseGodClaim(claim, facts, contract.validationContext.useGod);
+  validateRelationPredicates(
+    claim,
+    facts,
+    contract.modelContract.facts,
+    contract.validationContext,
+  );
+  validateUseGodClaim(
+    claim,
+    facts,
+    contract.modelContract.facts,
+    contract.validationContext.useGod,
+  );
 
   const ceiling = facts.length === 0 ? 'low' : confidenceCeiling(facts, claim.text);
   if (CONFIDENCE_RANK[claim.confidence] > CONFIDENCE_RANK[ceiling]) {
