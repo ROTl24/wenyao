@@ -1,7 +1,6 @@
 import type { DivinationCaseV2, UseGodClarificationPatch, UseGodTargetSelector } from '../domain/liuyao/model';
-import type { AnalysisReport } from './types';
-import type { ChatMessage } from './session';
-import type { EvidenceEntry, RetrievalDiagnostics } from './retrieval';
+import type { AssistantChatMessageV2, UserChatMessageV2 } from './session';
+import type { ValidatedAnalysisBundleV2, ValidatedFollowUpBundleV2 } from './types';
 
 export type RuntimeTrust = 'authoritative' | 'browser-preview';
 
@@ -30,14 +29,12 @@ export interface ReadingCaseEnvelope {
 }
 
 export interface AnalyzeReadingResult extends ReadingCaseEnvelope {
-  report: AnalysisReport;
-  evidence: EvidenceEntry[];
-  retrievalDiagnostics: RetrievalDiagnostics | null;
+  analysisBundle: ValidatedAnalysisBundleV2;
 }
 
 export interface FollowUpReadingResult extends ReadingCaseEnvelope {
-  answer: { content: string; evidenceIds: string[] };
-  messages: ChatMessage[];
+  followUpBundle: ValidatedFollowUpBundleV2;
+  messages: readonly [UserChatMessageV2, AssistantChatMessageV2];
 }
 
 export interface ReadingClient {

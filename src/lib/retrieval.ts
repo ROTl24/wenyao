@@ -1,131 +1,112 @@
-export type EvidenceSourceType = 'original' | 'summary';
+import type { CanonicalEvidenceV2 } from '../domain/liuyao/analysis-report';
 
-export interface EvidenceEntry {
-  id: string;
-  title: string;
-  source: string;
-  location: string;
-  text: string;
-  tags: string[];
-  sourceType: EvidenceSourceType;
-  pageImage?: string;
-  knowledgeKind?: 'rule' | 'case' | 'doctrine';
-  topics?: string[];
-  retrieval?: {
-    lexicalScore: number;
-    vectorScore: number;
-    fusionScore: number;
-    rerankScore: number | null;
-  };
-}
-
-export interface RankedEvidence extends EvidenceEntry {
-  score: number;
-  matchedTerms: string[];
-}
+export type EvidenceEntry = CanonicalEvidenceV2;
 
 export interface RetrievalDiagnosticsV2 {
-  mode: 'hybrid-reranked' | 'hybrid-fused' | 'lexical-fallback';
-  lexicalCandidates: number;
-  vectorCandidates: number;
-  fusedCandidates: number;
-  vectorUsed: boolean;
-  rerankUsed: boolean;
-  requestedRuleIds: readonly string[];
-  matchedRuleIds: readonly string[];
-  ruleCandidateIds: readonly string[];
-  ruleBoost: number;
-  warnings: readonly string[];
+  readonly mode: 'hybrid-reranked' | 'hybrid-fused' | 'lexical-fallback';
+  readonly lexicalCandidates: number;
+  readonly vectorCandidates: number;
+  readonly fusedCandidates: number;
+  readonly vectorUsed: boolean;
+  readonly rerankUsed: boolean;
+  readonly requestedRuleIds: readonly string[];
+  readonly matchedRuleIds: readonly string[];
+  readonly ruleCandidateIds: readonly string[];
+  readonly ruleBoost: number;
+  readonly warnings: readonly string[];
 }
 
-/**
- * Transitional renderer-only diagnostics. New validated bundles must use the
- * exact RetrievalDiagnosticsV2 shape; this legacy branch exists only until the
- * browser preview migration in Task 10C is complete.
- */
-export interface LegacyRetrievalDiagnostics {
-  mode: RetrievalDiagnosticsV2['mode'];
-  lexicalCandidates: number;
-  vectorCandidates: number;
-  fusedCandidates: number;
-  vectorUsed: boolean;
-  rerankUsed: boolean;
-  warnings: string[];
+export interface EvidenceCandidateRef {
+  readonly id: string;
+  readonly rank: number;
 }
 
-export type RetrievalDiagnostics = RetrievalDiagnosticsV2 | LegacyRetrievalDiagnostics;
-
-const SUBJECT_TERMS = new Set([
-  '事业', '功名', '官禄', '仕宦', '求名', '财运', '求财', '买卖',
-  '感情', '婚姻', '健康', '疾病', '学业', '考试', '科举', '科甲',
-  '寻物', '失物', '出行', '行人',
-].map((term) => term.toLowerCase()));
+export const RULE_MATCH_BOOST = 12;
 
 function normalize(value: string): string {
   return value.toLowerCase().replace(/[\s，。、《》“”‘’：；！？,.!?;:()（）\[\]]+/g, '');
 }
 
 function ngrams(value: string, size: number): string[] {
-  const normalized = normalize(value);
-  if (normalized.length < size) return normalized ? [normalized] : [];
-  return Array.from({ length: normalized.length - size + 1 }, (_, index) => normalized.slice(index, index + size));
+  const text = normalize(value);
+  if (text.length < size) return text ? [text] : [];
+  return Array.from({ length: text.length - size + 1 }, (_, index) => text.slice(index, index + size));
 }
 
-function unique<T>(items: T[]): T[] {
-  return [...new Set(items)];
+function uniqueStrings(values: readonly string[]): string[] {
+  return [...new Set(values.filter((value) => typeof value === 'string' && value.trim()).map((value) => value.trim()))]
+    .sort((left, right) => left.localeCompare(right));
 }
 
-export function searchEvidence(
-  entries: readonly EvidenceEntry[],
-  query: string,
-  domainTerms: readonly string[],
-  limit = 8,
-): RankedEvidence[] {
-  const normalizedQuery = normalize(query);
-  const normalizedDomainTerms = unique(domainTerms.map(normalize).filter(Boolean));
-  const terms = unique([
-    ...normalizedDomainTerms,
-    ...ngrams(query, 2),
-    ...ngrams(query, 3),
-  ]);
+interface SearchInput {
+  readonly entries: readonly CanonicalEvidenceV2[];
+  readonly query: string;
+  readonly domainTerms: readonly string[];
+  readonly ruleIds: readonly string[];
+  readonly limit?: number;
+}
 
-  const ranked = entries
-    .map((entry) => {
-      const normalizedText = normalize(`${entry.title}${entry.text}${entry.tags.join('')}${entry.source}`);
-      const normalizedTitle = normalize(entry.title);
-      const normalizedTags = entry.tags.map(normalize);
-      const matchedTerms = terms.filter((term) => normalizedText.includes(term));
-      const exactTagScore = entry.tags.reduce((sum, tag) => (
-        normalizedQuery.includes(normalize(tag)) ? sum + 8 : sum
-      ), 0);
-      const domainScore = normalizedDomainTerms.reduce((sum, term) => {
-        const tagScore = normalizedTags.includes(term) ? 8 : 0;
-        const titleScore = SUBJECT_TERMS.has(term) && normalizedTitle.includes(term) ? 80 : 0;
-        const bodyScore = normalize(entry.text).includes(term) ? 2 : 0;
-        return sum + tagScore + titleScore + bodyScore;
-      }, 0);
-      const titleScore = terms.reduce((sum, term) => sum + (normalizedTitle.includes(term) ? 3 : 0), 0);
-      const textScore = matchedTerms.reduce((sum, term) => sum + Math.min(4, term.length), 0);
-      return { ...entry, score: exactTagScore + domainScore + titleScore + textScore, matchedTerms };
-    })
-    .filter((entry) => entry.score > 0)
-    .sort((left, right) => right.score - left.score || left.id.localeCompare(right.id));
-
-  const selected: RankedEvidence[] = [];
-  const perSource = new Map<string, number>();
-  const sourceCap = Math.max(2, Math.ceil(limit / 3));
-  const diversityFloor = (ranked[0]?.score || 0) * 0.5;
-  for (const entry of ranked) {
-    if (entry.score < diversityFloor) continue;
-    if ((perSource.get(entry.source) || 0) >= sourceCap) continue;
-    selected.push(entry);
-    perSource.set(entry.source, (perSource.get(entry.source) || 0) + 1);
-    if (selected.length >= limit) return selected;
+export function searchEvidenceCandidates({
+  entries, query, domainTerms, ruleIds, limit = 8,
+}: SearchInput): { readonly candidateRefs: readonly EvidenceCandidateRef[]; readonly diagnostics: RetrievalDiagnosticsV2 } {
+  const requestedRuleIds = uniqueStrings(ruleIds);
+  const normalizedDomainTerms = domainTerms.map(normalize).filter(Boolean);
+  const domainSet = new Set(normalizedDomainTerms);
+  const terms = [...new Set([...normalizedDomainTerms, ...ngrams(query, 2), ...ngrams(query, 3)])].filter(Boolean);
+  const documents = entries.map((entry) => normalize(`${entry.title}${entry.text}${entry.tags.join('')}${entry.source}`));
+  const frequency = new Map(terms.map((term) => [term, documents.filter((document) => document.includes(term)).length]));
+  const lexicalAll = entries.map((entry, index) => {
+    const document = documents[index];
+    const title = normalize(entry.title);
+    const tags = entry.tags.map(normalize);
+    const matchedTerms = terms.filter((term) => document.includes(term));
+    const lexicalScore = matchedTerms.reduce((sum, term) => {
+      const df = frequency.get(term) ?? 0;
+      const idf = Math.log(1 + (entries.length - df + 0.5) / (df + 0.5));
+      const domainBoost = domainSet.has(term) ? 2.5 : 1;
+      const fieldBoost = title.includes(term) ? 3 : tags.includes(term) ? 2 : 1;
+      return sum + idf * domainBoost * fieldBoost;
+    }, 0);
+    const matchedRuleIds = requestedRuleIds.filter((ruleId) => entry.supportsRuleIds.includes(ruleId));
+    return { entry, score: lexicalScore + matchedRuleIds.length * RULE_MATCH_BOOST, matchedRuleIds };
+  }).filter((candidate) => candidate.score > 0)
+    .sort((left, right) => right.score - left.score || left.entry.id.localeCompare(right.entry.id));
+  const lexical = lexicalAll.slice(0, 40);
+  const matchedRuleIds = requestedRuleIds.filter((ruleId) => entries.some((entry) => entry.supportsRuleIds.includes(ruleId)));
+  const reservedIds: string[] = [];
+  for (const ruleId of matchedRuleIds) {
+    const candidate = lexicalAll.find((item) => item.matchedRuleIds.includes(ruleId));
+    if (candidate && !reservedIds.includes(candidate.entry.id)) reservedIds.push(candidate.entry.id);
   }
-  for (const entry of ranked) {
-    if (selected.some((item) => item.id === entry.id)) continue;
-    selected.push(entry);
+  const selected = reservedIds.slice(0, limit);
+  const sourceCounts = new Map<string, number>();
+  const sourceCap = Math.max(2, Math.ceil(limit / 3));
+  for (const id of selected) {
+    const source = entries.find((entry) => entry.id === id)?.source ?? '';
+    sourceCounts.set(source, (sourceCounts.get(source) ?? 0) + 1);
+  }
+  for (const candidate of lexical.slice(0, 30)) {
+    if (selected.includes(candidate.entry.id)) continue;
+    if ((sourceCounts.get(candidate.entry.source) ?? 0) >= sourceCap) continue;
+    selected.push(candidate.entry.id);
+    sourceCounts.set(candidate.entry.source, (sourceCounts.get(candidate.entry.source) ?? 0) + 1);
     if (selected.length >= limit) break;
   }
-  return selected;
+  for (const candidate of lexical.slice(0, 30)) {
+    if (selected.includes(candidate.entry.id)) continue;
+    selected.push(candidate.entry.id);
+    if (selected.length >= limit) break;
+  }
+  const candidateRefs = selected.slice(0, limit).map((id, index) => ({ id, rank: index + 1 }));
+  return {
+    candidateRefs,
+    diagnostics: {
+      mode: 'lexical-fallback', lexicalCandidates: lexical.length, vectorCandidates: 0,
+      fusedCandidates: lexical.length, vectorUsed: false, rerankUsed: false,
+      requestedRuleIds, matchedRuleIds,
+      ruleCandidateIds: reservedIds.filter((id) => selected.includes(id)).slice(0, limit),
+      ruleBoost: RULE_MATCH_BOOST,
+      warnings: ['浏览器预览仅使用 canonical catalog 关键词召回。'],
+    },
+  };
 }

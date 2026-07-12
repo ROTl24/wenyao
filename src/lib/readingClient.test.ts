@@ -1,7 +1,8 @@
 import { createHash } from 'node:crypto';
 import { describe, expect, it, vi } from 'vitest';
 import type { DivinationCaseV2 } from '../domain/liuyao/model';
-import { browserSha256, createBrowserReadingAdapter } from './browserReadingAdapter';
+import { createBrowserReadingAdapter } from './browserReadingAdapter';
+import { browserSha256 } from './browserCrypto';
 import {
   createElectronReadingClient,
   type ReadingClient,
@@ -56,7 +57,6 @@ function createBrowserHarness() {
         return structuredClone(session);
       },
     },
-    corpus: [],
     now: () => new Date(BUILT_AT),
     createId: (() => {
       let value = 0;
@@ -97,12 +97,11 @@ describe('ReadingClient adapters', () => {
       selectIntent: vi.fn(async () => ({ caseSnapshot, runtimeTrust: 'authoritative' as const })),
       analyze: vi.fn(async () => ({
         caseSnapshot, runtimeTrust: 'authoritative' as const,
-        report: { mode: 'local', summary: '报告' } as never,
-        evidence: [], retrievalDiagnostics: null,
+        analysisBundle: { schemaVersion: '2.0.0', caseHash: 'facts' } as never,
       })),
       followUp: vi.fn(async () => ({
         caseSnapshot, runtimeTrust: 'authoritative' as const,
-        answer: { content: '回答', evidenceIds: [] }, messages: [],
+        followUpBundle: { schemaVersion: '2.0.0', caseHash: 'facts' } as never, messages: [] as never,
       })),
     };
     const client = createElectronReadingClient(transport);
@@ -151,14 +150,19 @@ describe('ReadingClient adapters', () => {
       sessionId: 'session-1', expectedFactSetHash: selected.caseSnapshot.factSetHash,
     });
     expect(analyzed.runtimeTrust).toBe('browser-preview');
-    expect(analyzed.report.summary).toContain('乾为天');
-    expect(analyzed.report.generatedAt).toBe(BUILT_AT);
+    expect(analyzed.analysisBundle.caseHash).toBe(selected.caseSnapshot.factSetHash);
+    expect(analyzed.analysisBundle.report.validation.validatedAt).toBe(BUILT_AT);
+    expect(analyzed.analysisBundle.corpusRef.hash).toBe('c1c7777ceecffdddcc586df371263868fa61cad2a161b4d58af3568b27018ba3');
+    expect(sessions.get('session-1')?.analysisBundle).toEqual(analyzed.analysisBundle);
+    expect(sessions.get('session-1')?.analysis).toBeUndefined();
 
     const followed = await adapter.followUp({
       sessionId: 'session-1', question: '下一步呢？', expectedFactSetHash: selected.caseSnapshot.factSetHash,
     });
     expect(followed.runtimeTrust).toBe('browser-preview');
     expect(followed.messages.map((message) => message.role)).toEqual(['user', 'assistant']);
+    expect(followed.messages.every((message) => message.schemaVersion === '2.0.0')).toBe(true);
+    expect(followed.messages[1].followUpBundle).toEqual(followed.followUpBundle);
     expect(sessions.get('session-1')?.messages.map((message) => message.role)).toEqual(['user', 'assistant']);
   });
 
@@ -197,6 +201,10 @@ describe('ReadingClient adapters', () => {
     const original = completedSession('browser-storage-session');
     await desktop.sessions.save(original);
     const built = await desktop.reading.buildCase({ sessionId: original.id });
+    const analyzed = await desktop.reading.analyze({
+      sessionId: original.id,
+      expectedFactSetHash: built.caseSnapshot.factSetHash,
+    });
     await desktop.reading.followUp({
       sessionId: original.id,
       question: '浏览器追问',
@@ -212,6 +220,7 @@ describe('ReadingClient adapters', () => {
     const stored = await desktop.sessions.get(original.id);
     expect(stored?.caseSnapshot?.factSetHash).toBe(built.caseSnapshot.factSetHash);
     expect(stored?.caseRuntimeTrust).toBe('browser-preview');
+    expect(stored?.analysisBundle).toEqual(analyzed.analysisBundle);
     expect(stored?.messages.map((message) => message.role)).toEqual(['user', 'assistant']);
   });
 
@@ -248,6 +257,7 @@ describe('ReadingClient adapters', () => {
       clarification: { explicitIntentId: 'career.rank-or-office' },
       expectedFactSetHash: initial.caseSnapshot.factSetHash,
     });
+    await adapter.analyze({ sessionId: 'session-1', expectedFactSetHash: selected.caseSnapshot.factSetHash });
     await adapter.followUp({
       sessionId: 'session-1', question: '旧 Case 追问', expectedFactSetHash: selected.caseSnapshot.factSetHash,
     });
@@ -258,9 +268,10 @@ describe('ReadingClient adapters', () => {
       expectedFactSetHash: selected.caseSnapshot.factSetHash,
     });
     expect(sameCase.caseSnapshot.factSetHash).toBe(selected.caseSnapshot.factSetHash);
+    expect(sessions.get('session-1')?.analysisBundle?.caseHash).toBe(selected.caseSnapshot.factSetHash);
     expect(sessions.get('session-1')?.messages.map((message) => message.content)).toEqual([
       '旧 Case 追问',
-      expect.stringContaining('浏览器预览'),
+      expect.stringContaining('当前未配置云端解卦服务'),
     ]);
 
     const changedCase = await adapter.selectIntent({
@@ -269,14 +280,16 @@ describe('ReadingClient adapters', () => {
       expectedFactSetHash: sameCase.caseSnapshot.factSetHash,
     });
     expect(changedCase.caseSnapshot.factSetHash).not.toBe(sameCase.caseSnapshot.factSetHash);
+    expect(sessions.get('session-1')?.analysisBundle).toBeUndefined();
     expect(sessions.get('session-1')?.messages).toEqual([]);
 
+    await adapter.analyze({ sessionId: 'session-1', expectedFactSetHash: changedCase.caseSnapshot.factSetHash });
     await adapter.followUp({
       sessionId: 'session-1', question: '新 Case 追问', expectedFactSetHash: changedCase.caseSnapshot.factSetHash,
     });
     expect(sessions.get('session-1')?.messages.map((message) => message.content)).toEqual([
       '新 Case 追问',
-      expect.stringContaining('浏览器预览'),
+      expect.stringContaining('当前未配置云端解卦服务'),
     ]);
   });
 
@@ -349,8 +362,8 @@ describe('ReadingClient adapters', () => {
       return createElectronReadingClient({
         async buildCase() { return { caseSnapshot, runtimeTrust: 'authoritative' }; },
         async selectIntent() { return { caseSnapshot, runtimeTrust: 'authoritative' }; },
-        async analyze() { return { caseSnapshot, runtimeTrust: 'authoritative', report: { summary: '报告' } as never, evidence: [], retrievalDiagnostics: null }; },
-        async followUp() { return { caseSnapshot, runtimeTrust: 'authoritative', answer: { content: '回答', evidenceIds: [] }, messages: [] }; },
+        async analyze() { return { caseSnapshot, runtimeTrust: 'authoritative', analysisBundle: {} as never }; },
+        async followUp() { return { caseSnapshot, runtimeTrust: 'authoritative', followUpBundle: {} as never, messages: [] as never }; },
       });
     }],
     ['browser-preview', async (): Promise<ReadingClient> => createBrowserHarness().adapter],

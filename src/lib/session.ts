@@ -211,10 +211,6 @@ export function advanceCurrentToss(
   );
 }
 
-export function withAnalysis(session: DivinationSession, analysis: AnalysisReport): DivinationSession {
-  return { ...session, analysis, updatedAt: new Date().toISOString() };
-}
-
 export function withMessage(session: DivinationSession, message: ChatMessage): DivinationSession {
   return { ...session, messages: [...session.messages, message], updatedAt: new Date().toISOString() };
 }

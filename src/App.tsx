@@ -9,7 +9,6 @@ import { legacyPlateFromCase } from './lib/casePresentation';
 import { desktop } from './lib/desktop';
 import { randomToss } from './lib/divination';
 import { createElectronReadingClient, type ReadingCaseEnvelope } from './lib/readingClient';
-import type { EvidenceEntry, RetrievalDiagnostics } from './lib/retrieval';
 import {
   advanceCurrentToss,
   createSession,
@@ -20,7 +19,7 @@ import {
   type DivinationSession,
   type SessionCategory,
 } from './lib/session';
-import type { AnalysisReport } from './lib/types';
+import type { ValidatedAnalysisBundleV2 } from './lib/types';
 
 type Screen = 'home' | 'casting' | 'building-case' | 'result' | 'review-error';
 
@@ -67,7 +66,7 @@ type AppFlowAction =
     type: 'APPLY_ANALYSIS';
     owner: SessionOwner;
     operationId: string;
-    analysis: AnalysisReport;
+    analysisBundle: ValidatedAnalysisBundleV2;
   }
   | { type: 'END_ANALYSIS'; owner: SessionOwner; operationId: string }
   | {
@@ -79,7 +78,7 @@ type AppFlowAction =
     type: 'RESOLVE_FOLLOW_UP';
     owner: SessionOwner;
     operationId: string;
-    messages: ChatMessage[];
+    messages: readonly ChatMessage[];
   }
   | { type: 'END_FOLLOW_UP'; owner: SessionOwner; operationId: string };
 
@@ -106,7 +105,7 @@ function sessionProgress(session: DivinationSession): number {
     + Number(session.authoritativeRevision || 0) * 1_000
     + session.tosses.length * 100
     + (session.status === 'complete' ? 50 : 0)
-    + (session.analysis ? 10 : 0)
+    + (session.analysisBundle ? 10 : session.analysis ? 1 : 0)
     + session.messages.length;
 }
 
@@ -194,11 +193,15 @@ export function appFlowReducer(state: AppFlowState, action: AppFlowAction): AppF
         || state.analysisOperationId !== action.operationId
         || !state.session
       ) return state;
-      const next = {
+      const next: DivinationSession = {
         ...state.session,
-        analysis: action.analysis,
-        updatedAt: latestTimestamp(state.session.updatedAt, action.analysis.generatedAt),
+        analysisBundle: action.analysisBundle,
+        updatedAt: latestTimestamp(
+          state.session.updatedAt,
+          action.analysisBundle.report.validation.validatedAt,
+        ),
       };
+      delete next.analysis;
       return { ...state, analysisOperationId: null, session: next };
     }
     case 'END_ANALYSIS':
@@ -312,6 +315,7 @@ export function sessionWithCase(
     updatedAt: latestTimestamp(session.updatedAt, envelope.caseSnapshot.builtAt),
   };
   if (!sameCase) {
+    delete next.analysisBundle;
     delete next.analysis;
     next.messages = [];
   }
@@ -329,8 +333,6 @@ export function App() {
   const [question, setQuestion] = useState('');
   const [category, setCategory] = useState<SessionCategory | null>(null);
   const [history, setHistory] = useState<DivinationSession[]>([]);
-  const [evidence, setEvidence] = useState<EvidenceEntry[]>([]);
-  const [retrievalDiagnostics, setRetrievalDiagnostics] = useState<RetrievalDiagnostics | null>(null);
   const [historyOpen, setHistoryOpen] = useState(false);
   const [settingsOpen, setSettingsOpen] = useState(false);
   const [analysisError, setAnalysisError] = useState('');
@@ -350,8 +352,6 @@ export function App() {
   );
 
   const resetAsyncUi = () => {
-    setEvidence([]);
-    setRetrievalDiagnostics(null);
     setAnalysisError('');
     setCaseBuildError('');
     failedCaseCommandRef.current = null;
@@ -418,21 +418,21 @@ export function App() {
         setHistory((current) => {
           const existing = current.find((entry) => entry.id === target.id) ?? target;
           if (existing.caseSnapshot?.factSetHash !== expectedFactSetHash) return current;
-          return mergeSavedSession(current, {
+          const analyzed: DivinationSession = {
             ...existing,
-            analysis: result.report,
-            updatedAt: latestTimestamp(existing.updatedAt, result.report.generatedAt),
-          });
+            analysisBundle: result.analysisBundle,
+            updatedAt: latestTimestamp(existing.updatedAt, result.analysisBundle.report.validation.validatedAt),
+          };
+          delete analyzed.analysis;
+          return mergeSavedSession(current, analyzed);
         });
       }
       if (!isOwnerCurrent(owner)) return;
-      setEvidence(result.evidence);
-      setRetrievalDiagnostics(result.retrievalDiagnostics);
       dispatchFlow({
         type: 'APPLY_ANALYSIS',
         owner,
         operationId,
-        analysis: result.report,
+        analysisBundle: result.analysisBundle,
       });
     } catch (error) {
       if (isOwnerCurrent(owner)) {
@@ -662,7 +662,7 @@ export function App() {
           {session.caseRuntimeTrust === 'browser-preview' && (
             <p className="runtime-trust-note" role="status">浏览器预览结果，未经过桌面主进程验证。</p>
           )}
-          <ResultScreen session={session} evidence={evidence} retrievalDiagnostics={retrievalDiagnostics} analyzing={analyzing} analysisError={analysisError} chatting={chatting} onAnalyze={() => { const owner = activeOwnerRef.current; if (owner) void runAnalysis(session, owner); }} onFollowUp={followUp} onBack={returnHome} />
+          <ResultScreen session={session} analyzing={analyzing} analysisError={analysisError} chatting={chatting} onAnalyze={() => { const owner = activeOwnerRef.current; if (owner) void runAnalysis(session, owner); }} onFollowUp={followUp} onBack={returnHome} />
         </>
       )}
       {historyOpen && <HistoryPanel sessions={history} onClose={() => setHistoryOpen(false)} onOpen={(saved) => void openSession(saved)} onDelete={(id) => void deleteSession(id)} />}

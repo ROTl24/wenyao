@@ -1,8 +1,8 @@
 import { describe, expect, it } from 'vitest';
-import corpus from '../../resources/corpus.json';
-import { searchEvidence, type EvidenceEntry } from './retrieval';
+import { browserEvidenceCatalog } from './browserEvidenceCatalog';
+import { searchEvidenceCandidates } from './retrieval';
 
-const entries = corpus as EvidenceEntry[];
+const entries = browserEvidenceCatalog.entries;
 
 describe('正式古籍证据包', () => {
   it('包含五本用户古籍且全部标记为原文', () => {
@@ -27,9 +27,9 @@ describe('正式古籍证据包', () => {
     ['求财买卖', ['求财', '妻财', '子孙', '兄弟']],
     ['疾病调养', ['疾病', '官鬼', '子孙', '用神']],
   ])('可以检索“%s”相关原文', (query, terms) => {
-    const result = searchEvidence(entries, query, terms, 8);
-    expect(result.length).toBeGreaterThanOrEqual(3);
-    expect(result.some((entry) => entry.matchedTerms.length > 0)).toBe(true);
-    expect(result.every((entry) => entry.sourceType === 'original')).toBe(true);
+    const result = searchEvidenceCandidates({ entries, query, domainTerms: terms, ruleIds: [], limit: 8 });
+    expect(result.candidateRefs.length).toBeGreaterThanOrEqual(3);
+    const hydrated = browserEvidenceCatalog.hydrate(result.candidateRefs, 8).evidence;
+    expect(hydrated.every((entry) => entry.sourceType === 'original')).toBe(true);
   });
 });

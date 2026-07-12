@@ -1,101 +1,38 @@
 import {
   buildDivinationCase,
+  createAnalysisRetrievalContextV2,
+  createFactContractV2,
+  createLocalRawFollowUpV2,
+  createLocalRawReportV2,
   DEFAULT_RULE_CONTEXT,
+  deriveFollowUpContentV2,
+  strictCanonicalStringify,
+  validateAnalysisReportV2,
+  validateFollowUpV2,
+  type AnalysisReportV2,
   type DivinationCaseV2,
+  type FactContractBundleV2,
   type UseGodClarificationPatch,
 } from '../domain/liuyao/index';
-import corpusJson from '../../resources/corpus.json';
+import { browserSha256 } from './browserCrypto';
+import {
+  browserEvidenceCatalog,
+  type BrowserEvidenceCatalog,
+} from './browserEvidenceCatalog';
 import { legacyPlateFromCase } from './casePresentation';
-import { createBrowserLocalReport } from './localAnalysis';
 import {
   mergeClarificationWithProvenance,
   sanitizeClarificationPatch,
-  type ReadingClient,
   type ReadingCaseEnvelope,
+  type ReadingClient,
 } from './readingClient';
-import { searchEvidence, type EvidenceEntry, type RetrievalDiagnostics } from './retrieval';
-import type { ChatMessage, DivinationSession } from './session';
-
-const SHA256_CONSTANTS = new Uint32Array([
-  0x428a2f98, 0x71374491, 0xb5c0fbcf, 0xe9b5dba5, 0x3956c25b, 0x59f111f1, 0x923f82a4, 0xab1c5ed5,
-  0xd807aa98, 0x12835b01, 0x243185be, 0x550c7dc3, 0x72be5d74, 0x80deb1fe, 0x9bdc06a7, 0xc19bf174,
-  0xe49b69c1, 0xefbe4786, 0x0fc19dc6, 0x240ca1cc, 0x2de92c6f, 0x4a7484aa, 0x5cb0a9dc, 0x76f988da,
-  0x983e5152, 0xa831c66d, 0xb00327c8, 0xbf597fc7, 0xc6e00bf3, 0xd5a79147, 0x06ca6351, 0x14292967,
-  0x27b70a85, 0x2e1b2138, 0x4d2c6dfc, 0x53380d13, 0x650a7354, 0x766a0abb, 0x81c2c92e, 0x92722c85,
-  0xa2bfe8a1, 0xa81a664b, 0xc24b8b70, 0xc76c51a3, 0xd192e819, 0xd6990624, 0xf40e3585, 0x106aa070,
-  0x19a4c116, 0x1e376c08, 0x2748774c, 0x34b0bcb5, 0x391c0cb3, 0x4ed8aa4a, 0x5b9cca4f, 0x682e6ff3,
-  0x748f82ee, 0x78a5636f, 0x84c87814, 0x8cc70208, 0x90befffa, 0xa4506ceb, 0xbef9a3f7, 0xc67178f2,
-]);
-
-const CATEGORY_TERMS: Record<string, string[]> = {
-  career: ['事业', '功名', '官鬼', '世爻', '父母'],
-  wealth: ['财运', '求财', '妻财', '子孙', '兄弟'],
-  relationship: ['感情', '婚姻', '世爻', '应爻', '官鬼', '妻财'],
-  health: ['健康', '疾病', '世爻', '官鬼', '子孙'],
-  study: ['学业', '考试', '父母', '官鬼', '世爻'],
-  lost_item: ['寻物', '失物', '用神', '方位', '冲合'],
-  travel: ['出行', '行人', '世爻', '应爻', '动爻'],
-  other: ['世爻', '应爻', '日辰', '月建'],
-};
-
-function rotateRight(value: number, count: number): number {
-  return (value >>> count) | (value << (32 - count));
-}
-
-export function browserSha256(value: string): string {
-  const input = new TextEncoder().encode(value);
-  const byteLength = Math.ceil((input.length + 9) / 64) * 64;
-  const bytes = new Uint8Array(byteLength);
-  bytes.set(input);
-  bytes[input.length] = 0x80;
-  const view = new DataView(bytes.buffer);
-  const bitLength = input.length * 8;
-  view.setUint32(byteLength - 8, Math.floor(bitLength / 0x1_0000_0000), false);
-  view.setUint32(byteLength - 4, bitLength >>> 0, false);
-
-  const hash = new Uint32Array([
-    0x6a09e667, 0xbb67ae85, 0x3c6ef372, 0xa54ff53a,
-    0x510e527f, 0x9b05688c, 0x1f83d9ab, 0x5be0cd19,
-  ]);
-  const words = new Uint32Array(64);
-  for (let offset = 0; offset < byteLength; offset += 64) {
-    for (let index = 0; index < 16; index += 1) words[index] = view.getUint32(offset + index * 4, false);
-    for (let index = 16; index < 64; index += 1) {
-      const before15 = words[index - 15];
-      const before2 = words[index - 2];
-      const sigma0 = rotateRight(before15, 7) ^ rotateRight(before15, 18) ^ (before15 >>> 3);
-      const sigma1 = rotateRight(before2, 17) ^ rotateRight(before2, 19) ^ (before2 >>> 10);
-      words[index] = (words[index - 16] + sigma0 + words[index - 7] + sigma1) >>> 0;
-    }
-
-    let [a, b, c, d, e, f, g, h] = hash;
-    for (let index = 0; index < 64; index += 1) {
-      const sum1 = rotateRight(e, 6) ^ rotateRight(e, 11) ^ rotateRight(e, 25);
-      const choice = (e & f) ^ (~e & g);
-      const temporary1 = (h + sum1 + choice + SHA256_CONSTANTS[index] + words[index]) >>> 0;
-      const sum0 = rotateRight(a, 2) ^ rotateRight(a, 13) ^ rotateRight(a, 22);
-      const majority = (a & b) ^ (a & c) ^ (b & c);
-      const temporary2 = (sum0 + majority) >>> 0;
-      h = g;
-      g = f;
-      f = e;
-      e = (d + temporary1) >>> 0;
-      d = c;
-      c = b;
-      b = a;
-      a = (temporary1 + temporary2) >>> 0;
-    }
-    hash[0] = (hash[0] + a) >>> 0;
-    hash[1] = (hash[1] + b) >>> 0;
-    hash[2] = (hash[2] + c) >>> 0;
-    hash[3] = (hash[3] + d) >>> 0;
-    hash[4] = (hash[4] + e) >>> 0;
-    hash[5] = (hash[5] + f) >>> 0;
-    hash[6] = (hash[6] + g) >>> 0;
-    hash[7] = (hash[7] + h) >>> 0;
-  }
-  return [...hash].map((word) => word.toString(16).padStart(8, '0')).join('');
-}
+import { searchEvidenceCandidates, type RetrievalDiagnosticsV2 } from './retrieval';
+import type {
+  AssistantChatMessageV2,
+  DivinationSession,
+  UserChatMessageV2,
+} from './session';
+import type { ValidatedAnalysisBundleV2, ValidatedFollowUpBundleV2 } from './types';
 
 interface BrowserSessionsPort {
   get(id: string): Promise<DivinationSession | null>;
@@ -104,7 +41,7 @@ interface BrowserSessionsPort {
 
 export interface BrowserReadingAdapterPorts {
   sessions: BrowserSessionsPort;
-  corpus?: readonly EvidenceEntry[];
+  catalog?: BrowserEvidenceCatalog;
   now?: () => Date;
   createId?: () => string;
 }
@@ -117,12 +54,8 @@ function isoNow(now: () => Date): string {
 
 function interactionFingerprint(session: DivinationSession): string {
   return browserSha256(JSON.stringify({
-    id: session.id,
-    question: session.question,
-    category: session.category,
-    castAt: session.castAt,
-    status: session.status,
-    tosses: session.tosses,
+    id: session.id, question: session.question, category: session.category,
+    castAt: session.castAt, status: session.status, tosses: session.tosses,
     currentToss: session.currentToss ?? null,
   }));
 }
@@ -136,9 +69,7 @@ function assertBuildable(session: DivinationSession | null): asserts session is 
 function assertCase(session: DivinationSession | null, expectedFactSetHash: string): DivinationCaseV2 {
   if (!session) throw new Error('会话不存在');
   if (session.migrationState === 'needs-review') throw new Error('该会话需要人工复核');
-  if (!session.caseSnapshot || session.caseSnapshot.factSetHash !== expectedFactSetHash) {
-    throw new Error('权威 Case 已变化');
-  }
+  if (!session.caseSnapshot || session.caseSnapshot.factSetHash !== expectedFactSetHash) throw new Error('权威 Case 已变化');
   return session.caseSnapshot;
 }
 
@@ -152,18 +83,91 @@ function provenance(caseSnapshot: DivinationCaseV2): UseGodClarificationPatch {
   };
 }
 
-function termsFor(caseSnapshot: DivinationCaseV2): string[] {
-  return [...new Set([
-    ...(CATEGORY_TERMS[caseSnapshot.category] ?? CATEGORY_TERMS.other),
-    caseSnapshot.plate.baseHexagram.shortName,
-    caseSnapshot.plate.changedHexagram.shortName,
-    ...caseSnapshot.plate.lines.flatMap((line) => [line.base.relationToBasePalace, line.base.role ?? '']),
-  ].filter(Boolean))];
+function sameStrings(left: readonly string[], right: readonly string[]): boolean {
+  return left.length === right.length && left.every((value, index) => value === right[index]);
+}
+
+function rawFromValidated(report: AnalysisReportV2) {
+  return {
+    schemaVersion: report.schemaVersion,
+    caseHash: report.caseHash,
+    claims: report.claims,
+    uncertainties: report.uncertainties,
+  };
+}
+
+function assertCurrentDiagnostics(
+  diagnostics: RetrievalDiagnosticsV2,
+  contract: FactContractBundleV2,
+  catalog: BrowserEvidenceCatalog,
+): void {
+  const context = createAnalysisRetrievalContextV2(contract.modelContract);
+  if (!diagnostics || !sameStrings(diagnostics.requestedRuleIds, context.ruleIds)) throw new Error('检索诊断与当前 Case 不一致');
+  const supported = new Set(catalog.entries.flatMap((entry) => entry.supportsRuleIds));
+  const matched = context.ruleIds.filter((ruleId) => supported.has(ruleId));
+  if (!sameStrings(diagnostics.matchedRuleIds, matched)) throw new Error('检索诊断与当前 catalog 不一致');
+  if (matched.length && diagnostics.ruleCandidateIds.length === 0) throw new Error('检索诊断缺少规则候选');
+  const byId = new Map(catalog.entries.map((entry) => [entry.id, entry]));
+  if (diagnostics.ruleCandidateIds.some((id) => !byId.get(id)?.supportsRuleIds.some((ruleId) => matched.includes(ruleId)))) {
+    throw new Error('检索诊断规则候选无效');
+  }
+}
+
+function coherentBundle(
+  value: unknown,
+  contract: FactContractBundleV2,
+  catalog: BrowserEvidenceCatalog,
+): ValidatedAnalysisBundleV2 | null {
+  try {
+    if (!value || typeof value !== 'object' || Array.isArray(value)) return null;
+    const bundle = value as ValidatedAnalysisBundleV2;
+    if (
+      bundle.schemaVersion !== '2.0.0'
+      || bundle.caseHash !== contract.modelContract.caseHash
+      || bundle.report?.caseHash !== bundle.caseHash
+      || bundle.corpusRef?.version !== catalog.corpusRef.version
+      || bundle.corpusRef?.hash !== catalog.corpusRef.hash
+      || !Array.isArray(bundle.canonicalEvidence)
+    ) return null;
+    assertCurrentDiagnostics(bundle.retrievalDiagnostics, contract, catalog);
+    const hydrated = catalog.hydrate(
+      bundle.canonicalEvidence.map((entry, index) => ({ id: entry.id, rank: index + 1 })),
+      bundle.canonicalEvidence.length,
+    ).evidence;
+    if (strictCanonicalStringify(hydrated) !== strictCanonicalStringify(bundle.canonicalEvidence)) return null;
+    const report = validateAnalysisReportV2(
+      rawFromValidated(bundle.report), contract, hydrated, bundle.report.validation.validatedAt,
+    );
+    if (strictCanonicalStringify(report) !== strictCanonicalStringify(bundle.report)) return null;
+    return structuredClone({ ...bundle, report, canonicalEvidence: hydrated });
+  } catch {
+    return null;
+  }
+}
+
+function retrievalFor(
+  catalog: BrowserEvidenceCatalog,
+  contract: FactContractBundleV2,
+  query: string,
+) {
+  const context = createAnalysisRetrievalContextV2(contract.modelContract);
+  const found = searchEvidenceCandidates({
+    entries: catalog.entries,
+    query,
+    domainTerms: context.queryTerms,
+    ruleIds: context.ruleIds,
+    limit: 8,
+  });
+  assertCurrentDiagnostics(found.diagnostics, contract, catalog);
+  return {
+    canonicalEvidence: catalog.hydrate(found.candidateRefs, 8).evidence,
+    retrievalDiagnostics: found.diagnostics,
+  };
 }
 
 export function createBrowserReadingAdapter({
   sessions,
-  corpus = corpusJson as EvidenceEntry[],
+  catalog = browserEvidenceCatalog,
   now = () => new Date(),
   createId = () => crypto.randomUUID(),
 }: BrowserReadingAdapterPorts): ReadingClient {
@@ -173,9 +177,7 @@ export function createBrowserReadingAdapter({
     const previous = tails.get(sessionId) ?? Promise.resolve();
     const current = previous.catch(() => undefined).then(task);
     tails.set(sessionId, current);
-    return current.finally(() => {
-      if (tails.get(sessionId) === current) tails.delete(sessionId);
-    });
+    return current.finally(() => { if (tails.get(sessionId) === current) tails.delete(sessionId); });
   }
 
   async function buildAndSave(
@@ -187,36 +189,28 @@ export function createBrowserReadingAdapter({
     const fingerprint = interactionFingerprint(session);
     const builtAt = isoNow(now);
     const caseSnapshot = buildDivinationCase({
-      sessionId: session.id,
-      plateId: `plate:${session.id}:v2`,
-      question: session.question,
-      category: session.category,
-      explicitIntentId: clarification?.explicitIntentId ?? null,
+      sessionId: session.id, plateId: `plate:${session.id}:v2`, question: session.question,
+      category: session.category, explicitIntentId: clarification?.explicitIntentId ?? null,
       ...(clarification?.subjectRelation ? { subjectRelation: clarification.subjectRelation } : {}),
       ...(clarification?.explicitTarget ? { explicitTarget: clarification.explicitTarget } : {}),
-      castAt: session.castAt,
-      builtAt,
+      castAt: session.castAt, builtAt,
       tossValues: session.tosses.map((toss) => toss.value) as unknown as DivinationCaseV2['plate']['rawTosses'],
       ruleContext: session.ruleContext ?? DEFAULT_RULE_CONTEXT,
     }, { sha256: browserSha256 });
     const current = await sessions.get(session.id);
     if (!current || interactionFingerprint(current) !== fingerprint) throw new Error('会话交互状态已变化');
-    if (expectedFactSetHash && current.caseSnapshot?.factSetHash !== expectedFactSetHash) {
-      throw new Error('权威 Case 已变化');
-    }
+    if (expectedFactSetHash && current.caseSnapshot?.factSetHash !== expectedFactSetHash) throw new Error('权威 Case 已变化');
     const sameCase = current.caseSnapshot?.factSetHash === caseSnapshot.factSetHash;
-    await sessions.save({
-      ...current,
-      caseSnapshot,
-      ruleContext: caseSnapshot.ruleContext,
-      migrationVersion: 2,
-      migrationState: 'clean',
-      caseRuntimeTrust: 'browser-preview',
-      plate: legacyPlateFromCase(caseSnapshot),
-      analysis: sameCase ? current.analysis : undefined,
-      messages: sameCase ? (current.messages ?? []) : [],
-      updatedAt: builtAt,
-    });
+    const next: DivinationSession = {
+      ...current, caseSnapshot, ruleContext: caseSnapshot.ruleContext,
+      migrationVersion: 2, migrationState: 'clean', caseRuntimeTrust: 'browser-preview',
+      plate: legacyPlateFromCase(caseSnapshot), messages: sameCase ? (current.messages ?? []) : [], updatedAt: builtAt,
+    };
+    if (!sameCase) {
+      delete next.analysisBundle;
+      delete next.analysis;
+    }
+    await sessions.save(next);
     return { caseSnapshot, runtimeTrust: 'browser-preview' };
   }
 
@@ -239,60 +233,39 @@ export function createBrowserReadingAdapter({
         const currentCase = assertCase(session, payload.expectedFactSetHash);
         const clarification = sanitizeClarificationPatch(payload.clarification);
         if (!clarification) throw new Error('selectIntent 必须提交结构化澄清');
-        return buildAndSave(
-          session!,
-          mergeClarificationWithProvenance(provenance(currentCase), clarification),
-          payload.expectedFactSetHash,
-        );
+        return buildAndSave(session!, mergeClarificationWithProvenance(provenance(currentCase), clarification), payload.expectedFactSetHash);
       });
     },
     analyze(payload) {
       return serialize(payload.sessionId, async () => {
         const session = await sessions.get(payload.sessionId);
         const caseSnapshot = assertCase(session, payload.expectedFactSetHash);
-        const evidence = searchEvidence(corpus, caseSnapshot.question, termsFor(caseSnapshot), 8);
-        const retrievalDiagnostics: RetrievalDiagnostics = {
-          mode: 'lexical-fallback',
-          lexicalCandidates: evidence.length,
-          vectorCandidates: 0,
-          fusedCandidates: evidence.length,
-          vectorUsed: false,
-          rerankUsed: false,
-          warnings: ['浏览器预览仅使用关键词检索。'],
-        };
-        if (session!.analysis) {
-          const current = await sessions.get(payload.sessionId);
-          const currentCase = assertCase(current, payload.expectedFactSetHash);
-          return {
-            caseSnapshot: currentCase,
-            runtimeTrust: 'browser-preview',
-            report: structuredClone(current!.analysis!),
-            evidence,
-            retrievalDiagnostics,
-          };
+        const contract = createFactContractV2(caseSnapshot);
+        const cached = coherentBundle(session!.analysisBundle, contract, catalog);
+        if (cached) {
+          const latest = await sessions.get(payload.sessionId);
+          assertCase(latest, payload.expectedFactSetHash);
+          const latestCached = coherentBundle(latest!.analysisBundle, contract, catalog);
+          if (!latestCached) throw new Error('预览分析缓存状态已变化');
+          return { caseSnapshot: latest!.caseSnapshot!, runtimeTrust: 'browser-preview', analysisBundle: latestCached };
         }
-        const report = {
-          ...createBrowserLocalReport({
-            ...session!,
-            plate: legacyPlateFromCase(caseSnapshot),
-          }, evidence),
-          generatedAt: isoNow(now),
+        const { canonicalEvidence, retrievalDiagnostics } = retrievalFor(catalog, contract, caseSnapshot.question);
+        const report = validateAnalysisReportV2(
+          createLocalRawReportV2(contract, canonicalEvidence), contract, canonicalEvidence, isoNow(now),
+        );
+        const analysisBundle: ValidatedAnalysisBundleV2 = {
+          schemaVersion: '2.0.0', caseHash: caseSnapshot.factSetHash, analysisOrigin: 'local',
+          report, canonicalEvidence, retrievalDiagnostics, corpusRef: catalog.corpusRef,
         };
         const current = await sessions.get(payload.sessionId);
         assertCase(current, payload.expectedFactSetHash);
-        const saved = await sessions.save({
-          ...current!,
-          analysis: report,
-          caseRuntimeTrust: 'browser-preview',
-          updatedAt: report.generatedAt,
-        });
-        return {
-          caseSnapshot: saved.caseSnapshot!,
-          runtimeTrust: 'browser-preview',
-          report,
-          evidence,
-          retrievalDiagnostics,
+        const next: DivinationSession = {
+          ...current!, analysisBundle: structuredClone(analysisBundle), caseRuntimeTrust: 'browser-preview',
+          updatedAt: report.validation.validatedAt,
         };
+        delete next.analysis;
+        const saved = await sessions.save(next);
+        return { caseSnapshot: saved.caseSnapshot!, runtimeTrust: 'browser-preview', analysisBundle };
       });
     },
     followUp(payload) {
@@ -301,30 +274,36 @@ export function createBrowserReadingAdapter({
         if (!question || question.length > 500) throw new Error('追问内容无效');
         const session = await sessions.get(payload.sessionId);
         const caseSnapshot = assertCase(session, payload.expectedFactSetHash);
+        const contract = createFactContractV2(caseSnapshot);
+        if (!coherentBundle(session!.analysisBundle, contract, catalog)) throw new Error('当前会话缺少 coherent analysisBundle，请先重新分析后再追问');
+        const { canonicalEvidence, retrievalDiagnostics } = retrievalFor(catalog, contract, question);
         const createdAt = isoNow(now);
-        const userMessage: ChatMessage = {
-          id: createId(), role: 'user', content: question, createdAt,
+        const followUp = validateFollowUpV2(
+          createLocalRawFollowUpV2(contract), contract, canonicalEvidence, createdAt,
+        );
+        const followUpBundle: ValidatedFollowUpBundleV2 = {
+          schemaVersion: '2.0.0', caseHash: caseSnapshot.factSetHash, analysisOrigin: 'local',
+          followUp, canonicalEvidence, retrievalDiagnostics, corpusRef: catalog.corpusRef,
         };
-        const assistantMessage: ChatMessage = {
-          id: createId(),
-          role: 'assistant',
-          content: '浏览器预览不会发送 AI 请求；桌面应用会沿用本次权威排盘和古籍证据继续回答。',
-          evidenceIds: [],
-          createdAt: isoNow(now),
+        const userMessage: UserChatMessageV2 = {
+          schemaVersion: '2.0.0', id: createId(), role: 'user', content: question,
+          caseHash: caseSnapshot.factSetHash, createdAt,
+        };
+        const assistantMessage: AssistantChatMessageV2 = {
+          schemaVersion: '2.0.0', id: createId(), role: 'assistant',
+          content: deriveFollowUpContentV2(followUp), caseHash: caseSnapshot.factSetHash,
+          followUpBundle, createdAt,
         };
         const current = await sessions.get(payload.sessionId);
         assertCase(current, payload.expectedFactSetHash);
+        if (!coherentBundle(current!.analysisBundle, contract, catalog)) throw new Error('预览分析缓存状态已变化');
         await sessions.save({
-          ...current!,
-          messages: [...(current!.messages ?? []), userMessage, assistantMessage],
-          caseRuntimeTrust: 'browser-preview',
-          updatedAt: assistantMessage.createdAt,
+          ...current!, messages: [...(current!.messages ?? []), userMessage, assistantMessage],
+          caseRuntimeTrust: 'browser-preview', updatedAt: createdAt,
         });
         return {
-          caseSnapshot,
-          runtimeTrust: 'browser-preview',
-          answer: { content: assistantMessage.content, evidenceIds: [] },
-          messages: [userMessage, assistantMessage],
+          caseSnapshot, runtimeTrust: 'browser-preview', followUpBundle,
+          messages: [userMessage, assistantMessage] as const,
         };
       });
     },

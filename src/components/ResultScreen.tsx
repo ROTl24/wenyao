@@ -1,14 +1,12 @@
 import { ArrowLeft, BookMarked, RefreshCw, Send, Sparkles } from 'lucide-react';
-import { useMemo, useState } from 'react';
+import { useState } from 'react';
+import type { AnalysisClaimV2, AnalysisSectionV2 } from '../domain/liuyao/analysis-report';
 import type { PlateLine } from '../lib/divination';
-import type { EvidenceEntry, RetrievalDiagnostics } from '../lib/retrieval';
 import type { DivinationSession } from '../lib/session';
 import { HexagramLines } from './HexagramLines';
 
 interface Props {
   session: DivinationSession;
-  evidence: EvidenceEntry[];
-  retrievalDiagnostics: RetrievalDiagnostics | null;
   analyzing: boolean;
   analysisError: string;
   chatting: boolean;
@@ -17,10 +15,23 @@ interface Props {
   onBack(): void;
 }
 
-export function ResultScreen({ session, evidence, retrievalDiagnostics, analyzing, analysisError, chatting, onAnalyze, onFollowUp, onBack }: Props) {
+const SECTION_LABELS: Readonly<Record<AnalysisSectionV2, string>> = {
+  summary: '卦象总览',
+  'use-god': '用神取用',
+  calendar: '日月时令',
+  moving: '动爻与变卦',
+  synthesis: '综合判断',
+  guidance: '行动建议',
+};
+
+const SECTION_ORDER = Object.keys(SECTION_LABELS) as AnalysisSectionV2[];
+
+export function ResultScreen({ session, analyzing, analysisError, chatting, onAnalyze, onFollowUp, onBack }: Props) {
   const [followUp, setFollowUp] = useState('');
   const plate = session.plate!;
-  const evidenceById = useMemo(() => new Map(evidence.map((item) => [item.id, item])), [evidence]);
+  const bundle = session.analysisBundle;
+  const evidence = bundle?.canonicalEvidence ?? [];
+  const diagnostics = bundle?.retrievalDiagnostics;
   const baseBits = plate.lines.map((line) => line.baseYang).reverse();
   const changedBits = plate.lines.map((line) => line.changedYang).reverse();
   const submit = () => {
@@ -53,8 +64,7 @@ export function ResultScreen({ session, evidence, retrievalDiagnostics, analyzin
                 <span className="beast">{line.beast}</span>
                 <span className="relation">{line.relation} {line.ganZhi}{line.element}<small>{lineFacts(line)}</small></span>
                 <span className="mini-line">{line.baseYang ? <i className="solid" /> : <><i /><i /></>}</span>
-                <span className="line-kind">{line.label}</span>
-                <span className="line-role">{line.role || ''}</span>
+                <span className="line-kind">{line.label}</span><span className="line-role">{line.role || ''}</span>
                 {line.moving && <><span className="moving-arrow">→</span><span className="changed-relation">{line.changedRelation} {line.changedGanZhi}{line.changedElement}<small>{changedLineFacts(line)}</small></span></>}
               </div>
             ))}
@@ -62,38 +72,42 @@ export function ResultScreen({ session, evidence, retrievalDiagnostics, analyzin
         </section>
         <section className="analysis-column">
           <div className="section-title"><i />AI 解读</div>
-          {analyzing && <div className="analysis-loading"><span className="ink-loader" /><strong>正在检索古籍并校验排盘…</strong><p>排盘事实已经锁定，AI 只能依据当前卦象与证据解释。</p></div>}
+          {analyzing && <div className="analysis-loading"><span className="ink-loader" /><strong>正在检索古籍并校验排盘…</strong><p>排盘事实已经锁定，分析只能引用当前卦例与 canonical 证据。</p></div>}
           {!analyzing && analysisError && <div className="analysis-error"><strong>AI 分析暂时失败</strong><p>{analysisError}</p><button type="button" onClick={onAnalyze}><RefreshCw size={16} />重新分析</button></div>}
-          {!analyzing && session.analysis && (
+          {!analyzing && bundle && (
             <article className="analysis-report">
-              <div className="analysis-mode"><Sparkles size={15} />{session.analysis.mode === 'cloud' ? '云端 AI · 已校验' : '本地基础推演'}</div>
-              {session.analysis.pipeline && <div className="pipeline-trace"><span>排盘事实锁定</span><span>证据引用校验</span><span>{session.analysis.pipeline.retrievalMode === 'hybrid-reranked' ? '混合召回 + 模型重排' : session.analysis.pipeline.retrievalMode === 'hybrid-fused' ? '混合召回 + 融合排序' : '关键词降级检索'}</span></div>}
-              <ReportSection title="卦象总断" body={session.analysis.summary} />
-              <ReportSection title="用神取用" body={session.analysis.focus} />
-              <ReportSection title="日月生克" body={session.analysis.relations} />
-              <ReportSection title="动爻与变卦" body={session.analysis.moving} />
-              {session.analysis.claims.length > 0 && (
-                <section className="report-section"><h3>古籍规则</h3>{session.analysis.claims.map((claim, index) => (
-                  <div className="claim" key={`${claim.text}-${index}`}><p>{claim.text}</p><div>{claim.evidenceIds.map((id) => <a href={`#evidence-${id}`} key={id}>{evidenceById.get(id)?.source || id}</a>)}<span>可信度 {claim.confidence}</span></div></div>
-                ))}</section>
-              )}
-              <ReportSection title="综合判断" body={session.analysis.synthesis} />
-              <section className="report-section report-guidance"><h3>行动建议</h3><ol>{session.analysis.guidance.map((item) => <li key={item}>{item}</li>)}</ol></section>
-              {session.analysis.uncertainties.map((item) => <p className="uncertainty" key={item}>{item}</p>)}
+              <div className="analysis-mode">
+                <Sparkles size={15} />
+                {bundle.analysisOrigin === 'cloud' ? '云端生成' : '本地生成'} · {session.caseRuntimeTrust === 'browser-preview' ? '浏览器预览' : '桌面权威运行时'}
+              </div>
+              <p className="runtime-trust-note" role="status">
+                当前 Case 引用/词元已校验；{session.caseRuntimeTrust === 'browser-preview' ? '浏览器预览不等同于桌面权威运行时复核。' : '结果由桌面主进程原子持久化。'}
+              </p>
+              {SECTION_ORDER.map((section) => (
+                <ClaimSection key={section} section={section} claims={bundle.report.claims.filter((claim) => claim.section === section)} />
+              ))}
+              {bundle.report.uncertainties.map((item) => <p className="uncertainty" key={item}>{item}</p>)}
             </article>
           )}
+          {!analyzing && !bundle && session.analysis && <LegacyReport analysis={session.analysis as unknown} />}
         </section>
       </div>
       <section className="evidence-rail">
         <div className="section-title"><i />古籍依据</div>
-        {retrievalDiagnostics && <div className={`retrieval-status retrieval-status--${retrievalDiagnostics.mode}`}><strong>{retrievalDiagnostics.mode === 'hybrid-reranked' ? '向量 + 关键词 + qwen3-rerank' : retrievalDiagnostics.mode === 'hybrid-fused' ? '向量 + 关键词融合' : '关键词检索（降级）'}</strong><span>关键词候选 {retrievalDiagnostics.lexicalCandidates} · 向量候选 {retrievalDiagnostics.vectorCandidates}</span>{retrievalDiagnostics.warnings.map((warning) => <small key={warning}>{warning}</small>)}</div>}
+        {diagnostics && (
+          <div className={`retrieval-status retrieval-status--${diagnostics.mode}`}>
+            <strong>{diagnostics.mode === 'hybrid-reranked' ? '混合召回 + 重排' : diagnostics.mode === 'hybrid-fused' ? '混合召回' : 'canonical 关键词召回'}</strong>
+            <span>候选 {diagnostics.lexicalCandidates} · 规则命中 {diagnostics.matchedRuleIds.length}</span>
+            {diagnostics.warnings.map((warning) => <small key={warning}>{warning}</small>)}
+          </div>
+        )}
         <div className="evidence-list">
           {evidence.length ? evidence.map((item) => (
             <article id={`evidence-${item.id}`} className="evidence-entry" key={item.id}>
               <div className="evidence-thumbnail"><BookMarked size={26} /><span>{item.sourceType === 'original' ? '原' : '摘'}</span></div>
               <div><strong>{item.title}</strong><span>{item.source} · {item.location} · {item.knowledgeKind === 'rule' ? '规则' : item.knowledgeKind === 'case' ? '占例' : '义理'}</span><p>{item.text}</p></div>
             </article>
-          )) : <p className="empty-evidence">当前知识库没有找到足够证据，因此不会编造古籍引用。</p>}
+          )) : <p className="empty-evidence">当前 bundle 没有 canonical 证据，不展示推测性古籍引用。</p>}
         </div>
       </section>
       <section className="chat-dock">
@@ -107,8 +121,40 @@ export function ResultScreen({ session, evidence, retrievalDiagnostics, analyzin
   );
 }
 
-function ReportSection({ title, body }: { title: string; body: string }) {
-  return <section className="report-section"><h3>{title}</h3><p>{body}</p></section>;
+function ClaimSection({ section, claims }: { section: AnalysisSectionV2; claims: readonly AnalysisClaimV2[] }) {
+  return (
+    <section className="report-section">
+      <h3>{SECTION_LABELS[section]}</h3>
+      {claims.map((claim) => (
+        <div className="claim" key={claim.id}>
+          <p>{claim.text}</p><span>置信度 {claim.confidence}</span>
+          <details><summary>引用详情</summary>
+            <ReferenceList label="事实" ids={claim.factIds} />
+            <ReferenceList label="规则" ids={claim.ruleIds} />
+            <ReferenceList label="证据" ids={claim.evidenceIds} evidenceLinks />
+          </details>
+        </div>
+      ))}
+    </section>
+  );
+}
+
+function ReferenceList({ label, ids, evidenceLinks = false }: { label: string; ids: readonly string[]; evidenceLinks?: boolean }) {
+  return <div className="claim-references"><strong>{label}</strong>{ids.length ? ids.map((id) => evidenceLinks ? <a key={id} href={`#evidence-${id}`}>{id}</a> : <span key={id}>{id}</span>) : <span>无</span>}</div>;
+}
+
+function LegacyReport({ analysis }: { analysis: unknown }) {
+  const value = analysis && typeof analysis === 'object' ? analysis as Record<string, unknown> : {};
+  const fields = ['summary', 'focus', 'relations', 'moving', 'synthesis']
+    .map((key) => typeof value[key] === 'string' ? value[key] as string : '')
+    .filter(Boolean);
+  return (
+    <article className="analysis-report analysis-report--legacy">
+      <div className="analysis-mode">旧版历史解读·未验证</div>
+      <p className="uncertainty">该内容没有 V2 Case 引用与词元校验，只作为历史记录展示。</p>
+      {fields.map((body, index) => <section className="report-section" key={`${index}-${body}`}><p>{body}</p></section>)}
+    </article>
+  );
 }
 
 function lineFacts(line: PlateLine) {

@@ -1,12 +1,17 @@
 import { StrictMode } from 'react';
 import { act, fireEvent, render, screen, waitFor } from '@testing-library/react';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
-import { buildDivinationCase } from './domain/liuyao/case';
+import {
+  buildDivinationCase,
+  createFactContractV2,
+  createLocalRawReportV2,
+  validateAnalysisReportV2,
+} from './domain/liuyao';
 import { DEFAULT_RULE_CONTEXT } from './domain/liuyao/rules/default-context';
-import { browserSha256 } from './lib/browserReadingAdapter';
+import { browserSha256 } from './lib/browserCrypto';
+import { browserEvidenceCatalog } from './lib/browserEvidenceCatalog';
 import { legacyPlateFromCase } from './lib/casePresentation';
 import { createToss } from './lib/divination';
-import { createBrowserLocalReport } from './lib/localAnalysis';
 import type { AnalyzeReadingResult, FollowUpReadingResult, ReadingCaseEnvelope } from './lib/readingClient';
 import {
   confirmCurrentToss,
@@ -142,13 +147,24 @@ function readingEnvelope(
 
 function analysisResult(session: DivinationSession): AnalyzeReadingResult {
   const caseSnapshot = session.caseSnapshot!;
-  const presented = { ...session, plate: legacyPlateFromCase(caseSnapshot) };
+  const contract = createFactContractV2(caseSnapshot);
+  const report = validateAnalysisReportV2(
+    createLocalRawReportV2(contract, []), contract, [], '2026-07-12T03:00:00.000Z',
+  );
   return {
     caseSnapshot,
     runtimeTrust: session.caseRuntimeTrust ?? 'authoritative',
-    report: createBrowserLocalReport(presented, []),
-    evidence: [],
-    retrievalDiagnostics: null,
+    analysisBundle: {
+      schemaVersion: '2.0.0', caseHash: caseSnapshot.factSetHash,
+      analysisOrigin: 'local', report, canonicalEvidence: [],
+      retrievalDiagnostics: {
+        mode: 'lexical-fallback', lexicalCandidates: 0, vectorCandidates: 0,
+        fusedCandidates: 0, vectorUsed: false, rerankUsed: false,
+        requestedRuleIds: [], matchedRuleIds: [], ruleCandidateIds: [],
+        ruleBoost: 12, warnings: [],
+      },
+      corpusRef: browserEvidenceCatalog.corpusRef,
+    },
   };
 }
 
@@ -196,14 +212,16 @@ beforeEach(() => {
   harness.followUp.mockReset().mockImplementation(async ({ question }: { question: string }) => {
     const session = harness.resultSession!;
     const createdAt = new Date().toISOString();
+    const caseHash = session.caseSnapshot!.factSetHash;
+    const followUpBundle = { schemaVersion: '2.0.0', caseHash } as never;
     return {
       caseSnapshot: session.caseSnapshot!,
       runtimeTrust: session.caseRuntimeTrust ?? 'authoritative',
-      answer: { content: '默认追问', evidenceIds: [] },
+      followUpBundle,
       messages: [
-        { id: 'user-message', role: 'user', content: question, createdAt },
-        { id: 'assistant-message', role: 'assistant', content: '默认追问', evidenceIds: [], createdAt },
-      ],
+        { schemaVersion: '2.0.0', id: 'user-message', role: 'user', content: question, caseHash, createdAt },
+        { schemaVersion: '2.0.0', id: 'assistant-message', role: 'assistant', content: '默认追问', caseHash, followUpBundle, createdAt },
+      ] as const,
     };
   });
   harness.currentSession = null;
@@ -221,7 +239,7 @@ describe('App 原子确认命令', () => {
     const withCase = sessionWithCase(completed, envelope);
     const existing = {
       ...withCase,
-      analysis: analysisResult(withCase).report,
+      analysisBundle: analysisResult(withCase).analysisBundle,
       messages: [
         { id: 'same-user', role: 'user' as const, content: '旧追问', createdAt: '2026-07-12T00:00:07.000Z' },
         { id: 'same-assistant', role: 'assistant' as const, content: '旧回答', createdAt: '2026-07-12T00:00:08.000Z' },
@@ -229,7 +247,7 @@ describe('App 原子确认命令', () => {
     };
 
     const rebuilt = sessionWithCase(existing, { ...envelope, runtimeTrust: 'browser-preview' });
-    expect(rebuilt.analysis).toEqual(existing.analysis);
+    expect(rebuilt.analysisBundle).toEqual(existing.analysisBundle);
     expect(rebuilt.messages).toEqual(existing.messages);
   });
 
@@ -239,7 +257,7 @@ describe('App 原子确认命令', () => {
     const withCase = sessionWithCase(completed, envelope);
     const existing = {
       ...withCase,
-      analysis: analysisResult(withCase).report,
+      analysisBundle: analysisResult(withCase).analysisBundle,
       messages: [
         { id: 'changed-user', role: 'user' as const, content: '旧追问', createdAt: '2026-07-12T00:00:07.000Z' },
         { id: 'changed-assistant', role: 'assistant' as const, content: '旧回答', createdAt: '2026-07-12T00:00:08.000Z' },
@@ -251,7 +269,7 @@ describe('App 原子确认命令', () => {
     };
 
     const rebuilt = sessionWithCase(existing, changedEnvelope);
-    expect(rebuilt.analysis).toBeUndefined();
+    expect(rebuilt.analysisBundle).toBeUndefined();
     expect(rebuilt.messages).toEqual([]);
   });
 
@@ -391,7 +409,7 @@ describe('App 原子确认命令', () => {
       plate: legacyPlateFromCase(envelope.caseSnapshot),
     } as DivinationSession;
     const result = analysisResult(withCase);
-    harness.openSession = { ...withCase, analysis: result.report };
+    harness.openSession = { ...withCase, analysisBundle: result.analysisBundle };
     harness.analyze.mockResolvedValue(result);
     render(<App />);
     fireEvent.click(screen.getByRole('button', { name: '历史记录' }));
@@ -413,7 +431,7 @@ describe('App 原子确认命令', () => {
       caseRuntimeTrust: staleEnvelope.runtimeTrust,
       plate: legacyPlateFromCase(staleEnvelope.caseSnapshot),
     };
-    const recovered = { ...base, analysis: analysisResult(stalePresented).report };
+    const recovered = { ...base, analysis: { mode: 'local', summary: '旧报告' } as never };
     const delayedCase = deferred<ReadingCaseEnvelope>();
     const delayedAnalysis = deferred<AnalyzeReadingResult>();
     harness.openSession = recovered;
@@ -632,11 +650,11 @@ describe('App 原子确认命令', () => {
     });
 
     await waitFor(() => expect(harness.currentSession?.id).toBe(newSessionId));
-    expect(harness.currentSession?.analysis).toBeUndefined();
+    expect(harness.currentSession?.analysisBundle).toBeUndefined();
     expect(screen.getByRole('heading', { name: '第1爻' })).toBeVisible();
     fireEvent.click(screen.getByRole('button', { name: '历史记录' }));
     await screen.findByRole('heading', { name: /^history-/ });
-    expect(harness.historySessions.find((entry) => entry.id === completed.id)?.analysis).toBeDefined();
+    expect(harness.historySessions.find((entry) => entry.id === completed.id)?.analysisBundle).toBeDefined();
   });
 
   it('会话删除后迟到的 save 不会把历史或持久化记录复活', async () => {
@@ -703,22 +721,27 @@ describe('App 原子确认命令', () => {
       delayedFollowUp.resolve({
         caseSnapshot: completed.caseSnapshot!,
         runtimeTrust: completed.caseRuntimeTrust ?? 'authoritative',
-        answer: { content: '交错回答', evidenceIds: [] },
-        messages: [
-          { id: 'cross-user', role: 'user', content: '交错追问', createdAt: new Date().toISOString() },
-          { id: 'cross-assistant', role: 'assistant', content: '交错回答', evidenceIds: [], createdAt: new Date().toISOString() },
-        ],
+        followUpBundle: { schemaVersion: '2.0.0', caseHash: completed.caseSnapshot!.factSetHash } as never,
+        messages: [{
+          schemaVersion: '2.0.0', id: 'cross-user', role: 'user', content: '交错追问',
+          caseHash: completed.caseSnapshot!.factSetHash, createdAt: new Date().toISOString(),
+        }, {
+          schemaVersion: '2.0.0', id: 'cross-assistant', role: 'assistant', content: '交错回答',
+          caseHash: completed.caseSnapshot!.factSetHash,
+          followUpBundle: { schemaVersion: '2.0.0', caseHash: completed.caseSnapshot!.factSetHash } as never,
+          createdAt: new Date().toISOString(),
+        }],
       });
       await delayedFollowUp.promise;
     });
 
     await waitFor(() => {
-      expect(harness.resultSession?.analysis).toBeDefined();
+      expect(harness.resultSession?.analysisBundle).toBeDefined();
       expect(harness.resultSession?.messages.map((message) => message.content))
         .toEqual(['交错追问', '交错回答']);
     });
     expect(harness.save.mock.calls.some(([persisted]) => (
-      Boolean(persisted.analysis) || persisted.messages.length > 0
+      Boolean(persisted.analysisBundle) || persisted.messages.length > 0
     ))).toBe(false);
   });
 

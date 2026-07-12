@@ -1,7 +1,6 @@
-import corpus from '../../resources/corpus.json';
 import type { DesktopApi } from '../types/desktop';
+import { browserEvidenceCatalog } from './browserEvidenceCatalog';
 import { createBrowserReadingAdapter } from './browserReadingAdapter';
-import type { EvidenceEntry } from './retrieval';
 import { normalizeSessionIdentity, type DivinationSession } from './session';
 
 const STORAGE_KEY = 'wenyao-browser-sessions';
@@ -147,7 +146,6 @@ const browserReading = createBrowserReadingAdapter({
     get: browserSessionApi.get,
     async save(session) { return writeBrowserSession(session); },
   },
-  corpus: corpus as unknown as EvidenceEntry[],
 });
 
 const browserFallback: DesktopApi = {
@@ -159,8 +157,19 @@ const browserFallback: DesktopApi = {
     async test() { return { ok: false, error: { code: 'DESKTOP_ONLY', message: '请在桌面应用中测试 AI 连接。', dataSafe: true, nextAction: '启动 Electron 桌面窗口。' } }; },
   },
   corpus: {
-    async list() { return corpus as unknown as EvidenceEntry[]; },
-    async status() { return { count: corpus.length, bookCount: new Set(corpus.map((entry) => entry.source)).size, originalCount: corpus.filter((entry) => entry.sourceType === 'original').length, summaryCount: corpus.filter((entry) => entry.sourceType === 'summary').length, ruleCount: 0, caseCount: 0, doctrineCount: corpus.length, vectorReady: false, vectorModel: '', ready: true }; },
+    async list() { return [...structuredClone(browserEvidenceCatalog.entries)]; },
+    async status() {
+      const entries = browserEvidenceCatalog.entries;
+      return {
+        count: entries.length, bookCount: new Set(entries.map((entry) => entry.source)).size,
+        originalCount: entries.filter((entry) => entry.sourceType === 'original').length,
+        summaryCount: entries.filter((entry) => entry.sourceType === 'summary').length,
+        ruleCount: entries.filter((entry) => entry.knowledgeKind === 'rule').length,
+        caseCount: entries.filter((entry) => entry.knowledgeKind === 'case').length,
+        doctrineCount: entries.filter((entry) => entry.knowledgeKind === 'doctrine').length,
+        vectorReady: false, vectorModel: '', ready: true,
+      };
+    },
     async rebuildVectors() { return { ok: false, error: { code: 'DESKTOP_ONLY', message: '请在桌面应用中构建向量索引。', dataSafe: true, nextAction: '启动 Electron 桌面窗口。' } }; },
   },
   reading: browserReading,
