@@ -204,6 +204,7 @@ export function createBrowserReadingAdapter({
     if (expectedFactSetHash && current.caseSnapshot?.factSetHash !== expectedFactSetHash) {
       throw new Error('权威 Case 已变化');
     }
+    const sameCase = current.caseSnapshot?.factSetHash === caseSnapshot.factSetHash;
     await sessions.save({
       ...current,
       caseSnapshot,
@@ -212,7 +213,8 @@ export function createBrowserReadingAdapter({
       migrationState: 'clean',
       caseRuntimeTrust: 'browser-preview',
       plate: legacyPlateFromCase(caseSnapshot),
-      analysis: current.caseSnapshot?.factSetHash === caseSnapshot.factSetHash ? current.analysis : undefined,
+      analysis: sameCase ? current.analysis : undefined,
+      messages: sameCase ? (current.messages ?? []) : [],
       updatedAt: builtAt,
     });
     return { caseSnapshot, runtimeTrust: 'browser-preview' };

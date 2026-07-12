@@ -5,6 +5,17 @@ const path = require('node:path');
 const test = require('node:test');
 const { JsonStore } = require('./store.cjs');
 
+const VALID_CATEGORY = 'career';
+const VALID_CAST_AT = '2026-07-12T00:00:00.000Z';
+
+function rendererSession(input = {}) {
+  return {
+    category: VALID_CATEGORY,
+    castAt: VALID_CAST_AT,
+    ...input,
+  };
+}
+
 test('JsonStore persists, orders and deletes sessions atomically', () => {
   const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'wenyao-store-'));
   const times = [
@@ -14,14 +25,38 @@ test('JsonStore persists, orders and deletes sessions atomically', () => {
   const store = new JsonStore(path.join(dir, 'app-data.json'), {
     now: () => times.shift() || new Date('2026-03-01T00:00:00.000Z'),
   });
-  store.saveRendererSession({ id: 'older', question: '旧问题', updatedAt: '2026-01-01T00:00:00.000Z' });
-  store.saveRendererSession({ id: 'newer', question: '新问题', updatedAt: '2026-02-01T00:00:00.000Z' });
+  store.saveRendererSession(rendererSession({ id: 'older', question: '旧问题', updatedAt: '2026-01-01T00:00:00.000Z' }));
+  store.saveRendererSession(rendererSession({ id: 'newer', question: '新问题', updatedAt: '2026-02-01T00:00:00.000Z' }));
 
   assert.deepEqual(store.listSessions().map((item) => item.id), ['newer', 'older']);
   assert.equal(store.getSession('older').question, '旧问题');
   store.deleteSession('older');
   assert.equal(store.getSession('older'), null);
   assert.equal(fs.existsSync(`${store.filePath}.tmp`), false);
+});
+
+test('renderer create normalizes question and rejects invalid immutable identity fields', () => {
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'wenyao-store-'));
+  const store = new JsonStore(path.join(dir, 'app-data.json'));
+  const created = store.saveRendererSession(rendererSession({
+    id: 'normalized-identity',
+    question: '  事业是否顺利？\n',
+    tosses: [],
+  }));
+  assert.equal(created.question, '事业是否顺利？');
+
+  const invalid = [
+    { id: 'empty-question', question: '   ', category: VALID_CATEGORY, castAt: VALID_CAST_AT },
+    { id: 'long-question', question: '问'.repeat(501), category: VALID_CATEGORY, castAt: VALID_CAST_AT },
+    { id: 'missing-category', question: '问题', castAt: VALID_CAST_AT },
+    { id: 'invalid-category', question: '问题', category: 'forged', castAt: VALID_CAST_AT },
+    { id: 'missing-cast-at', question: '问题', category: VALID_CATEGORY },
+    { id: 'non-exact-cast-at', question: '问题', category: VALID_CATEGORY, castAt: '2026-07-12' },
+  ];
+  for (const session of invalid) {
+    assert.throws(() => store.saveRendererSession(session), /会话数据无效/);
+    assert.equal(store.getSession(session.id), null);
+  }
 });
 
 function authoritativeCase(sessionId = 'session-1') {
@@ -111,11 +146,11 @@ test('renderer session save cannot create or overwrite authoritative fields or m
 test('authoritative case is identity-bound and advances the stored revision', () => {
   const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'wenyao-store-'));
   const store = new JsonStore(path.join(dir, 'app-data.json'));
-  store.saveRendererSession({
+  store.saveRendererSession(rendererSession({
     id: 'session-1',
     question: '权威问题',
     updatedAt: '2026-07-12T00:00:05.000Z',
-  });
+  }));
 
   assert.throws(
     () => store.saveAuthoritativeCase('session-1', authoritativeCase('other-session')),
@@ -137,6 +172,88 @@ test('authoritative case is identity-bound and advances the stored revision', ()
   assert.equal(saved.caseSnapshot.plate.id, 'plate:session-1:v2');
   assert.equal(saved.authoritativeRevision, 1);
   assert.equal(saved.updatedAt >= '2026-07-12T00:00:05.000Z', true);
+});
+
+test('authoritative Case rebuild preserves conversation only for the same factSetHash', () => {
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'wenyao-store-'));
+  const store = new JsonStore(path.join(dir, 'app-data.json'));
+  store.saveRendererSession(rendererSession({
+    id: 'session-1', question: '权威问题', status: 'casting', tosses: [],
+  }));
+  const initialCase = authoritativeCase();
+  store.saveAuthoritativeCase('session-1', initialCase, {
+    expectedInteractionFingerprint: store.getInteractionFingerprint('session-1'),
+    runtimeTrust: 'authoritative',
+  });
+  store.saveAuthoritativeAnalysis('session-1', {
+    mode: 'local', summary: '旧分析', generatedAt: '2026-07-12T00:00:02.000Z',
+  }, { expectedFactSetHash: initialCase.factSetHash });
+  store.appendAuthoritativeMessage('session-1', {
+    id: 'old-user', role: 'user', content: '旧追问', createdAt: '2026-07-12T00:00:03.000Z',
+  }, { expectedFactSetHash: initialCase.factSetHash });
+
+  const sameFacts = { ...structuredClone(initialCase), builtAt: '2026-07-12T00:00:04.000Z' };
+  const sameSaved = store.saveAuthoritativeCase('session-1', sameFacts, {
+    expectedInteractionFingerprint: store.getInteractionFingerprint('session-1'),
+    expectedFactSetHash: initialCase.factSetHash,
+    runtimeTrust: 'authoritative',
+  });
+  assert.equal(sameSaved.analysis.summary, '旧分析');
+  assert.deepEqual(sameSaved.messages.map((message) => message.id), ['old-user']);
+
+  const changedFacts = { ...structuredClone(sameFacts), factSetHash: 'fact-set-reselected' };
+  const changedSaved = store.saveAuthoritativeCase('session-1', changedFacts, {
+    expectedInteractionFingerprint: store.getInteractionFingerprint('session-1'),
+    expectedFactSetHash: initialCase.factSetHash,
+    runtimeTrust: 'authoritative',
+  });
+  assert.equal(changedSaved.analysis, undefined);
+  assert.deepEqual(changedSaved.messages, []);
+});
+
+test('authoritative follow-up messages validate and commit as one atomic pair', () => {
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'wenyao-store-'));
+  const store = new JsonStore(path.join(dir, 'app-data.json'));
+  store.saveRendererSession(rendererSession({
+    id: 'session-1', question: '权威问题', status: 'casting', tosses: [],
+  }));
+  const caseSnapshot = authoritativeCase();
+  const withCase = store.saveAuthoritativeCase('session-1', caseSnapshot, {
+    expectedInteractionFingerprint: store.getInteractionFingerprint('session-1'),
+    runtimeTrust: 'authoritative',
+  });
+  const user = {
+    id: 'pair-user', role: 'user', content: '原子追问', createdAt: '2026-07-12T00:00:03.000Z',
+  };
+  const invalidAssistant = {
+    id: 'pair-assistant', role: 'assistant', content: '', createdAt: '2026-07-12T00:00:04.000Z',
+  };
+  assert.throws(() => store.appendAuthoritativeMessages('session-1', [user, invalidAssistant], {
+    expectedFactSetHash: caseSnapshot.factSetHash,
+  }), /权威消息无效/);
+  assert.deepEqual(store.getSession('session-1').messages, []);
+  assert.equal(store.getSession('session-1').authoritativeRevision, withCase.authoritativeRevision);
+
+  assert.throws(() => store.appendAuthoritativeMessages('session-1', [
+    user,
+    { ...invalidAssistant, id: user.id, content: '批内重复 ID' },
+  ], { expectedFactSetHash: caseSnapshot.factSetHash }), /权威消息 ID 冲突/);
+  assert.deepEqual(store.getSession('session-1').messages, []);
+
+  const assistant = { ...invalidAssistant, content: '原子回答' };
+  const saved = store.appendAuthoritativeMessages('session-1', [user, assistant], {
+    expectedFactSetHash: caseSnapshot.factSetHash,
+  });
+  assert.deepEqual(saved.messages.map((message) => message.id), ['pair-user', 'pair-assistant']);
+  assert.equal(saved.authoritativeRevision, withCase.authoritativeRevision + 1);
+
+  assert.throws(() => store.appendAuthoritativeMessages('session-1', [
+    { ...user, id: 'new-user' },
+    { ...assistant, id: 'pair-assistant' },
+  ], { expectedFactSetHash: caseSnapshot.factSetHash }), /权威消息 ID 冲突/);
+  const afterConflict = store.getSession('session-1');
+  assert.deepEqual(afterConflict.messages.map((message) => message.id), ['pair-user', 'pair-assistant']);
+  assert.equal(afterConflict.authoritativeRevision, saved.authoritativeRevision);
 });
 
 function confirmedToss(id, lineIndex, value = 7) {
@@ -227,30 +344,30 @@ test('renderer progress is monotonic, immutable and independent of renderer time
 test('renderer cannot create an invalid confirmed toss sequence', () => {
   const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'wenyao-store-'));
   const store = new JsonStore(path.join(dir, 'app-data.json'));
-  assert.throws(() => store.saveRendererSession({
+  assert.throws(() => store.saveRendererSession(rendererSession({
     id: 'invalid-create',
     question: '非法投币',
     status: 'complete',
     tosses: Array.from({ length: 7 }, (_, index) => confirmedToss(`toss-${index + 1}`, index + 1)),
-  }), /投币历史冲突/);
+  })), /投币历史冲突/);
 });
 
 test('renderer status is derived from confirmed toss count', () => {
   const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'wenyao-store-'));
   const store = new JsonStore(path.join(dir, 'app-data.json'));
-  const partial = store.saveRendererSession({
+  const partial = store.saveRendererSession(rendererSession({
     id: 'derived-status',
     question: '状态不可伪造',
     status: 'complete',
     tosses: [confirmedToss('confirmed-1', 1)],
     currentToss: preparedToss('pending-2', 2),
-  });
+  }));
   assert.equal(partial.status, 'casting');
   assert.equal(partial.currentToss.id, 'pending-2');
 
-  const empty = store.saveRendererSession({
+  const empty = store.saveRendererSession(rendererSession({
     id: 'invalid-status', question: '非法状态', status: 'forged', tosses: [],
-  });
+  }));
   assert.equal(empty.status, 'casting');
 });
 
@@ -259,18 +376,18 @@ test('renderer toss faces, value and derived fields must be self-consistent', ()
   const store = new JsonStore(path.join(dir, 'app-data.json'));
   const forged = confirmedToss('forged-toss', 1, 7);
   forged.faces = ['reverse', 'reverse', 'reverse'];
-  assert.throws(() => store.saveRendererSession({
+  assert.throws(() => store.saveRendererSession(rendererSession({
     id: 'forged-toss-session',
     question: '伪造投币派生字段',
     status: 'casting',
     tosses: [forged],
-  }), /投币历史冲突/);
+  })), /投币历史冲突/);
 });
 
 test('deleted session IDs are tombstoned and cannot be revived by delayed saves', () => {
   const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'wenyao-store-'));
   const store = new JsonStore(path.join(dir, 'app-data.json'));
-  const session = { id: 'deleted-session', question: '删除测试', tosses: [] };
+  const session = rendererSession({ id: 'deleted-session', question: '删除测试', tosses: [] });
   store.saveRendererSession(session);
   store.deleteSession(session.id);
   assert.throws(() => store.saveRendererSession(session), /会话已删除/);
@@ -289,7 +406,7 @@ test('failed delete commit keeps the session visible and retryable', () => {
     },
   };
   const store = new JsonStore(filePath, { fileSystem });
-  store.saveRendererSession({ id: 'delete-failure', question: '删除失败', tosses: [] });
+  store.saveRendererSession(rendererSession({ id: 'delete-failure', question: '删除失败', tosses: [] }));
   failRename = true;
   assert.throws(() => store.deleteSession('delete-failure'), /simulated delete rename failure/);
   assert.equal(store.getSession('delete-failure').question, '删除失败');
@@ -303,14 +420,14 @@ test('failed delete commit keeps the session visible and retryable', () => {
 test('authoritative writes enforce interaction and Case compare-and-swap guards', () => {
   const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'wenyao-store-'));
   const store = new JsonStore(path.join(dir, 'app-data.json'));
-  store.saveRendererSession({ id: 'session-1', question: 'CAS', status: 'casting', tosses: [] });
+  store.saveRendererSession(rendererSession({ id: 'session-1', question: 'CAS', status: 'casting', tosses: [] }));
   const staleInteraction = store.getInteractionFingerprint('session-1');
-  store.saveRendererSession({
+  store.saveRendererSession(rendererSession({
     id: 'session-1',
     question: 'CAS',
     status: 'casting',
     tosses: [confirmedToss('confirmed-1', 1)],
-  });
+  }));
   const casCase = { ...authoritativeCase(), question: 'CAS' };
   assert.throws(() => store.saveAuthoritativeCase('session-1', casCase, {
     expectedInteractionFingerprint: staleInteraction,
@@ -349,7 +466,7 @@ test('Store writes preserve migrated top-level fields and encrypted settings', (
     customTopLevel: { preserve: true },
   }));
   const store = new JsonStore(filePath);
-  store.saveRendererSession({ id: 'session-1', question: '保留顶层字段' });
+  store.saveRendererSession(rendererSession({ id: 'session-1', question: '保留顶层字段' }));
   const persisted = JSON.parse(fs.readFileSync(filePath, 'utf8'));
   assert.deepEqual(persisted.customTopLevel, { preserve: true });
   assert.equal(persisted.settings.encryptedApiKey, 'ciphertext');

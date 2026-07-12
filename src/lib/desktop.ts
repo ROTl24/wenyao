@@ -2,7 +2,7 @@ import corpus from '../../resources/corpus.json';
 import type { DesktopApi } from '../types/desktop';
 import { createBrowserReadingAdapter } from './browserReadingAdapter';
 import type { EvidenceEntry } from './retrieval';
-import type { DivinationSession } from './session';
+import { normalizeSessionIdentity, type DivinationSession } from './session';
 
 const STORAGE_KEY = 'wenyao-browser-sessions';
 const deletedBrowserSessionIds = new Set<string>();
@@ -90,11 +90,9 @@ function rendererBrowserSession(input: DivinationSession): DivinationSession {
   validateBrowserInteraction(input);
   const existing = browserSessions().find((item) => item.id === input.id);
   if (!existing) {
+    const identity = normalizeSessionIdentity(input);
     return {
-      id: input.id,
-      question: input.question,
-      category: input.category,
-      castAt: input.castAt,
+      ...identity,
       updatedAt: browserTimestamp(),
       status: input.tosses.length === 6 ? 'complete' : 'casting',
       tosses: structuredClone(input.tosses),

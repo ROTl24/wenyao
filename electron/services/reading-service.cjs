@@ -382,7 +382,6 @@ function createReadingService({
         content: question,
         createdAt: nowIso(now),
       };
-      const afterUser = store.appendAuthoritativeMessage(sessionId, userMessage, { expectedFactSetHash });
       const found = await searchCorpus({
         query: question,
         domainTerms: termsForCase(caseSnapshot),
@@ -411,7 +410,11 @@ function createReadingService({
         evidenceIds,
         createdAt: nowIso(now),
       };
-      const saved = store.appendAuthoritativeMessage(sessionId, assistantMessage, { expectedFactSetHash });
+      const saved = store.appendAuthoritativeMessages(
+        sessionId,
+        [userMessage, assistantMessage],
+        { expectedFactSetHash },
+      );
       return {
         caseSnapshot: structuredClone(saved.caseSnapshot),
         runtimeTrust: saved.caseRuntimeTrust || 'authoritative',

@@ -215,6 +215,70 @@ describe('ReadingClient adapters', () => {
     expect(stored?.messages.map((message) => message.role)).toEqual(['user', 'assistant']);
   });
 
+  it('browser renderer create normalizes question and rejects invalid immutable identity fields', async () => {
+    localStorage.clear();
+    vi.resetModules();
+    const { desktop } = await import('./desktop');
+    const normalized = await desktop.sessions.save({
+      ...completedSession('browser-normalized-identity'),
+      question: '  事业是否顺利？\n',
+    });
+    expect(normalized.question).toBe('事业是否顺利？');
+
+    const invalid = [
+      { ...completedSession('browser-empty-question'), question: '   ' },
+      { ...completedSession('browser-long-question'), question: '问'.repeat(501) },
+      { ...completedSession('browser-missing-category'), category: undefined },
+      { ...completedSession('browser-invalid-category'), category: 'forged' },
+      { ...completedSession('browser-missing-cast-at'), castAt: undefined },
+      { ...completedSession('browser-non-exact-cast-at'), castAt: '2026-07-12' },
+    ];
+    for (const session of invalid) {
+      await expect(desktop.sessions.save(session as DivinationSession)).rejects.toThrow('会话数据无效');
+      expect(await desktop.sessions.get(session.id)).toBeNull();
+    }
+  });
+
+  it('browser Case rebuild preserves messages only for the same factSetHash', async () => {
+    const { adapter, sessions } = createBrowserHarness();
+    const initial = await adapter.buildCase({ sessionId: 'session-1' });
+    const selected = await adapter.selectIntent({
+      sessionId: 'session-1',
+      clarification: { explicitIntentId: 'career.rank-or-office' },
+      expectedFactSetHash: initial.caseSnapshot.factSetHash,
+    });
+    await adapter.followUp({
+      sessionId: 'session-1', question: '旧 Case 追问', expectedFactSetHash: selected.caseSnapshot.factSetHash,
+    });
+
+    const sameCase = await adapter.selectIntent({
+      sessionId: 'session-1',
+      clarification: { explicitIntentId: 'career.rank-or-office' },
+      expectedFactSetHash: selected.caseSnapshot.factSetHash,
+    });
+    expect(sameCase.caseSnapshot.factSetHash).toBe(selected.caseSnapshot.factSetHash);
+    expect(sessions.get('session-1')?.messages.map((message) => message.content)).toEqual([
+      '旧 Case 追问',
+      expect.stringContaining('浏览器预览'),
+    ]);
+
+    const changedCase = await adapter.selectIntent({
+      sessionId: 'session-1',
+      clarification: { explicitIntentId: 'career.contract-or-approval' },
+      expectedFactSetHash: sameCase.caseSnapshot.factSetHash,
+    });
+    expect(changedCase.caseSnapshot.factSetHash).not.toBe(sameCase.caseSnapshot.factSetHash);
+    expect(sessions.get('session-1')?.messages).toEqual([]);
+
+    await adapter.followUp({
+      sessionId: 'session-1', question: '新 Case 追问', expectedFactSetHash: changedCase.caseSnapshot.factSetHash,
+    });
+    expect(sessions.get('session-1')?.messages.map((message) => message.content)).toEqual([
+      '新 Case 追问',
+      expect.stringContaining('浏览器预览'),
+    ]);
+  });
+
   it('browser session persistence clears completed currentToss and tombstones deleted IDs', async () => {
     localStorage.clear();
     vi.resetModules();

@@ -6,6 +6,16 @@ const { isDeepStrictEqual } = require('node:util');
 const DEFAULT_STATE = Object.freeze({ migrationVersion: 2, sessions: [], settings: {} });
 const RUNTIME_TRUST = new Set(['authoritative', 'browser-preview']);
 const TOSS_VALUES = new Set([6, 7, 8, 9]);
+const SESSION_CATEGORIES = new Set([
+  'career',
+  'wealth',
+  'relationship',
+  'health',
+  'study',
+  'lost_item',
+  'travel',
+  'other',
+]);
 
 function ownedClone(value) {
   return structuredClone(value);
@@ -47,14 +57,22 @@ function interactionFingerprint(session) {
 }
 
 function rendererCreateSnapshot(input) {
-  if (!isRecord(input) || !nonEmptyString(input.id) || typeof input.question !== 'string') {
+  const question = typeof input?.question === 'string' ? input.question.trim() : '';
+  if (
+    !isRecord(input)
+    || !nonEmptyString(input.id)
+    || !question
+    || question.length > 500
+    || !SESSION_CATEGORIES.has(input.category)
+    || !exactIso(input.castAt)
+  ) {
     throw new TypeError('会话数据无效');
   }
   const session = {
     id: input.id,
-    question: input.question,
-    ...(typeof input.category === 'string' ? { category: input.category } : {}),
-    ...(typeof input.castAt === 'string' ? { castAt: input.castAt } : {}),
+    question,
+    category: input.category,
+    castAt: input.castAt,
     status: 'casting',
     tosses: Array.isArray(input.tosses) ? ownedClone(input.tosses) : [],
     ...(isRecord(input.currentToss) ? { currentToss: ownedClone(input.currentToss) } : {}),
@@ -117,6 +135,14 @@ function validTossSequence(tosses) {
 function validCurrentToss(toss, confirmedCount) {
   if (confirmedCount >= 6) return toss === undefined;
   return toss === undefined || validTossFields(toss, confirmedCount + 1, { confirmed: false });
+}
+
+function validAuthoritativeMessage(message, role) {
+  return isRecord(message)
+    && nonEmptyString(message.id)
+    && message.role === role
+    && nonEmptyString(message.content)
+    && nonEmptyString(message.createdAt);
 }
 
 function compareRendererProgress(existing, input) {
@@ -320,7 +346,10 @@ class JsonStore {
       authoritativeRevision: Number(session.authoritativeRevision || 0) + 1,
       updatedAt: this.#nextTimestamp(session),
     };
-    if (changedCase) delete next.analysis;
+    if (changedCase) {
+      delete next.analysis;
+      next.messages = [];
+    }
     return this.#replaceSession(index, next);
   }
 
@@ -344,7 +373,7 @@ class JsonStore {
       !isRecord(message)
       || !nonEmptyString(message.id)
       || !['user', 'assistant'].includes(message.role)
-      || typeof message.content !== 'string'
+      || !nonEmptyString(message.content)
       || !nonEmptyString(message.createdAt)
     ) throw new TypeError('权威消息无效');
     const messages = Array.isArray(session.messages) ? session.messages : [];
@@ -352,6 +381,32 @@ class JsonStore {
     const next = {
       ...session,
       messages: [...messages, ownedClone(message)],
+      authoritativeRevision: Number(session.authoritativeRevision || 0) + 1,
+      updatedAt: this.#nextTimestamp(session),
+    };
+    return this.#replaceSession(index, next);
+  }
+
+  appendAuthoritativeMessages(sessionId, messagePair, { expectedFactSetHash } = {}) {
+    const { index, session } = this.#requireSession(sessionId);
+    this.#assertCaseHash(session, expectedFactSetHash);
+    if (
+      !Array.isArray(messagePair)
+      || messagePair.length !== 2
+      || !validAuthoritativeMessage(messagePair[0], 'user')
+      || !validAuthoritativeMessage(messagePair[1], 'assistant')
+    ) throw new TypeError('权威消息无效');
+
+    const existingMessages = Array.isArray(session.messages) ? session.messages : [];
+    const incomingIds = messagePair.map((message) => message.id);
+    if (
+      new Set(incomingIds).size !== incomingIds.length
+      || incomingIds.some((id) => existingMessages.some((message) => message.id === id))
+    ) throw new Error('权威消息 ID 冲突');
+
+    const next = {
+      ...session,
+      messages: [...existingMessages, ...ownedClone(messagePair)],
       authoritativeRevision: Number(session.authoritativeRevision || 0) + 1,
       updatedAt: this.#nextTimestamp(session),
     };

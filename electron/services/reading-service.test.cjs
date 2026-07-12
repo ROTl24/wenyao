@@ -335,6 +335,81 @@ test('followUp owns user and assistant persistence and filters untrusted evidenc
   assert.deepEqual(store.getSession('session-1').messages.map((message) => message.content), ['下一步怎么看？', '权威回答']);
 });
 
+test('followUp retrieval failure leaves the conversation unchanged', async () => {
+  const store = createCompletedStore();
+  const service = createReadingService(servicePorts(store, {
+    searchCorpus: async () => { throw new Error('检索失败'); },
+  }));
+  const built = await service.buildCase({ sessionId: 'session-1' });
+
+  await assert.rejects(service.followUp({
+    sessionId: 'session-1', question: '检索失败时不要落消息', expectedFactSetHash: built.caseSnapshot.factSetHash,
+  }), /检索失败/);
+  assert.deepEqual(store.getSession('session-1').messages, []);
+});
+
+test('followUp AI failure leaves no orphan and retry atomically commits one pair', async () => {
+  const store = createCompletedStore();
+  const histories = [];
+  let attempts = 0;
+  const service = createReadingService(servicePorts(store, {
+    followUp: async (input) => {
+      histories.push(input.session.messages.map((message) => message.content));
+      attempts += 1;
+      if (attempts === 1) throw new Error('AI 暂时失败');
+      return { content: '重试成功', evidenceIds: [] };
+    },
+  }));
+  const built = await service.buildCase({ sessionId: 'session-1' });
+  const payload = {
+    sessionId: 'session-1', question: '失败后重试', expectedFactSetHash: built.caseSnapshot.factSetHash,
+  };
+
+  await assert.rejects(service.followUp(payload), /AI 暂时失败/);
+  assert.deepEqual(store.getSession('session-1').messages, []);
+  await service.followUp(payload);
+  assert.deepEqual(histories, [[], []]);
+  assert.deepEqual(
+    store.getSession('session-1').messages.map((message) => [message.role, message.content]),
+    [['user', '失败后重试'], ['assistant', '重试成功']],
+  );
+});
+
+test('selectIntent with a changed Case starts followUp from an empty conversation', async () => {
+  const store = createCompletedStore({
+    id: 'health-conversation',
+    category: 'health',
+    question: '替家中长辈看身体情况',
+  });
+  const histories = [];
+  const service = createReadingService(servicePorts(store, {
+    followUp: async (input) => {
+      histories.push(input.session.messages.map((message) => message.content));
+      return { content: `回答${histories.length}`, evidenceIds: [] };
+    },
+  }));
+  const initial = await service.buildCase({ sessionId: 'health-conversation' });
+  await service.followUp({
+    sessionId: 'health-conversation', question: '旧 Case 追问', expectedFactSetHash: initial.caseSnapshot.factSetHash,
+  });
+  const selected = await service.selectIntent({
+    sessionId: 'health-conversation',
+    clarification: { explicitIntentId: 'health.other-person', subjectRelation: '父母' },
+    expectedFactSetHash: initial.caseSnapshot.factSetHash,
+  });
+  assert.notEqual(selected.caseSnapshot.factSetHash, initial.caseSnapshot.factSetHash);
+  assert.deepEqual(store.getSession('health-conversation').messages, []);
+
+  await service.followUp({
+    sessionId: 'health-conversation', question: '新 Case 追问', expectedFactSetHash: selected.caseSnapshot.factSetHash,
+  });
+  assert.deepEqual(histories, [[], []]);
+  assert.deepEqual(
+    store.getSession('health-conversation').messages.map((message) => message.content),
+    ['新 Case 追问', '回答2'],
+  );
+});
+
 test('late follow-up answer cannot append after Case hash changes', async () => {
   const store = createCompletedStore();
   const gate = deferred();
@@ -347,7 +422,7 @@ test('late follow-up answer cannot append after Case hash changes', async () => 
     sessionId: 'session-1', question: '迟到追问', expectedFactSetHash: built.caseSnapshot.factSetHash,
   });
   await started.promise;
-  assert.deepEqual(store.getSession('session-1').messages.map((message) => message.role), ['user']);
+  assert.deepEqual(store.getSession('session-1').messages, []);
   const replacement = structuredClone(built.caseSnapshot);
   replacement.factSetHash = 'replacement-hash';
   store.saveAuthoritativeCase('session-1', replacement, {
@@ -357,7 +432,26 @@ test('late follow-up answer cannot append after Case hash changes', async () => 
   });
   gate.resolve({ content: '迟到回答', evidenceIds: [] });
   await assert.rejects(pending, /权威 Case 已变化/);
-  assert.deepEqual(store.getSession('session-1').messages.map((message) => message.role), ['user']);
+  assert.deepEqual(store.getSession('session-1').messages, []);
+});
+
+test('late follow-up after deletion cannot recreate messages', async () => {
+  const store = createCompletedStore({ id: 'deleted-follow-up' });
+  const gate = deferred();
+  const started = deferred();
+  const service = createReadingService(servicePorts(store, {
+    followUp: async () => { started.resolve(); return gate.promise; },
+  }));
+  const built = await service.buildCase({ sessionId: 'deleted-follow-up' });
+  const pending = service.followUp({
+    sessionId: 'deleted-follow-up', question: '删除期间追问', expectedFactSetHash: built.caseSnapshot.factSetHash,
+  });
+  await started.promise;
+  store.deleteSession('deleted-follow-up');
+  gate.resolve({ content: '迟到回答', evidenceIds: [] });
+
+  await assert.rejects(pending, /会话已删除/);
+  assert.equal(store.getSession('deleted-follow-up'), null);
 });
 
 test('needs-review sessions cannot be promoted through the normal build route', async () => {

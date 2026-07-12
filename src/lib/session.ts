@@ -6,6 +6,17 @@ import type { AnalysisReport } from './types';
 export type SessionCategory = 'career' | 'wealth' | 'relationship' | 'health' | 'study' | 'lost_item' | 'travel' | 'other';
 export type SessionStatus = 'casting' | 'complete';
 
+const SESSION_CATEGORIES = new Set<SessionCategory>([
+  'career',
+  'wealth',
+  'relationship',
+  'health',
+  'study',
+  'lost_item',
+  'travel',
+  'other',
+]);
+
 export interface TossRecord extends Toss {
   id: string;
   lineIndex: number;
@@ -56,6 +67,33 @@ export interface DivinationSession {
   authoritativeRevision?: number;
   analysis?: AnalysisReport;
   messages: ChatMessage[];
+}
+
+function exactIso(value: unknown): value is string {
+  if (typeof value !== 'string') return false;
+  const parsed = new Date(value);
+  return Number.isFinite(parsed.getTime()) && parsed.toISOString() === value;
+}
+
+export function normalizeSessionIdentity(value: unknown): Pick<DivinationSession, 'id' | 'question' | 'category' | 'castAt'> {
+  if (!value || typeof value !== 'object' || Array.isArray(value)) throw new TypeError('会话数据无效');
+  const candidate = value as Record<string, unknown>;
+  const question = typeof candidate.question === 'string' ? candidate.question.trim() : '';
+  if (
+    typeof candidate.id !== 'string'
+    || !candidate.id.trim()
+    || !question
+    || question.length > 500
+    || typeof candidate.category !== 'string'
+    || !SESSION_CATEGORIES.has(candidate.category as SessionCategory)
+    || !exactIso(candidate.castAt)
+  ) throw new TypeError('会话数据无效');
+  return {
+    id: candidate.id,
+    question,
+    category: candidate.category as SessionCategory,
+    castAt: candidate.castAt,
+  };
 }
 
 export function isValidQuestion(question: string): boolean {
