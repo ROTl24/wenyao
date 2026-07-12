@@ -23,7 +23,7 @@
 
 - `回头生/回头克` 的方向以“化爻作用于原动爻”为准：原爻木、化爻水是回头生；原爻木、化爻金是回头克。不得把“原爻生化爻”误标为回头生。
 - `wenwang-najia-v2-review.md` 中的“双重复核”指两个相互独立的审阅代理针对最终同一规则表 artifact 分别核表并留下真实身份类型、独立运行 ID、日期、输入来源、artifact hash 与结论；不得伪写成人工专家复核。两次自动审阅一致时只标 `independent-automated + project-enabled`；只有真实人工底本复核后才标 `human-reviewed`。两次不能一致则保持 `fixture-only`，不能进入默认上下文。
-- `PlateV2` 只承载可复算结构：不预填十二长生、六神、六合/六冲或 `ruleContextHash`。十二长生与六神在 Task 6 生成 facts，六合/六冲在 Task 5 生成 facts，`ruleContextHash` 在 Task 8 组装完整 Case 时计算。
+- `PlateV2` 只承载可复算结构：不预填十二长生、六神、六合/六冲或 `ruleContextHash`。十二长生与六神在 Task 6 生成 facts；Task 4 生成爻支之间的六合/六冲，Task 5 再生成卦级六合/六冲等 formations；`ruleContextHash` 在 Task 8 组装完整 Case 时计算。
 - `yehe_core_v1` 对日冲采用保守分类：先始终输出结构性 `clashes`；只有月令同支、同五行或月令生爻且不存在月破时，才输出条件性 `is-dark-moving`；只有月破或月令克爻且没有任何已记录生扶时，才输出条件性 `is-day-break`；其余只保留日冲原始事实，不强判暗动或日破。这个阈值是产品 profile 对“旺相/休囚”的现代操作化，不得伪称古籍给出了同一算法。
 - 受限神煞的取法必须登记为：天乙贵人、禄神以日干起；驿马以日支三合局起；`yehe-seasonal-tianxi` 依月令季节取春戌、夏丑、秋辰、冬未。按年支起红鸾天喜属于另一星命 profile，不得混入。四项都只能输出 `secondary + conditional`，不得进入旺衰评分或单独定吉凶。
 - 事项类别不能替代问意。婚恋对象性别/角色、失物类型、代占行人身份等信息不足时必须 `needs-user-input`；Task 7 可扩充 `QuestionIntentId`，不得为满足旧联合类型而静默猜用神。
@@ -450,7 +450,7 @@ export function buildPlateV2(input: {
 
 - [ ] **Step 5: 加入三组独立验证**
 
-1. `golden-hexagrams.ts` 明列 64 卦的上下卦、宫、世应与游归魂；六合/六冲归 Task 5 facts，不进入结构盘。
+1. `golden-hexagrams.ts` 明列 64 卦的上下卦、宫、世应与游归魂；六合/六冲不进入结构盘，爻支关系归 Task 4 facts，卦级分类归 Task 5 facts。
 2. `golden-najia.ts` 明列 64×6 的本卦纳甲，并抽取 16 个动变用例验证 `relationToBasePalace/relationToOwnPalace`。
 3. 八宫各至少一个潜在伏神用例，验证宿主行、来源爻位、六亲、来源首卦和 `status:'potential'`；何时启用留给 Task 7。
 4. 穷举 4096 组投币并验证本变卦组合唯一、仅动爻翻转、静爻仍按完整变卦重新装甲；加入乾六动变坤，防止两种六亲参照被同宫样例掩盖。
@@ -475,24 +475,53 @@ git commit -m "feat(domain): 构建受审本变卦与完整纳甲盘"
 - Create: `src/domain/liuyao/facts/model.ts`
 - Create: `src/domain/liuyao/facts/element-relations.ts`
 - Create: `src/domain/liuyao/facts/branch-relations.ts`
+- Create: `src/domain/liuyao/facts/relation-core-v1.ts`
+- Create: `src/domain/liuyao/facts/relation-registry.ts`
 - Create: `src/domain/liuyao/facts/derive.ts`
 - Create: `src/domain/liuyao/facts/derive.test.ts`
-- Modify: `src/domain/liuyao/rules/tables.ts`
+- Create: `docs/domain/relation-core-v1-review.md`
+- Create: `docs/domain/reviews/relation-core-v1-review-a.md`
+- Create: `docs/domain/reviews/relation-core-v1-review-b.md`
+- Create: `scripts/review-relation-candidate.mjs`
+- Modify: `src/domain/liuyao/rules/model.ts`
+- Modify: `src/domain/liuyao/rules/default-context.ts`
+- Modify: `src/domain/liuyao/rules/registry.ts`
+- Modify: `src/domain/liuyao/plate.test.ts`
 - Modify: `src/domain/liuyao/index.ts`
 
 **Interfaces:**
-- Consumes: `PlateV2`、`RuleContext`。
-- Produces: `deriveFacts({ plate, ruleContext, useGod? }): readonly DerivedFact[]`、稳定 `createFactId`。
+- Consumes: `PlateV2`、`RuleContext`、Task 3 已冻结的五行 `generates/controls` 原语。
+- Produces: 独立受审的 `relation_core_v1` artifact/manifest、`deriveFacts({ plate, ruleContext, useGod? }): readonly DerivedFact[]`、稳定 `createFactId`。
+
+**执行前决议：**
+
+- Task 3 的 `wenwang_najia_v2` canonical payload/hash 已完成双审，Task 4 不得修改它。关系表使用独立 artifact；其中以 `dependsOnWenwangArtifactHash` 绑定五行原语，避免复制第二份五行真值。
+- 六合、六冲为 `structural + computed`；六害为来源特定的 `profile-dependent + computed`；六破、三刑存在来源分歧，固定为 `profile-dependent + disputed`。
+- 默认破只取两份来源共同的子酉、丑辰、卯午、未戌四对；默认刑为有向核心 `寅→巳→申`、`丑→戌→未` 的前两段、`子↔卯` 与辰午酉亥自刑，不补 `申→寅`、`未→丑`。
+- `RuleContext.sources` 扩为各启用 bundle 来源并集；Task 3 Plate gate 改为核验自己 7 个必需来源的完整子集并允许其他已登记来源，仍拒绝重复 ID 或同 ID 伪造内容。
 
 - [ ] **Step 1: 写矩阵和事实 ID 红灯测试**
 
 ```ts
-it('derives directional element facts and symmetric branch facts', () => {
-  expect(elementRelation('木', '火')).toBe('generates');
-  expect(elementRelation('木', '土')).toBe('controls');
-  expect(branchRelations('子', '午')).toContain('clashes');
-  expect(branchRelations('午', '子')).toContain('clashes');
-  expect(branchRelations('子', '丑')).toContain('combines');
+it('covers the exact directional 5x5 element matrix', () => {
+  const matrix = ELEMENTS.flatMap((source) => ELEMENTS.map((target) => elementRelation(source, target)));
+  expect(matrix.filter((value) => value === 'same-element')).toHaveLength(5);
+  expect(matrix.filter((value) => value === 'generates')).toHaveLength(5);
+  expect(matrix.filter((value) => value === 'controls')).toHaveLength(5);
+  expect(matrix.filter((value) => value === null)).toHaveLength(10);
+});
+
+it('keeps overlapping branch matches and their authority metadata', () => {
+  expect(branchRelationMatches('寅', '亥', DEFAULT_RULE_CONTEXT.relationProfile))
+    .toEqual(expect.arrayContaining([
+      expect.objectContaining({ relation: 'combines', authority: 'structural', certainty: 'computed' }),
+      expect.objectContaining({ relation: 'breaks', authority: 'profile-dependent', certainty: 'disputed' }),
+    ]));
+  expect(branchRelationMatches('寅', '巳', DEFAULT_RULE_CONTEXT.relationProfile))
+    .toEqual(expect.arrayContaining([
+      expect.objectContaining({ relation: 'harms' }),
+      expect.objectContaining({ relation: 'punishes', direction: 'forward', certainty: 'disputed' }),
+    ]));
 });
 
 it('keeps fact ids and ordering stable', () => {
@@ -509,9 +538,24 @@ it('keeps fact ids and ordering stable', () => {
 Run: `cmd /c npx vitest run src/domain/liuyao/facts/derive.test.ts`
 Expected: FAIL，facts 模块不存在。
 
-- [ ] **Step 3: 实现表驱动关系**
+- [ ] **Step 3: 冻结独立关系 artifact 并完成双审**
 
-`element-relations.ts` 只返回 `generates/controls/same-element/null`；方向由入参顺序表达。`branch-relations.ts` 从受审表返回可能同时存在的多个关系，不使用 `if/else` 覆盖其他命中。
+`relation-core-v1.ts` 的 canonical artifact 覆盖：Task 3 artifact 依赖 hash、六合/六冲/六害表、两套六破来源表及默认交集 profile、有向三刑来源表及默认 profile、每条规则的 authority/certainty/sourceRefs/version。不得把这些表加入 `WENWANG_NAJIA_V2_ARTIFACT`。
+
+`RuleContext.relationProfile` 增加：
+
+```ts
+bundle: { id: 'relation_core_v1'; version: '1.0.0'; artifactHash: string };
+harmPolicy: 'liuren-six-harms-v1';
+breakPolicy: 'cross-source-common-four-breaks-v1';
+punishmentPolicy: 'liuren-directional-core-v1';
+```
+
+来源至少逐项登记《增删卜易》五行生、克、六合、六冲，以及《六壬大全》害/破/刑和《五行精纪》四破的固定定位。先形成 `fixture-only` 候选和 SHA-256，再让两个互不读取结果的独立审阅者针对最终同一 artifactHash 核表；只允许记为 `independent-automated + project-enabled`，不得冒充人工。审阅报告、输入 sourceRefs、checkedClaims 和差异必须提交并绑定 manifest。
+
+- [ ] **Step 4: 实现表驱动关系与稳定 ID**
+
+`element-relations.ts` 从 Task 3 artifact 复用 `generates/controls`，只返回 `generates/controls/same-element/null`；方向由入参顺序表达。`branch-relations.ts` 返回带 `relation/ruleId/profileId/authority/certainty/sourceRefs/direction` 的所有匹配，不使用 `if/else` 覆盖多重命中。
 
 ```ts
 export function createFactId(parts: readonly string[]): string {
@@ -521,25 +565,29 @@ export function createFactId(parts: readonly string[]): string {
 export function stableFacts(facts: readonly DerivedFact[]): readonly DerivedFact[] {
   const byId = new Map(facts.map((fact) => [fact.id, fact]));
   if (byId.size !== facts.length) throw new Error('派生事实 ID 冲突');
-  return Object.freeze([...byId.values()].sort((left, right) => left.id.localeCompare(right.id)));
+  return Object.freeze([...byId.values()].sort((left, right) => left.id < right.id ? -1 : left.id > right.id ? 1 : 0));
 }
 ```
 
-- [ ] **Step 4: 覆盖所有实体对但控制噪声**
+- [ ] **Step 5: 覆盖所有实体对但控制噪声**
 
-四柱→本卦六爻、动爻→其他本卦爻、动爻→对应化爻生成 facts；静爻之间不生成全排列生克，避免无意义的 36×关系噪声。每条 fact 写入 `ruleId/profileId/authority/certainty/sourceRefs`，不写吉凶文案。
+比较对固定为：四柱地支→本卦六爻 24 对；本卦六爻中只比较“至少一端为动爻”的无序对；每个动爻再比较本位 `changed→base`。动爻数 `m=0..6` 时，本卦爻对数必须依次为 `0,5,9,12,14,15,15`，总比较对为 `24,30,35,39,42,44,45`。不生成静爻—静爻、四柱—变卦、化爻—非本位爻，也不重复 A→B/B→A 的对称关系。
 
-- [ ] **Step 5: 加入完整地支表测试**
+四柱关系只用 `CalendarPillar.branch.element/branch.value`，不得误用天干。对每个实体对检查正反五行方向：若柱水克爻火，fact source 是柱；若爻木克柱土，fact source 是爻。transition 原始关系固定 `changed→base`。每条 fact 写入版本化 `ruleId/profileId/authority/certainty/sourceRefs`，不写吉凶文案。
 
-测试 12×12 矩阵：冲、合、害、破为对称关系；三刑按规则表输出方向/组合，不强行对称；没有表项的对返回空数组；每条表项有已登记 `ruleId`。
+- [ ] **Step 6: 加入完整矩阵、门禁与稳定性测试**
 
-- [ ] **Step 6: 验证与提交**
+测试 12×12 矩阵：六合/六冲对称且 structural；六害对称但 profile-dependent；默认四破只命中四对并标 disputed；三刑按有向表输出，子卯双向、四自刑，不强行补全循环。专测寅亥、巳申、寅巳、辰辰多关系。测试 `m=0..6` 比较对公式、柱支而非柱干、transition 方向、深克隆/输入遍历顺序后的 fact ID 与顺序稳定、重复 ID 抛错、bundle hash/source 门禁失败。
 
-Run: `cmd /c npx vitest run src/domain/liuyao/facts/derive.test.ts && npm run typecheck`
-Expected: PASS。
+关系 bundle 启用后，更新 `DEFAULT_RULE_CONTEXT.sources` 为两包来源并集；Plate gate 对自己的来源做子集核验，`buildPlateV2(DEFAULT_RULE_CONTEXT)` 继续通过，缺失或伪造 Task 3 必需来源仍拒绝。
+
+- [ ] **Step 7: 验证与提交**
+
+Run: `cmd /c npx vitest run src/domain/liuyao/facts/derive.test.ts src/domain/liuyao/plate.test.ts && npm run build:domain && npm run typecheck`
+Expected: PASS；关系 artifact/review/hash 可独立复算，Task 3 artifactHash 完全不变。
 
 ```bash
-git add src/domain/liuyao
+git add src/domain/liuyao docs/domain/relation-core-v1-review.md docs/domain/reviews/relation-core-v1-review-a.md docs/domain/reviews/relation-core-v1-review-b.md scripts/review-relation-candidate.mjs
 git commit -m "feat(domain): 建立可追溯六爻关系事实图"
 ```
 

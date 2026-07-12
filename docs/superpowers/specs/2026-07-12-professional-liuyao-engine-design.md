@@ -128,8 +128,16 @@ export interface RuleContext {
   };
   relationProfile: {
     id: 'yehe_core_v1';
+    bundle: {
+      id: 'relation_core_v1';
+      version: '1.0.0';
+      artifactHash: string;
+    };
     dayClashPolicy: 'strength-aware';
     changedRelationReference: 'base-palace';
+    harmPolicy: 'liuren-six-harms-v1';
+    breakPolicy: 'cross-source-common-four-breaks-v1';
+    punishmentPolicy: 'liuren-directional-core-v1';
   };
   growthProfile: {
     id: 'five-element-forward_v1';
@@ -151,7 +159,7 @@ export interface RuleContext {
 }
 ```
 
-这里的默认值是本产品的受审选择，不宣称为所有流派共识。以后增加其他流派时必须新增 profile，不允许原地改变旧 profile 的语义。
+这里的默认值是本产品的受审选择，不宣称为所有流派共识。以后增加其他流派时必须新增 profile，不允许原地改变旧 profile 的语义。`sources` 是所有已启用规则包的来源登记并集；每个 bundle 的运行门只核验自己 manifest 声明的必需 source 子集，同时拒绝重复或同 ID 异内容，不能要求全局 sources 永远恰好等于某一个早期规则包的列表。
 
 ### 4.2 CalendarPillar
 
@@ -331,6 +339,8 @@ export interface DerivedFact {
 
 `DerivedFact` 描述关系，不预存“吉/凶”字符串。吉凶倾向必须是依用神、旺衰、问意和 profile 生成的解释 claim。
 
+基础地支关系分层：六合、六冲在默认关系包中是 `structural + computed`；六害是来源特定的 `profile-dependent + computed`；六破与三刑存在明确表法分歧，只能以命名 profile 输出 `profile-dependent + disputed`。默认六破仅取两份来源交集的子酉、丑辰、卯午、未戌四对；默认三刑采用来源明确的有向核心，不把 `申→寅`、`未→丑` 静默补成循环。一个支对同时命中合、破、刑、害时必须保留全部 facts。
+
 ### 4.5 UseGodSelection
 
 ```ts
@@ -434,10 +444,11 @@ export interface RuleDefinition {
 - 日柱午夜还是子初换日；
 - 十二长生阴阳顺逆、土从水还是另立；
 - 暗动、日破、三合局、进退、反吟伏吟的成立条件；
+- 六害的来源体系、六破取四对还是六对、三刑是否补全循环；
 - 用神两现如何排序；
 - 神煞集合与权重。
 
-本规格默认：立春精确时刻、节令精确时刻、子初 23:00 换日；五行十二长生顺排且土从水；解释重点为生旺墓绝；神煞限贵人、禄神、驿马、天喜且只能辅助。切换任何一项都必须产生不同的 profile ID 和 `factSetHash`。
+本规格默认：立春精确时刻、节令精确时刻、子初 23:00 换日；五行十二长生顺排且土从水；关系包使用六害、跨来源共同四破和有向三刑核心；解释重点为生旺墓绝；神煞限贵人、禄神、驿马、天喜且只能辅助。切换任何一项都必须产生不同的 profile ID 和 `factSetHash`。
 
 默认 `yehe_core_v1` 的日冲分类采用保守门槛：日支冲爻始终只是结构性 `clashes`；月令同支、同五行或月令生爻且不月破时，才附加条件性暗动；月破或月令克爻且没有已记录生扶时，才附加条件性日破；其余不强判。该门槛是产品 profile 对古籍“旺相/休囚”的现代操作化，必须按 `profile-dependent + conditional` 展示。默认神煞取法固定为天乙贵人、禄神以日干起，驿马以日支起，天喜采用《增删卜易》星煞章的季节表（春戌、夏丑、秋辰、冬未），且统一为 `secondary + conditional`；按年支起天喜属于另一星命 profile，不得混用。
 
