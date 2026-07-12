@@ -1,12 +1,6 @@
 import type { RuleContext } from './model.js';
-
-function deepFreeze<T>(value: T): Readonly<T> {
-  if (value && typeof value === 'object') {
-    Object.freeze(value);
-    Object.values(value as Record<string, unknown>).forEach((entry) => deepFreeze(entry));
-  }
-  return value;
-}
+import { deepFreeze } from './tables.js';
+import { RULE_SOURCE_EVIDENCE_CAPSULES } from './wenwang-najia-v2.js';
 
 export const BASE_RULE_CONTEXT = deepFreeze({
   schemaVersion: '2.0.0',
@@ -42,4 +36,9 @@ export const BASE_RULE_CONTEXT = deepFreeze({
     multipleCandidates: 'retain-ranked-candidates',
   },
   sources: [],
+} as const satisfies RuleContext);
+
+export const DEFAULT_RULE_CONTEXT = deepFreeze({
+  ...BASE_RULE_CONTEXT,
+  sources: RULE_SOURCE_EVIDENCE_CAPSULES.map(({ ref }) => ref),
 } as const satisfies RuleContext);

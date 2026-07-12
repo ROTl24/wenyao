@@ -1,0 +1,459 @@
+import { createHash } from 'node:crypto';
+import { describe, expect, it } from 'vitest';
+import { GOLDEN_HEXAGRAMS, GOLDEN_TRIGRAM_BITS, type GoldenHexagram } from './__fixtures__/golden-hexagrams.js';
+import { GOLDEN_CHANGED_RELATION_CASES, GOLDEN_NAJIA } from './__fixtures__/golden-najia.js';
+import type { PlateV2, SixRelation } from './model.js';
+import { buildPlateV2 } from './plate.js';
+import { BASE_RULE_CONTEXT, DEFAULT_RULE_CONTEXT } from './rules/default-context.js';
+import type { RuleContext, RulePackManifest, RuleReviewRecord } from './rules/model.js';
+import { assertProjectEnabledRulePack } from './rules/registry.js';
+import { canonicalStringify } from './rules/tables.js';
+import {
+  RULE_SOURCE_EVIDENCE_CAPSULES,
+  WENWANG_NAJIA_V2_ARTIFACT,
+  WENWANG_NAJIA_V2_ARTIFACT_HASH,
+  WENWANG_NAJIA_V2_CANONICAL_PAYLOAD,
+  WENWANG_NAJIA_V2_MANIFEST,
+} from './rules/wenwang-najia-v2.js';
+
+const FIXED_BUILD_INPUT = {
+  plateId: 'plate-fixed',
+  sessionId: 'session-fixed',
+  castAt: '2026-07-11T04:00:00.000Z',
+  ruleContext: DEFAULT_RULE_CONTEXT,
+} as const;
+
+type TossTuple = PlateV2['rawTosses'];
+
+function staticTossesForHexagram(hexagram: GoldenHexagram): TossTuple {
+  const bits = [
+    ...GOLDEN_TRIGRAM_BITS[hexagram.lowerTrigram],
+    ...GOLDEN_TRIGRAM_BITS[hexagram.upperTrigram],
+  ];
+  return bits.map((yang) => (yang ? 7 : 8)) as unknown as TossTuple;
+}
+
+function buildFixturePlate(tossValues: TossTuple): PlateV2 {
+  return buildPlateV2({ ...FIXED_BUILD_INPUT, tossValues });
+}
+
+function buildStaticHexagram(name: string): PlateV2 {
+  const golden = GOLDEN_HEXAGRAMS.find((hexagram) => hexagram.name === name);
+  if (!golden) throw new Error(`黄金表缺少卦名：${name}`);
+  return buildFixturePlate(staticTossesForHexagram(golden));
+}
+
+function matchedReview(
+  reviewerId: string,
+  independentRunId: string,
+  overrides: Partial<RuleReviewRecord> = {},
+): RuleReviewRecord {
+  return {
+    reviewerId,
+    reviewerKind: 'automated-agent',
+    independentRunId,
+    reviewedAt: '2026-07-12T08:00:00+08:00',
+    artifactHash: WENWANG_NAJIA_V2_ARTIFACT_HASH,
+    outcome: 'matched',
+    ...overrides,
+  };
+}
+
+function enabledManifest(overrides: Partial<RulePackManifest> = {}): RulePackManifest {
+  return {
+    rulePackId: 'wenwang_najia_v2',
+    version: '2.0.0',
+    artifactHash: WENWANG_NAJIA_V2_ARTIFACT_HASH,
+    verificationLevel: 'independent-automated',
+    runtimeStatus: 'project-enabled',
+    reviews: [matchedReview('reviewer-a', 'run-a'), matchedReview('reviewer-b', 'run-b')],
+    sourceRefs: WENWANG_NAJIA_V2_MANIFEST.sourceRefs,
+    ...overrides,
+  };
+}
+
+describe('wenwang_najia_v2 reviewed artifact', () => {
+  it('has one stable canonical payload and a precomputed SHA-256', () => {
+    const independentlyComputed = createHash('sha256')
+      .update(WENWANG_NAJIA_V2_CANONICAL_PAYLOAD, 'utf8')
+      .digest('hex');
+
+    expect(canonicalStringify(WENWANG_NAJIA_V2_ARTIFACT)).toBe(WENWANG_NAJIA_V2_CANONICAL_PAYLOAD);
+    expect(WENWANG_NAJIA_V2_ARTIFACT_HASH).toMatch(/^[0-9a-f]{64}$/);
+    expect(independentlyComputed).toBe(WENWANG_NAJIA_V2_ARTIFACT_HASH);
+  });
+
+  it('deep-freezes the final tables and two real automated review records', () => {
+    expect(Object.isFrozen(WENWANG_NAJIA_V2_ARTIFACT)).toBe(true);
+    expect(Object.isFrozen(WENWANG_NAJIA_V2_ARTIFACT.hexagrams)).toBe(true);
+    expect(Object.isFrozen(WENWANG_NAJIA_V2_ARTIFACT.hexagrams[0])).toBe(true);
+    expect(Object.isFrozen(WENWANG_NAJIA_V2_ARTIFACT.trigrams[0].inner.branches)).toBe(true);
+    expect(Object.isFrozen(WENWANG_NAJIA_V2_MANIFEST)).toBe(true);
+    expect(Object.isFrozen(WENWANG_NAJIA_V2_MANIFEST.reviews)).toBe(true);
+    expect(WENWANG_NAJIA_V2_MANIFEST).toEqual({
+      rulePackId: 'wenwang_najia_v2',
+      version: '2.0.0',
+      artifactHash: WENWANG_NAJIA_V2_ARTIFACT_HASH,
+      verificationLevel: 'independent-automated',
+      runtimeStatus: 'project-enabled',
+      reviews: [
+        {
+          reviewerId: 'codex-ctext-audit-a',
+          reviewerKind: 'automated-agent',
+          independentRunId: 'wenwang-final-a-20260712',
+          reviewedAt: '2026-07-12T08:00:00+08:00',
+          artifactHash: WENWANG_NAJIA_V2_ARTIFACT_HASH,
+          outcome: 'matched',
+        },
+        {
+          reviewerId: 'codex-wikisource-audit-b',
+          reviewerKind: 'automated-agent',
+          independentRunId: 'wenwang-final-b-20260712',
+          reviewedAt: '2026-07-12T07:57:25.9273596+08:00',
+          artifactHash: WENWANG_NAJIA_V2_ARTIFACT_HASH,
+          outcome: 'matched',
+        },
+      ],
+      sourceRefs: RULE_SOURCE_EVIDENCE_CAPSULES.map(({ ref }) => ref.id),
+    });
+    expect(WENWANG_NAJIA_V2_MANIFEST.reviews.every(Object.isFrozen)).toBe(true);
+  });
+
+  it('hashes the exact local evidence capsules named by sourceRefs', () => {
+    expect(RULE_SOURCE_EVIDENCE_CAPSULES.length).toBeGreaterThanOrEqual(6);
+    expect(new Set(RULE_SOURCE_EVIDENCE_CAPSULES.map(({ ref }) => ref.id)).size)
+      .toBe(RULE_SOURCE_EVIDENCE_CAPSULES.length);
+
+    for (const { ref, payload } of RULE_SOURCE_EVIDENCE_CAPSULES) {
+      expect(createHash('sha256').update(payload, 'utf8').digest('hex')).toBe(ref.contentHash);
+      expect(WENWANG_NAJIA_V2_MANIFEST.sourceRefs).toContain(ref.id);
+    }
+    expect(WENWANG_NAJIA_V2_MANIFEST.sourceRefs).toHaveLength(RULE_SOURCE_EVIDENCE_CAPSULES.length);
+  });
+
+  it('matches the explicit 64-hexagram golden table', () => {
+    expect(WENWANG_NAJIA_V2_ARTIFACT.hexagrams).toEqual(GOLDEN_HEXAGRAMS);
+    expect(WENWANG_NAJIA_V2_ARTIFACT.hexagrams).toHaveLength(64);
+    expect(new Set(WENWANG_NAJIA_V2_ARTIFACT.hexagrams.map(({ key }) => key)).size).toBe(64);
+  });
+});
+
+describe('assertProjectEnabledRulePack', () => {
+  it('accepts the real manifest with two independent automated matches', () => {
+    expect(() => assertProjectEnabledRulePack(WENWANG_NAJIA_V2_MANIFEST)).not.toThrow();
+  });
+
+  it('accepts two independent automated matches for the exact compiled artifact only', () => {
+    const manifest = enabledManifest();
+    expect(() => assertProjectEnabledRulePack(manifest)).not.toThrow();
+    expect(manifest.verificationLevel).toBe('independent-automated');
+  });
+
+  it.each([
+    ['single review', () => enabledManifest({ reviews: [matchedReview('reviewer-a', 'run-a')] })],
+    ['duplicate reviewerId', () => enabledManifest({ reviews: [matchedReview('same', 'run-a'), matchedReview('same', 'run-b')] })],
+    ['duplicate runId', () => enabledManifest({ reviews: [matchedReview('reviewer-a', 'same'), matchedReview('reviewer-b', 'same')] })],
+    ['different artifactHash', () => enabledManifest({ reviews: [matchedReview('reviewer-a', 'run-a'), matchedReview('reviewer-b', 'run-b', { artifactHash: 'f'.repeat(64) })] })],
+    ['disputed outcome', () => enabledManifest({ reviews: [matchedReview('reviewer-a', 'run-a'), matchedReview('reviewer-b', 'run-b', { outcome: 'disputed' })] })],
+    ['unverified level', () => enabledManifest({ verificationLevel: 'unverified' })],
+    ['fixture-only status', () => enabledManifest({ runtimeStatus: 'fixture-only' })],
+    ['manifest hash differs from compiled artifact', () => enabledManifest({ artifactHash: 'e'.repeat(64) })],
+  ])('rejects %s', (_label, makeManifest) => {
+    expect(() => assertProjectEnabledRulePack(makeManifest())).toThrow('结构规则包未通过项目运行门');
+  });
+});
+
+describe('buildPlateV2', () => {
+  it.each([
+    ['missing context', undefined],
+    ['non-array sources', { ...DEFAULT_RULE_CONTEXT, sources: null }],
+  ])('rejects malformed runtime context: %s', (_label, ruleContext) => {
+    expect(() => buildPlateV2({
+      ...FIXED_BUILD_INPUT,
+      tossValues: [9, 7, 7, 7, 7, 7],
+      ruleContext: ruleContext as unknown as RuleContext,
+    })).toThrow('结构规则上下文未通过项目运行门');
+  });
+
+  it('rejects BASE_RULE_CONTEXT because it remains fixture-only with no sources', () => {
+    expect(() => buildPlateV2({
+      ...FIXED_BUILD_INPUT,
+      tossValues: [9, 7, 7, 7, 7, 7],
+      ruleContext: BASE_RULE_CONTEXT,
+    })).toThrow('结构规则上下文未通过项目运行门');
+  });
+
+  it.each([
+    ['missing source', (sources: typeof DEFAULT_RULE_CONTEXT.sources) => sources.slice(1)],
+    ['forged URL', (sources: typeof DEFAULT_RULE_CONTEXT.sources) => sources.map((source, index) => (
+      index === 0 ? { ...source, url: 'https://example.invalid/forged' } : source
+    ))],
+    ['forged locator', (sources: typeof DEFAULT_RULE_CONTEXT.sources) => sources.map((source, index) => (
+      index === 0 ? { ...source, locator: 'forged locator' } : source
+    ))],
+    ['forged contentHash', (sources: typeof DEFAULT_RULE_CONTEXT.sources) => sources.map((source, index) => (
+      index === 0 ? { ...source, contentHash: 'f'.repeat(64) } : source
+    ))],
+    ['duplicate source', (sources: typeof DEFAULT_RULE_CONTEXT.sources) => [...sources.slice(0, -1), sources[0]]],
+  ])('rejects a context with %s', (_label, forgeSources) => {
+    const forgedContext = {
+      ...DEFAULT_RULE_CONTEXT,
+      sources: forgeSources(DEFAULT_RULE_CONTEXT.sources),
+    };
+    expect(() => buildPlateV2({
+      ...FIXED_BUILD_INPUT,
+      tossValues: [9, 7, 7, 7, 7, 7],
+      ruleContext: forgedContext,
+    })).toThrow('结构规则上下文未通过项目运行门');
+  });
+
+  it.each([
+    ['forged schemaVersion', (context: RuleContext) => ({ ...context, schemaVersion: '9.9.9' })],
+    ['forged calendar profile id', (context: RuleContext) => ({
+      ...context,
+      calendarProfile: { ...context.calendarProfile, id: 'forged-calendar' },
+    })],
+    ['forged calendar day boundary', (context: RuleContext) => ({
+      ...context,
+      calendarProfile: { ...context.calendarProfile, dayBoundary: 'midnight' },
+    })],
+    ['forged relation profile', (context: RuleContext) => ({
+      ...context,
+      relationProfile: { ...context.relationProfile, changedRelationReference: 'changed-palace' },
+    })],
+    ['forged growth profile', (context: RuleContext) => ({
+      ...context,
+      growthProfile: { ...context.growthProfile, earthFollows: 'fire' },
+    })],
+    ['forged shen-sha profile', (context: RuleContext) => ({
+      ...context,
+      shenShaProfile: { ...context.shenShaProfile, enabled: ['tianyi'] },
+    })],
+    ['forged use-god profile', (context: RuleContext) => ({
+      ...context,
+      useGodProfile: { ...context.useGodProfile, ambiguousIntent: 'guess' },
+    })],
+  ])('rejects %s at runtime', (_label, forgeContext) => {
+    expect(() => buildPlateV2({
+      ...FIXED_BUILD_INPUT,
+      tossValues: [9, 7, 7, 7, 7, 7],
+      ruleContext: forgeContext(DEFAULT_RULE_CONTEXT) as unknown as RuleContext,
+    })).toThrow('结构规则上下文未通过项目运行门');
+  });
+
+  it('builds complete base and changed sides and re-installs static changed lines', () => {
+    const plate = buildFixturePlate([9, 7, 7, 7, 7, 7]);
+
+    expect(plate.baseHexagram.name).toBe('乾为天');
+    expect(plate.changedHexagram.name).toBe('天风姤');
+    expect(plate.lines).toHaveLength(6);
+    expect(plate.lines.every((line) => line.base && line.changed)).toBe(true);
+    expect(plate.lines[0]).toMatchObject({
+      id: 'line:1',
+      moving: true,
+      base: { ganZhi: '甲子', relationToBasePalace: '子孙' },
+      changed: { ganZhi: '辛丑', relationToBasePalace: '父母' },
+      transition: { fromLineId: 'line:1:base', toLineId: 'line:1:changed' },
+    });
+    expect(plate.lines[1]).toMatchObject({
+      moving: false,
+      base: { ganZhi: '甲寅' },
+      changed: { ganZhi: '辛亥' },
+      transition: null,
+    });
+    expect(plate.lines[2]).toMatchObject({
+      moving: false,
+      base: { ganZhi: '甲辰' },
+      changed: { ganZhi: '辛酉' },
+      transition: null,
+    });
+    expect(plate.lines.every(({ hiddenSpiritCandidates }) => hiddenSpiritCandidates.length === 0)).toBe(true);
+  });
+
+  it('uses each side own shi/ying positions instead of copying base roles', () => {
+    const plate = buildFixturePlate([9, 7, 7, 7, 7, 7]);
+
+    expect(plate.baseHexagram).toMatchObject({ shiLine: 6, yingLine: 3 });
+    expect(plate.changedHexagram).toMatchObject({ shiLine: 1, yingLine: 4 });
+    expect(plate.lines.map(({ base }) => base.role)).toEqual([null, null, '应', null, null, '世']);
+    expect(plate.lines.map(({ changed }) => changed.role)).toEqual(['世', null, null, '应', null, null]);
+  });
+
+  it('contains rulePackRef and no facts or context-hash placeholders', () => {
+    const plate = buildFixturePlate([9, 7, 7, 7, 7, 7]);
+    const serialized = JSON.stringify(plate);
+
+    expect(plate.rulePackRef).toEqual({
+      id: 'wenwang_najia_v2',
+      version: '2.0.0',
+      artifactHash: WENWANG_NAJIA_V2_ARTIFACT_HASH,
+    });
+    for (const forbidden of [
+      'growthByPillar', 'beast', 'growthIntoChanged', 'harmonyForm',
+      'ruleContextHash', 'hiddenSpirits',
+    ]) {
+      expect(serialized).not.toContain(`\"${forbidden}\"`);
+    }
+    expect(serialized).toContain('hiddenSpiritCandidates');
+  });
+
+  it('maps all 64 explicit upper/lower combinations, palaces and shi/ying positions', () => {
+    for (const golden of GOLDEN_HEXAGRAMS) {
+      const side = buildFixturePlate(staticTossesForHexagram(golden)).baseHexagram;
+      expect(side).toMatchObject(golden);
+    }
+  });
+
+  it('matches the explicit 64 by 6 Najia golden matrix', () => {
+    expect(GOLDEN_NAJIA).toHaveLength(64);
+    expect(new Set(GOLDEN_NAJIA.map(({ key }) => key)).size).toBe(64);
+
+    for (const golden of GOLDEN_HEXAGRAMS) {
+      const expected = GOLDEN_NAJIA.find(({ key }) => key === golden.key);
+      expect(expected, `纳甲黄金表缺少 ${golden.key}`).toBeDefined();
+      const plate = buildFixturePlate(staticTossesForHexagram(golden));
+      expect(plate.lines.map(({ base }) => base.ganZhi)).toEqual(expected?.lines);
+    }
+  });
+
+  it.each(GOLDEN_CHANGED_RELATION_CASES)('$label separates the two changed relations', (golden) => {
+    const line = buildFixturePlate(golden.tossValues).lines[golden.line - 1];
+    expect(line.moving).toBe(true);
+    expect(line.changed).toMatchObject({
+      ganZhi: golden.changedGanZhi,
+      relationToBasePalace: golden.relationToBasePalace,
+      relationToOwnPalace: golden.relationToOwnPalace,
+    });
+  });
+
+  it('keeps every 乾六爻动→坤 changed relation pair distinct by reference palace', () => {
+    const plate = buildFixturePlate([9, 9, 9, 9, 9, 9]);
+    expect(plate.changedHexagram.name).toBe('坤为地');
+    expect(plate.lines.map(({ changed }) => [
+      changed.ganZhi,
+      changed.relationToBasePalace,
+      changed.relationToOwnPalace,
+    ])).toEqual([
+      ['乙未', '父母', '兄弟'],
+      ['乙巳', '官鬼', '父母'],
+      ['乙卯', '妻财', '官鬼'],
+      ['癸丑', '父母', '兄弟'],
+      ['癸亥', '子孙', '妻财'],
+      ['癸酉', '兄弟', '子孙'],
+    ]);
+  });
+
+  it('covers every toss state uniquely and flips only moving lines', () => {
+    const values = [6, 7, 8, 9] as const;
+    const baseChangedPairs = new Set<string>();
+
+    for (let encoded = 0; encoded < 4096; encoded += 1) {
+      let rest = encoded;
+      const tossValues = Array.from({ length: 6 }, () => {
+        const value = values[rest % 4];
+        rest = Math.floor(rest / 4);
+        return value;
+      }) as unknown as TossTuple;
+      const first = buildFixturePlate(tossValues);
+      const second = buildFixturePlate(tossValues);
+
+      expect(first).toEqual(second);
+      expect(first.lines).toHaveLength(6);
+      baseChangedPairs.add(`${first.baseHexagram.key}>${first.changedHexagram.key}`);
+      first.lines.forEach((line) => {
+        expect(line.base.yang !== line.changed.yang).toBe(line.moving);
+        expect(line.transition === null).toBe(!line.moving);
+      });
+    }
+
+    expect(baseChangedPairs.size).toBe(4096);
+  }, 30_000);
+
+  it.each([
+    {
+      palace: '乾', name: '天风姤', candidates: [
+        { hostLine: 2, hostGanZhi: '辛亥', sourceLine: 2, relation: '妻财', sourceGanZhi: '甲寅', sourceHexagram: '乾为天' },
+      ],
+    },
+    {
+      palace: '坎', name: '水雷屯', candidates: [
+        { hostLine: 3, hostGanZhi: '庚辰', sourceLine: 3, relation: '妻财', sourceGanZhi: '戊午', sourceHexagram: '坎为水' },
+      ],
+    },
+    {
+      palace: '艮', name: '风泽中孚', candidates: [
+        { hostLine: 3, hostGanZhi: '丁丑', sourceLine: 3, relation: '子孙', sourceGanZhi: '丙申', sourceHexagram: '艮为山' },
+        { hostLine: 5, hostGanZhi: '辛巳', sourceLine: 5, relation: '妻财', sourceGanZhi: '丙子', sourceHexagram: '艮为山' },
+      ],
+    },
+    {
+      palace: '震', name: '雷风恒', candidates: [
+        { hostLine: 2, hostGanZhi: '辛亥', sourceLine: 2, relation: '兄弟', sourceGanZhi: '庚寅', sourceHexagram: '震为雷' },
+      ],
+    },
+    {
+      palace: '巽', name: '风天小畜', candidates: [
+        { hostLine: 3, hostGanZhi: '甲辰', sourceLine: 3, relation: '官鬼', sourceGanZhi: '辛酉', sourceHexagram: '巽为风' },
+      ],
+    },
+    {
+      palace: '离', name: '火山旅', candidates: [
+        { hostLine: 1, hostGanZhi: '丙辰', sourceLine: 1, relation: '父母', sourceGanZhi: '己卯', sourceHexagram: '离为火' },
+        { hostLine: 3, hostGanZhi: '丙申', sourceLine: 3, relation: '官鬼', sourceGanZhi: '己亥', sourceHexagram: '离为火' },
+      ],
+    },
+    {
+      palace: '坤', name: '地雷复', candidates: [
+        { hostLine: 2, hostGanZhi: '庚寅', sourceLine: 2, relation: '父母', sourceGanZhi: '乙巳', sourceHexagram: '坤为地' },
+      ],
+    },
+    {
+      palace: '兑', name: '地山谦', candidates: [
+        { hostLine: 2, hostGanZhi: '丙午', sourceLine: 2, relation: '妻财', sourceGanZhi: '丁卯', sourceHexagram: '兑为泽' },
+      ],
+    },
+  ])('places $palace palace potential hidden spirits on same-position hosts', ({ name, candidates }) => {
+    const plate = buildStaticHexagram(name);
+    const actual = plate.lines.flatMap((line) => line.hiddenSpiritCandidates.map((candidate) => ({
+      hostLine: line.position,
+      hostGanZhi: line.base.ganZhi,
+      sourceLine: candidate.sourceLine,
+      relation: candidate.relation,
+      sourceGanZhi: candidate.ganZhi,
+      sourceHexagram: candidate.sourceHexagram,
+      status: candidate.status,
+    })));
+
+    expect(actual).toEqual(candidates.map((candidate) => ({ ...candidate, status: 'potential' })));
+  });
+
+  it('produces the reviewed 56-candidate relation and palace distributions', () => {
+    const byRelation = Object.fromEntries(
+      (['父母', '兄弟', '妻财', '子孙', '官鬼'] as const).map((relation) => [relation, 0]),
+    ) as Record<SixRelation, number>;
+    const byPalace = Object.fromEntries(
+      (['乾', '坎', '艮', '震', '巽', '离', '坤', '兑'] as const).map((palace) => [palace, 0]),
+    ) as Record<string, number>;
+
+    for (const golden of GOLDEN_HEXAGRAMS) {
+      const candidates = buildFixturePlate(staticTossesForHexagram(golden)).lines
+        .flatMap(({ hiddenSpiritCandidates }) => hiddenSpiritCandidates);
+      byPalace[golden.palace] += candidates.length;
+      candidates.forEach(({ relation }) => { byRelation[relation] += 1; });
+    }
+
+    expect(byRelation).toEqual({ 父母: 10, 兄弟: 6, 妻财: 16, 子孙: 16, 官鬼: 8 });
+    expect(byPalace).toEqual({ 乾: 8, 坎: 4, 艮: 10, 震: 10, 巽: 6, 离: 8, 坤: 4, 兑: 6 });
+    expect(Object.values(byRelation).reduce((sum, count) => sum + count, 0)).toBe(56);
+  });
+
+  it.each([
+    [[], '六爻必须正好包含六个投币值'],
+    [[7, 7, 7, 7, 7, 5], '投币值只能是 6、7、8、9'],
+  ])('rejects malformed toss input %#', (tossValues, message) => {
+    expect(() => buildPlateV2({
+      ...FIXED_BUILD_INPUT,
+      tossValues: tossValues as unknown as TossTuple,
+    })).toThrow(message);
+  });
+});

@@ -6,7 +6,28 @@ export interface RuleSourceRef {
   url: string;
   locator: string;
   contentHash: string;
-  reviewStatus: 'draft' | 'reviewed' | 'approved';
+}
+
+export type VerificationLevel = 'unverified' | 'independent-automated' | 'human-reviewed';
+export type RulePackRuntimeStatus = 'fixture-only' | 'project-enabled';
+
+export interface RuleReviewRecord {
+  reviewerId: string;
+  reviewerKind: 'automated-agent' | 'human';
+  independentRunId: string;
+  reviewedAt: string;
+  artifactHash: string;
+  outcome: 'matched' | 'disputed';
+}
+
+export interface RulePackManifest {
+  rulePackId: 'wenwang_najia_v2';
+  version: string;
+  artifactHash: string;
+  verificationLevel: VerificationLevel;
+  runtimeStatus: RulePackRuntimeStatus;
+  reviews: readonly RuleReviewRecord[];
+  sourceRefs: readonly string[];
 }
 
 export interface RuleContext {

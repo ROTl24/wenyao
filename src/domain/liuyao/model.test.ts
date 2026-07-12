@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { BASE_RULE_CONTEXT } from './index';
+import { BASE_RULE_CONTEXT, DEFAULT_RULE_CONTEXT, RULE_SOURCE_EVIDENCE_CAPSULES } from './index';
 
 describe('V2 domain contract', () => {
   it('locks every interpretation choice into a versioned context', () => {
@@ -28,5 +28,20 @@ describe('V2 domain contract', () => {
     expect(Object.isFrozen(BASE_RULE_CONTEXT.shenShaProfile)).toBe(true);
     expect(Object.isFrozen(BASE_RULE_CONTEXT.shenShaProfile.enabled)).toBe(true);
     expect(Object.isFrozen(BASE_RULE_CONTEXT.sources)).toBe(true);
+    expect(BASE_RULE_CONTEXT.sources).toEqual([]);
+  });
+
+  it('exports one deeply frozen production context with all reviewed source refs', () => {
+    expect(DEFAULT_RULE_CONTEXT).toMatchObject({
+      rulePackId: 'wenwang_najia_v2',
+      rulePackVersion: '2.0.0',
+    });
+    expect(DEFAULT_RULE_CONTEXT.sources).toEqual(
+      RULE_SOURCE_EVIDENCE_CAPSULES.map(({ ref }) => ref),
+    );
+    expect(DEFAULT_RULE_CONTEXT.sources).toHaveLength(7);
+    expect(Object.isFrozen(DEFAULT_RULE_CONTEXT)).toBe(true);
+    expect(Object.isFrozen(DEFAULT_RULE_CONTEXT.sources)).toBe(true);
+    expect(DEFAULT_RULE_CONTEXT.sources.every(Object.isFrozen)).toBe(true);
   });
 });

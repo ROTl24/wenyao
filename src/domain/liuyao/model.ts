@@ -43,7 +43,6 @@ export interface HexagramSideV2 {
   generation: string;
   shiLine: 1 | 2 | 3 | 4 | 5 | 6;
   yingLine: 1 | 2 | 3 | 4 | 5 | 6;
-  harmonyForm: 'six-harmony' | 'six-clash' | 'neither';
 }
 
 export interface LineFacetV2 {
@@ -56,18 +55,19 @@ export interface LineFacetV2 {
   relationToBasePalace: SixRelation;
   relationToOwnPalace: SixRelation;
   role: '世' | '应' | null;
-  growthByPillar: Record<PillarKind, TwelveStage>;
 }
 
-export interface HiddenSpiritV2 {
+export interface HiddenSpiritCandidateV2 {
   id: string;
   hostLineId: string;
+  sourceLine: 1 | 2 | 3 | 4 | 5 | 6;
   relation: SixRelation;
   stem: Stem;
   branch: Branch;
   ganZhi: string;
   element: Element;
   sourceHexagram: string;
+  status: 'potential';
 }
 
 export interface PlateLineV2 {
@@ -75,15 +75,13 @@ export interface PlateLineV2 {
   position: 1 | 2 | 3 | 4 | 5 | 6;
   tossValue: 6 | 7 | 8 | 9;
   moving: boolean;
-  beast: '青龙' | '朱雀' | '勾陈' | '腾蛇' | '白虎' | '玄武';
   base: LineFacetV2;
   changed: LineFacetV2;
   transition: null | {
     fromLineId: string;
     toLineId: string;
-    growthIntoChanged: TwelveStage;
   };
-  hiddenSpirits: readonly HiddenSpiritV2[];
+  hiddenSpiritCandidates: readonly HiddenSpiritCandidateV2[];
 }
 
 export interface PlateV2 {
@@ -92,7 +90,11 @@ export interface PlateV2 {
   sessionId: string;
   castAt: string;
   calendar: CalendarSnapshot;
-  ruleContextHash: string;
+  rulePackRef: {
+    id: 'wenwang_najia_v2';
+    version: string;
+    artifactHash: string;
+  };
   rawTosses: readonly [6 | 7 | 8 | 9, 6 | 7 | 8 | 9, 6 | 7 | 8 | 9, 6 | 7 | 8 | 9, 6 | 7 | 8 | 9, 6 | 7 | 8 | 9];
   baseHexagram: HexagramSideV2;
   changedHexagram: HexagramSideV2;
