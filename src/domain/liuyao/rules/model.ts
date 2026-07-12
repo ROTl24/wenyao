@@ -33,6 +33,35 @@ export interface RulePackManifest {
   sourceRefs: readonly string[];
 }
 
+export interface RelationRuleBundleManifest {
+  bundleId: 'relation_core_v1';
+  version: '1.0.0';
+  artifactHash: string;
+  verificationLevel: VerificationLevel;
+  runtimeStatus: RulePackRuntimeStatus;
+  reviews: readonly RuleReviewRecord[];
+  sourceRefs: readonly string[];
+}
+
+export type RelationHarmPolicy = 'liuren-six-harms-v1';
+export type RelationBreakPolicy =
+  | 'cross-source-common-four-breaks-v1'
+  | 'liuren-six-breaks-v1'
+  | 'wuxingjingji-four-breaks-v1';
+export type RelationPunishmentPolicy = 'liuren-directional-core-v1';
+
+export interface RelationMatchingProfile {
+  id: string;
+  bundle: {
+    id: 'relation_core_v1';
+    version: '1.0.0';
+    artifactHash: string;
+  };
+  harmPolicy: RelationHarmPolicy;
+  breakPolicy: RelationBreakPolicy;
+  punishmentPolicy: RelationPunishmentPolicy;
+}
+
 export interface RuleContext {
   schemaVersion: '2.0.0';
   rulePackId: 'wenwang_najia_v2';
@@ -47,8 +76,16 @@ export interface RuleContext {
   };
   relationProfile: {
     id: 'yehe_core_v1';
+    bundle: {
+      id: 'relation_core_v1';
+      version: '1.0.0';
+      artifactHash: string;
+    };
     dayClashPolicy: 'strength-aware';
     changedRelationReference: 'base-palace';
+    harmPolicy: 'liuren-six-harms-v1';
+    breakPolicy: 'cross-source-common-four-breaks-v1';
+    punishmentPolicy: 'liuren-directional-core-v1';
   };
   growthProfile: {
     id: 'five-element-forward_v1';

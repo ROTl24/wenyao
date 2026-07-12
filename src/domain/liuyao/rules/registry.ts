@@ -1,6 +1,11 @@
-import type { RuleContext, RulePackManifest, RuleSourceRef } from './model.js';
-import { BASE_RULE_CONTEXT } from './default-context.js';
+import type { RuleContext, RuleSourceRef } from './model.js';
+import { BASE_RULE_CONTEXT, REGISTERED_RULE_SOURCES } from './default-context.js';
+import { assertReviewedArtifactManifest } from './review-gate.js';
 import { canonicalStringify } from './tables.js';
+import {
+  WENWANG_REVIEW_CHECKED_CLAIMS,
+  WENWANG_REVIEW_REPORT_PATHS,
+} from './wenwang-manifest-expectations.js';
 import {
   RULE_SOURCE_EVIDENCE_CAPSULES,
   WENWANG_NAJIA_V2_ARTIFACT_HASH,
@@ -9,91 +14,55 @@ import {
 
 const GATE_ERROR = '结构规则包未通过项目运行门';
 const CONTEXT_GATE_ERROR = '结构规则上下文未通过项目运行门';
-const ZONED_ISO_PATTERN = /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}(?:\.\d+)?(?:Z|[+-]\d{2}:\d{2})$/;
 
-function reject(): never {
-  throw new Error(GATE_ERROR);
+export function assertProjectEnabledRulePack(manifest: unknown): void {
+  assertReviewedArtifactManifest(manifest, {
+    id: { field: 'rulePackId', value: 'wenwang_najia_v2' },
+    version: WENWANG_NAJIA_V2_MANIFEST.version,
+    artifactHash: WENWANG_NAJIA_V2_ARTIFACT_HASH,
+    sourceRefs: RULE_SOURCE_EVIDENCE_CAPSULES.map(({ ref }) => ref.id),
+    checkedClaims: WENWANG_REVIEW_CHECKED_CLAIMS,
+    reportPaths: WENWANG_REVIEW_REPORT_PATHS,
+    errorMessage: GATE_ERROR,
+  });
 }
 
-function isCanonicalNonEmpty(value: unknown): value is string {
-  return typeof value === 'string' && value.length > 0 && value === value.trim();
-}
-
-function isZonedIso(value: unknown): value is string {
-  return isCanonicalNonEmpty(value)
-    && ZONED_ISO_PATTERN.test(value)
-    && Number.isFinite(Date.parse(value));
-}
-
-export function assertProjectEnabledRulePack(manifest: RulePackManifest): void {
-  if (
-    manifest.rulePackId !== 'wenwang_najia_v2'
-    || manifest.version !== WENWANG_NAJIA_V2_MANIFEST.version
-    || manifest.artifactHash !== WENWANG_NAJIA_V2_ARTIFACT_HASH
-    || manifest.runtimeStatus !== 'project-enabled'
-    || (manifest.verificationLevel !== 'independent-automated'
-      && manifest.verificationLevel !== 'human-reviewed')
-    || manifest.reviews.length < 2
-  ) reject();
-
-  const expectedSourceRefs = new Set(WENWANG_NAJIA_V2_MANIFEST.sourceRefs);
-  const actualSourceRefs = new Set(manifest.sourceRefs);
-  if (
-    actualSourceRefs.size !== manifest.sourceRefs.length
-    || actualSourceRefs.size !== expectedSourceRefs.size
-    || [...expectedSourceRefs].some((sourceRef) => !actualSourceRefs.has(sourceRef))
-  ) reject();
-
-  const reviewerIds = new Set<string>();
-  const runIds = new Set<string>();
-  const reportPaths = new Set<string>();
-  for (const review of manifest.reviews) {
-    const inputSourceRefs = Array.isArray(review.inputSourceRefs) ? review.inputSourceRefs : [];
-    const checkedClaims = Array.isArray(review.checkedClaims) ? review.checkedClaims : [];
-    const inputSourceRefSet = new Set(inputSourceRefs);
-    const checkedClaimSet = new Set(checkedClaims);
-    if (
-      review.outcome !== 'matched'
-      || review.artifactHash !== manifest.artifactHash
-      || (review.reviewerKind !== 'automated-agent' && review.reviewerKind !== 'human')
-      || !isCanonicalNonEmpty(review.reviewerId)
-      || !isCanonicalNonEmpty(review.independentRunId)
-      || !isZonedIso(review.reviewedAt)
-      || !isCanonicalNonEmpty(review.reportPath)
-      || reviewerIds.has(review.reviewerId)
-      || runIds.has(review.independentRunId)
-      || reportPaths.has(review.reportPath)
-      || inputSourceRefs.length === 0
-      || inputSourceRefSet.size !== inputSourceRefs.length
-      || inputSourceRefs.some((sourceRef) => (
-        !isCanonicalNonEmpty(sourceRef) || !actualSourceRefs.has(sourceRef)
-      ))
-      || checkedClaims.length === 0
-      || checkedClaimSet.size !== checkedClaims.length
-      || checkedClaims.some((claim) => !isCanonicalNonEmpty(claim))
-    ) reject();
-    reviewerIds.add(review.reviewerId);
-    runIds.add(review.independentRunId);
-    reportPaths.add(review.reportPath);
-  }
-
-  const requiredReviewerKind = manifest.verificationLevel === 'human-reviewed'
-    ? 'human'
-    : 'automated-agent';
-  if (manifest.reviews.filter(({ reviewerKind }) => reviewerKind === requiredReviewerKind).length < 2) {
-    reject();
-  }
-}
-
-function sameSourceRef(actual: RuleSourceRef | undefined, expected: RuleSourceRef): boolean {
-  return actual !== undefined
-    && actual !== null
+function sameSourceRef(
+  actual: unknown,
+  expected: RuleSourceRef | undefined,
+): boolean {
+  return actual !== null
     && typeof actual === 'object'
-    && actual.id === expected.id
-    && actual.title === expected.title
-    && actual.url === expected.url
-    && actual.locator === expected.locator
-    && actual.contentHash === expected.contentHash;
+    && !Array.isArray(actual)
+    && expected !== undefined
+    && (actual as RuleSourceRef).id === expected.id
+    && (actual as RuleSourceRef).title === expected.title
+    && (actual as RuleSourceRef).url === expected.url
+    && (actual as RuleSourceRef).locator === expected.locator
+    && (actual as RuleSourceRef).contentHash === expected.contentHash;
+}
+
+export function hasRegisteredRequiredSources(
+  actualSources: unknown,
+  requiredSources: readonly RuleSourceRef[],
+): boolean {
+  if (
+    !Array.isArray(actualSources)
+    || !Array.from({ length: actualSources.length }, (_, index) => index in actualSources).every(Boolean)
+  ) return false;
+  const registeredById = new Map<string, RuleSourceRef>(
+    REGISTERED_RULE_SOURCES.map((source) => [source.id, source]),
+  );
+  const actualById = new Map<string, unknown>();
+  for (const source of actualSources) {
+    if (source === null || typeof source !== 'object' || Array.isArray(source)) return false;
+    const id = (source as { id?: unknown }).id;
+    if (typeof id !== 'string' || actualById.has(id)) return false;
+    actualById.set(id, source);
+  }
+  if (actualById.size !== actualSources.length) return false;
+  if ([...actualById].some(([id, source]) => !sameSourceRef(source, registeredById.get(id)))) return false;
+  return requiredSources.every((source) => sameSourceRef(actualById.get(source.id), source));
 }
 
 function runtimeProfilePayload(context: RuleContext) {
@@ -109,30 +78,31 @@ function runtimeProfilePayload(context: RuleContext) {
 
 const EXPECTED_RUNTIME_PROFILE_PAYLOAD = canonicalStringify(runtimeProfilePayload(BASE_RULE_CONTEXT));
 
-export function assertProjectEnabledRuleContext(context: RuleContext): void {
+export function assertProjectEnabledRuleContext(context: unknown): asserts context is RuleContext {
   try {
     assertProjectEnabledRulePack(WENWANG_NAJIA_V2_MANIFEST);
   } catch {
     throw new Error(CONTEXT_GATE_ERROR);
   }
 
-  if (!context || typeof context !== 'object' || !Array.isArray(context.sources)) {
+  if (!context || typeof context !== 'object' || Array.isArray(context)) {
     throw new Error(CONTEXT_GATE_ERROR);
   }
+  const candidate = context as Partial<RuleContext>;
 
   const expectedSources = RULE_SOURCE_EVIDENCE_CAPSULES.map(({ ref }) => ref);
   let profilesMatch = false;
   try {
-    profilesMatch = canonicalStringify(runtimeProfilePayload(context)) === EXPECTED_RUNTIME_PROFILE_PAYLOAD;
+    profilesMatch = canonicalStringify(runtimeProfilePayload(candidate as RuleContext))
+      === EXPECTED_RUNTIME_PROFILE_PAYLOAD;
   } catch {
     profilesMatch = false;
   }
   if (
-    context.rulePackId !== WENWANG_NAJIA_V2_MANIFEST.rulePackId
-    || context.rulePackVersion !== WENWANG_NAJIA_V2_MANIFEST.version
+    candidate.rulePackId !== WENWANG_NAJIA_V2_MANIFEST.rulePackId
+    || candidate.rulePackVersion !== WENWANG_NAJIA_V2_MANIFEST.version
     || !profilesMatch
-    || context.sources.length !== expectedSources.length
-    || context.sources.some((source, index) => !sameSourceRef(source, expectedSources[index]))
+    || !hasRegisteredRequiredSources(candidate.sources, expectedSources)
   ) {
     throw new Error(CONTEXT_GATE_ERROR);
   }

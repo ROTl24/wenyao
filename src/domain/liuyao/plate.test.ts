@@ -3,9 +3,14 @@ import { existsSync, readFileSync } from 'node:fs';
 import { describe, expect, it } from 'vitest';
 import { GOLDEN_HEXAGRAMS, GOLDEN_TRIGRAM_BITS, type GoldenHexagram } from './__fixtures__/golden-hexagrams.js';
 import { GOLDEN_CHANGED_RELATION_CASES, GOLDEN_NAJIA } from './__fixtures__/golden-najia.js';
+import { RELATION_SOURCE_EVIDENCE_CAPSULES } from './facts/relation-core-v1.js';
 import type { PlateV2, SixRelation } from './model.js';
 import { buildPlateV2 } from './plate.js';
-import { BASE_RULE_CONTEXT, DEFAULT_RULE_CONTEXT } from './rules/default-context.js';
+import {
+  BASE_RULE_CONTEXT,
+  DEFAULT_RULE_CONTEXT,
+  REGISTERED_RULE_SOURCES,
+} from './rules/default-context.js';
 import type { RuleContext, RulePackManifest, RuleReviewRecord } from './rules/model.js';
 import { assertProjectEnabledRulePack } from './rules/registry.js';
 import { canonicalStringify } from './rules/tables.js';
@@ -32,6 +37,10 @@ const REVIEW_CHECKED_CLAIMS = [
   'qian-to-gou-full-changed-reinstall',
   'qian-to-kun-dual-relations',
   'hidden-spirit-candidates:56',
+] as const;
+const REVIEW_REPORT_PATHS = [
+  'docs/domain/reviews/wenwang-najia-v2-review-a.md',
+  'docs/domain/reviews/wenwang-najia-v2-review-b.md',
 ] as const;
 const GOLDEN_NAJIA_BY_KEY: ReadonlyMap<string, (typeof GOLDEN_NAJIA)[number]> = new Map(
   GOLDEN_NAJIA.map((entry) => [entry.key, entry]),
@@ -77,7 +86,7 @@ function matchedReview(
     artifactHash: WENWANG_NAJIA_V2_ARTIFACT_HASH,
     outcome: 'matched',
     inputSourceRefs: REVIEW_INPUT_SOURCE_REFS,
-    reportPath: `docs/domain/reviews/synthetic-${reviewerId}.md`,
+    reportPath: independentRunId.endsWith('a') ? REVIEW_REPORT_PATHS[0] : REVIEW_REPORT_PATHS[1],
     checkedClaims: REVIEW_CHECKED_CLAIMS,
     ...overrides,
   } as RuleReviewRecord;
@@ -242,6 +251,10 @@ describe('assertProjectEnabledRulePack', () => {
       matchedReview('reviewer-a', 'run-a', { inputSourceRefs: [REVIEW_INPUT_SOURCE_REFS[0], REVIEW_INPUT_SOURCE_REFS[0]] }),
       matchedReview('reviewer-b', 'run-b'),
     ] })],
+    ['incomplete inputSourceRefs', () => enabledManifest({ reviews: [
+      matchedReview('reviewer-a', 'run-a', { inputSourceRefs: REVIEW_INPUT_SOURCE_REFS.slice(1) }),
+      matchedReview('reviewer-b', 'run-b'),
+    ] })],
     ['unknown inputSourceRef', () => enabledManifest({ reviews: [
       matchedReview('reviewer-a', 'run-a', { inputSourceRefs: ['UNKNOWN-SOURCE'] }),
       matchedReview('reviewer-b', 'run-b'),
@@ -258,8 +271,28 @@ describe('assertProjectEnabledRulePack', () => {
       matchedReview('reviewer-a', 'run-a', { checkedClaims: [] }),
       matchedReview('reviewer-b', 'run-b'),
     ] })],
+    ['incomplete checkedClaims', () => enabledManifest({ reviews: [
+      matchedReview('reviewer-a', 'run-a', { checkedClaims: REVIEW_CHECKED_CLAIMS.slice(1) }),
+      matchedReview('reviewer-b', 'run-b'),
+    ] })],
+    ['wrong fixed report path', () => enabledManifest({ reviews: [
+      matchedReview('reviewer-a', 'run-a', { reportPath: 'docs/domain/reviews/synthetic-a.md' }),
+      matchedReview('reviewer-b', 'run-b'),
+    ] })],
   ])('rejects %s', (_label, makeManifest) => {
     expect(() => assertProjectEnabledRulePack(makeManifest())).toThrow('结构规则包未通过项目运行门');
+  });
+
+  it.each([
+    null,
+    {},
+    { ...enabledManifest(), sourceRefs: [null] },
+    { ...enabledManifest(), reviews: Object.assign(new Array(2), {
+      0: matchedReview('reviewer-a', 'run-a'),
+    }) },
+  ])('rejects malformed JS manifests with the structural gate error: %#', (manifest) => {
+    expect(() => assertProjectEnabledRulePack(manifest))
+      .toThrow('结构规则包未通过项目运行门');
   });
 });
 
@@ -281,6 +314,8 @@ describe('buildPlateV2', () => {
   it.each([
     ['missing context', undefined],
     ['non-array sources', { ...DEFAULT_RULE_CONTEXT, sources: null }],
+    ['null source entry', { ...DEFAULT_RULE_CONTEXT, sources: [null] }],
+    ['sparse sources', { ...DEFAULT_RULE_CONTEXT, sources: new Array(1) }],
   ])('rejects malformed runtime context: %s', (_label, ruleContext) => {
     expect(() => buildPlateV2({
       ...FIXED_BUILD_INPUT,
@@ -295,6 +330,54 @@ describe('buildPlateV2', () => {
       tossValues: [9, 7, 7, 7, 7, 7],
       ruleContext: BASE_RULE_CONTEXT,
     })).toThrow('结构规则上下文未通过项目运行门');
+  });
+
+  it('validates only the structural source subset while accepting the registered source union', () => {
+    expect(DEFAULT_RULE_CONTEXT.sources).toEqual(REGISTERED_RULE_SOURCES);
+    expect(new Set(DEFAULT_RULE_CONTEXT.sources.map(({ id }) => id)).size)
+      .toBe(DEFAULT_RULE_CONTEXT.sources.length);
+    expect(DEFAULT_RULE_CONTEXT.sources).toEqual(expect.arrayContaining([
+      ...RULE_SOURCE_EVIDENCE_CAPSULES.map(({ ref }) => ref),
+      ...RELATION_SOURCE_EVIDENCE_CAPSULES.map(({ ref }) => ref),
+    ]));
+
+    const structuralOnlyContext = {
+      ...DEFAULT_RULE_CONTEXT,
+      sources: RULE_SOURCE_EVIDENCE_CAPSULES.map(({ ref }) => ref),
+    } as RuleContext;
+    expect(() => buildPlateV2({
+      ...FIXED_BUILD_INPUT,
+      tossValues: [9, 7, 7, 7, 7, 7],
+      ruleContext: structuralOnlyContext,
+    })).not.toThrow();
+  });
+
+  it('rejects forged or unknown extras even when all structural sources remain present', () => {
+    const relationSourceId = RELATION_SOURCE_EVIDENCE_CAPSULES[0].ref.id;
+    const forgedRelationSource = {
+      ...DEFAULT_RULE_CONTEXT,
+      sources: DEFAULT_RULE_CONTEXT.sources.map((source) => (
+        source.id === relationSourceId ? { ...source, title: 'forged title' } : source
+      )),
+    } as RuleContext;
+    const unknownExtra = {
+      ...DEFAULT_RULE_CONTEXT,
+      sources: [...DEFAULT_RULE_CONTEXT.sources, {
+        id: 'UNKNOWN-SOURCE',
+        title: 'unknown',
+        url: 'https://example.invalid',
+        locator: 'unknown',
+        contentHash: 'f'.repeat(64),
+      }],
+    } as RuleContext;
+
+    for (const ruleContext of [forgedRelationSource, unknownExtra]) {
+      expect(() => buildPlateV2({
+        ...FIXED_BUILD_INPUT,
+        tossValues: [9, 7, 7, 7, 7, 7],
+        ruleContext,
+      })).toThrow('结构规则上下文未通过项目运行门');
+    }
   });
 
   it.each([
