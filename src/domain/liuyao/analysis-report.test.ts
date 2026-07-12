@@ -771,6 +771,72 @@ describe('analysis report v2 contract', () => {
     expect(() => validateAnalysisReportV2(mixed, mixedContract, [], VALIDATED_AT)).not.toThrow();
   });
 
+  it('parses spirit-role position cues before or after the entity and fails closed when unresolved', () => {
+    const caseSnapshot = buildCase();
+    const contract = createFactContractV2(caseSnapshot);
+    const sourceSpirit = contract.modelContract.facts.find(({ relation }) => relation === 'is-source-spirit')!;
+    const sourcePosition = sourceSpirit.source?.type === 'line'
+      ? Number(sourceSpirit.source.id.split(':').at(-1))
+      : 2;
+    const correctEntity = `contract:entity:line:line:${sourcePosition}:base`;
+    const base = mutableRaw(caseSnapshot);
+    const claim = base.claims.find(({ section }) => section === 'use-god')!;
+    claim.factIds = [...claim.factIds, sourceSpirit.id, correctEntity, 'contract:entity:line:line:6:base'];
+    claim.ruleIds = [...sourceSpirit.ruleIds];
+
+    for (const text of [
+      `元神依据对应事实，本卦${POSITION_TEXT[sourcePosition]}是其具体位置。`,
+      `元神依据对应事实，最终指向本卦${POSITION_TEXT[sourcePosition]}。`,
+      `元神依据对应事实，其对应爻位为本卦${POSITION_TEXT[sourcePosition]}。`,
+    ]) {
+      claim.text = text;
+      expect(() => validateAnalysisReportV2(base, contract, [], VALIDATED_AT), `correct:${text}`).not.toThrow();
+    }
+    for (const text of [
+      '元神依据对应事实，本卦上爻是其具体位置。',
+      '元神依据对应事实，最终指向本卦上爻。',
+      '元神依据对应事实，其对应爻位为本卦上爻。',
+    ]) {
+      claim.text = text;
+      expect(() => validateAnalysisReportV2(base, contract, [], VALIDATED_AT), `wrong:${text}`).toThrow(/元神|具体位置|指向|实体|source/);
+    }
+    claim.text = '元神依据对应事实，其具体位置尚未解析。';
+    expect(() => validateAnalysisReportV2(base, contract, [], VALIDATED_AT)).toThrow(/fail.closed|无法解析|具体位置|实体/i);
+    for (const text of ['元神为有利辅助因素。', '元神为力量来源。']) {
+      claim.text = text;
+      expect(() => validateAnalysisReportV2(base, contract, [], VALIDATED_AT), text).not.toThrow();
+    }
+  });
+
+  it('excludes 对应爻位 from the standalone 应爻 token without weakening real 应爻 assertions', () => {
+    const caseSnapshot = buildCase();
+    const contract = createFactContractV2(caseSnapshot);
+    const sourceSpirit = contract.modelContract.facts.find(({ relation }) => relation === 'is-source-spirit')!;
+    const sourcePosition = sourceSpirit.source?.type === 'line'
+      ? Number(sourceSpirit.source.id.split(':').at(-1))
+      : 2;
+    const useGodRaw = mutableRaw(caseSnapshot);
+    const useGodClaim = useGodRaw.claims.find(({ section }) => section === 'use-god')!;
+    useGodClaim.text = `元神依据对应事实，其对应爻位为本卦${POSITION_TEXT[sourcePosition]}。`;
+    useGodClaim.factIds = [
+      ...useGodClaim.factIds,
+      sourceSpirit.id,
+      `contract:entity:line:line:${sourcePosition}:base`,
+    ];
+    useGodClaim.ruleIds = [...sourceSpirit.ruleIds];
+    expect(() => validateAnalysisReportV2(useGodRaw, contract, [], VALIDATED_AT)).not.toThrow();
+
+    const roleRaw = mutableRaw(caseSnapshot);
+    roleRaw.claims[0] = {
+      ...roleRaw.claims[0], text: '本卦三爻为应爻。',
+      factIds: ['contract:entity:line:line:3:base'], ruleIds: [], evidenceIds: [], confidence: 'high',
+    };
+    expect(() => validateAnalysisReportV2(roleRaw, contract, [], VALIDATED_AT)).not.toThrow();
+    roleRaw.claims[0].text = '本卦初爻为应爻。';
+    roleRaw.claims[0].factIds.push('contract:entity:line:line:1:base');
+    expect(() => validateAnalysisReportV2(roleRaw, contract, [], VALIDATED_AT)).toThrow(/应爻|实体属性|关联/);
+  });
+
   it('rejects bare negative 生克冲合刑害破 while preserving positive and symmetric semantics', () => {
     const caseSnapshot = buildCase();
     const contract = createFactContractV2(caseSnapshot);

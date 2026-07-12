@@ -979,7 +979,6 @@ const STATIC_CONCRETE_TOKENS = stableUnique([
   ...ALL_POSITION_TOKENS,
   ...ALL_SIX_RELATIONS,
   '本卦', '变卦', '伏神',
-  '世爻', '应爻', '持世', '持应', '世应',
   '动爻', '静爻', '发动', '安静',
   '木行', '火行', '土行', '金行', '水行',
   '甲子旬', '甲戌旬', '甲申旬', '甲午旬', '甲辰旬', '甲寅旬',
@@ -990,6 +989,14 @@ function extractConcreteTokens(text: string, context: FactContractValidationCont
   const found = new Set<string>();
   for (const token of STATIC_CONCRETE_TOKENS) {
     if (text.includes(token)) found.add(token === '腾蛇' ? '螣蛇' : token);
+  }
+  for (const token of ['世爻', '持世', '持应', '世应'] as const) {
+    if (text.includes(token)) found.add(token);
+  }
+  let yingLineIndex = text.indexOf('应爻');
+  while (yingLineIndex >= 0) {
+    if (yingLineIndex === 0 || text[yingLineIndex - 1] !== '对') found.add('应爻');
+    yingLineIndex = text.indexOf('应爻', yingLineIndex + 2);
   }
   for (const match of text.matchAll(/[甲乙丙丁戊己庚辛壬癸][子丑寅卯辰巳午未申酉戌亥]/gu)) {
     found.add(match[0]);
@@ -1593,66 +1600,63 @@ function structuredSpiritRoleAssertions(
   allFacts: readonly ContractFactV2[],
 ): readonly SpiritRoleEntityAssertion[] {
   const result: SpiritRoleEntityAssertion[] = [];
-  const nearestAfter = (
-    anchors: readonly EntityAnchorMatch[],
-    start: number,
-    clause: string,
-  ): readonly EntityAnchorMatch[] => {
-    const conjunction = /(?:并且|同时|以及|而且|且|但|并)/u.exec(clause.slice(start));
-    const end = conjunction ? start + conjunction.index : clause.length;
-    const eligible = anchors.filter((anchor) => anchor.index >= start && anchor.index < end);
-    if (eligible.length === 0) return [];
-    const nearestIndex = Math.min(...eligible.map(({ index }) => index));
-    return eligible.filter(({ index }) => index === nearestIndex);
-  };
-  const nearestBefore = (
-    anchors: readonly EntityAnchorMatch[],
-    end: number,
-  ): readonly EntityAnchorMatch[] => {
-    const eligible = anchors.filter((anchor) => anchor.end <= end);
-    if (eligible.length === 0) return [];
-    const nearestEnd = Math.max(...eligible.map((anchor) => anchor.end));
-    return eligible.filter((anchor) => anchor.end === nearestEnd);
-  };
   for (const sentence of text.split(/[。；;\n]+/u)) {
     let activeRole: SpiritRoleLabel | null = null;
     for (const rawClause of sentence.split(/[，,]+/u)) {
       const clause = rawClause.trim();
       if (!clause) continue;
-      const roleMatches = [...clause.matchAll(/(元神|忌神|仇神)/gu)];
-      if (roleMatches.length > 0) activeRole = roleMatches.at(-1)?.[1] as SpiritRoleLabel;
-      const anchors = entityAnchorMatches(clause, allFacts);
-      if (anchors.length === 0) continue;
+      const fragments = clause.split(/(?:并且|同时|以及|而且|但是|且|但)/u)
+        .map((entry) => entry.trim())
+        .filter(Boolean);
+      for (const fragment of fragments) {
+        const roleMatches = [...fragment.matchAll(/(元神|忌神|仇神)/gu)];
+        if (roleMatches.length > 0) activeRole = roleMatches.at(-1)?.[1] as SpiritRoleLabel;
+        if (!activeRole) continue;
 
-      let assertedRole: SpiritRoleLabel | null = null;
-      let assertedAnchors: readonly EntityAnchorMatch[] = [];
-      const locationMatch = /(?:其)?(?:具体)?(?:位置|所在)(?:落于|位于|在|就是|为|来自)|(?:落于|位于|来自)/u.exec(clause);
-      if (activeRole && locationMatch) {
-        assertedRole = activeRole;
-        assertedAnchors = nearestAfter(
-          anchors,
-          locationMatch.index + locationMatch[0].length,
-          clause,
-        );
-      }
-      for (const role of ['元神', '忌神', '仇神'] as const) {
-        const direct = new RegExp(`${role}[^。；，,]{0,40}(?:就是|为|是|在|位于|落于|来自)`, 'u').exec(clause);
-        if (direct) {
-          assertedRole = role;
-          assertedAnchors = nearestAfter(anchors, direct.index + direct[0].length, clause);
+        const anchors = entityAnchorMatches(fragment, allFacts);
+        const hasRoleInFragment = roleMatches.length > 0;
+        const hasLocationNoun = /(?:具体位置|对应爻位|所在|位置|爻位)/u.test(fragment);
+        const cueMatches: Array<{ index: number; end: number }> = [];
+        for (const match of fragment.matchAll(/(?:指向|落于|位于|来自)/gu)) {
+          cueMatches.push({ index: match.index, end: match.index + match[0].length });
         }
-        const reverse = new RegExp(`(?:就是|为|是|作为|当作)${role}`, 'u').exec(clause);
-        if (reverse) {
-          assertedRole = role;
-          assertedAnchors = nearestBefore(anchors, reverse.index);
+        const hasStrongLocationCue = cueMatches.length > 0;
+        if (hasRoleInFragment || hasLocationNoun) {
+          for (const match of fragment.matchAll(/(?:就是|为|是|在)/gu)) {
+            cueMatches.push({ index: match.index, end: match.index + match[0].length });
+          }
         }
+        if (cueMatches.length === 0 && hasLocationNoun) {
+          const noun = /(?:具体位置|对应爻位|所在|位置|爻位)/u.exec(fragment);
+          if (noun) cueMatches.push({ index: noun.index, end: noun.index + noun[0].length });
+        }
+        if (cueMatches.length === 0) continue;
+        if (anchors.length === 0 && !hasLocationNoun && !hasStrongLocationCue) continue;
+
+        let assertedAnchors: readonly EntityAnchorMatch[] = [];
+        if (anchors.length > 0) {
+          let minimumDistance = Number.POSITIVE_INFINITY;
+          for (const cue of cueMatches) {
+            for (const anchor of anchors) {
+              const distance = anchor.end <= cue.index
+                ? cue.index - anchor.end
+                : anchor.index >= cue.end ? anchor.index - cue.end : 0;
+              if (distance < minimumDistance) {
+                minimumDistance = distance;
+                assertedAnchors = [anchor];
+              } else if (distance === minimumDistance
+                && assertedAnchors.some((candidate) => candidate.index === anchor.index)) {
+                assertedAnchors = [...assertedAnchors, anchor];
+              }
+            }
+          }
+        }
+        result.push({
+          role: activeRole,
+          entityKeys: stableUnique(assertedAnchors.flatMap(({ entityKeys }) => entityKeys)),
+          text: fragment,
+        });
       }
-      if (!assertedRole || assertedAnchors.length === 0) continue;
-      result.push({
-        role: assertedRole,
-        entityKeys: stableUnique(assertedAnchors.flatMap(({ entityKeys }) => entityKeys)),
-        text: clause,
-      });
     }
   }
   return result;
