@@ -105,6 +105,7 @@ export interface FactContractV2 {
 export interface ContractPredicateV2 {
   readonly factId: string;
   readonly relation: string;
+  readonly direction: 'directed' | 'symmetric';
   readonly sourceLabels: readonly string[];
   readonly targetLabels: readonly string[];
 }
@@ -194,7 +195,7 @@ const SECTION_SET = new Set<string>(ANALYSIS_REPORT_V2_SECTIONS);
 const CONFIDENCE_SET = new Set<string>(ANALYSIS_CONFIDENCE_LEVELS);
 const CASE_HASH_RE = /^[0-9a-f]{64}$/;
 const CONTROL_RE = /[\u0000-\u001f\u007f]/u;
-const PROMPT_INJECTION_RE = /(?:ignore\s+(?:all\s+)?(?:previous|prior)|bypass.{0,20}(?:validation|rules?|safety)|override.{0,20}(?:instructions?|rules?)|reveal.{0,20}(?:system|hidden).{0,12}(?:prompt|instructions?)|system\s*(?:prompt|message)|developer\s*message|prompt\s*injection|jailbreak|(?:忽略|无视).{0,12}(?:指令|提示|规则)|(?:绕过|跳过|规避).{0,10}(?:事实校验|校验|规则|限制|安全机制)|(?:改为|直接).{0,4}输出.{0,12}(?:系统|规则|提示|隐藏)|隐藏.{0,8}(?:规则|指令|提示)|不要遵循.{0,8}(?:规则|指令)|系统提示词|开发者消息|越狱|提示词注入)/iu;
+const PROMPT_INJECTION_RE = /(?:ignore\s+(?:all\s+)?(?:previous|prior)|disregard\s+(?:all\s+)?(?:earlier|previous|prior).{0,24}(?:constraints?|instructions?|rules?)|bypass.{0,20}(?:validation|rules?|safety)|override.{0,20}(?:instructions?|rules?)|(?:print|output|show|expose).{0,12}(?:internal|hidden|system).{0,12}(?:prompt|instructions?|rules?|content)|reveal.{0,20}(?:system|hidden).{0,12}(?:prompt|instructions?)|system\s*(?:prompt|message)|developer\s*message|prompt\s*injection|jailbreak|(?:忽略|无视).{0,12}(?:指令|提示|规则)|(?:抛开|撇开|放弃)(?:以上|此前|前述|所有|这些)?(?:约束|限制|规则|要求)|(?:打印|输出|展示|泄露).{0,12}(?:内部|隐藏|系统).{0,8}(?:提示|指令|规则|内容)|(?:绕过|跳过|规避).{0,10}(?:事实校验|校验|规则|限制|安全机制)|(?:改为|直接).{0,4}输出.{0,12}(?:系统|规则|提示|隐藏)|隐藏.{0,8}(?:规则|指令|提示)|不要遵循.{0,8}(?:规则|指令)|系统提示词|开发者消息|越狱|提示词注入)/iu;
 const ANCIENT_SOURCE_RE = /(?:古籍|原文|占例|卜筮正宗|增删卜易|黄金策|易隐|易冒)/u;
 const SINGLE_PRIMARY_RE = /(?:已(?:定|取)|确定|选定|取.{0,12}为用神|唯一(?:的)?主用神)/u;
 const SPIRIT_ASSERTION_RE = /(?:元神|忌神|仇神)/u;
@@ -327,6 +328,10 @@ function strictClone<T>(value: T, label = '输入', ancestors = new Set<object>(
         if (key === 'length') continue;
         if (!/^(?:0|[1-9]\d*)$/u.test(key) || String(Number(key)) !== key) {
           fail(`${label} 数组含非规范索引或额外字段`);
+        }
+        const numericIndex = Number(key);
+        if (!Number.isSafeInteger(numericIndex) || numericIndex < 0 || numericIndex >= value.length) {
+          fail(`${label} 数组索引 ${key} 超出实际 length 范围`);
         }
       }
       return value.map((entry, index) => strictClone(entry, `${label}[${index}]`, ancestors)) as T;
@@ -796,6 +801,7 @@ export function createFactContractV2(caseSnapshot: DivinationCaseV2): FactContra
     .map((fact) => ({
       factId: fact.id,
       relation: fact.relation as string,
+      direction: fact.values.direction === 'symmetric' ? 'symmetric' : 'directed',
       sourceLabels: [...fact.sourceLabels],
       targetLabels: [...fact.targetLabels],
     }));
@@ -1017,6 +1023,13 @@ function extractConcreteTokens(text: string, context: FactContractValidationCont
     'gu',
   );
   for (const match of text.matchAll(standaloneStage)) found.add(match[1]);
+  const prefixedStage = new RegExp(
+    `(${stageAlternation})(?:临|在|落于|见于)(?:本卦|变卦)?(?:${positionAlternation})`,
+    'gu',
+  );
+  for (const match of text.matchAll(prefixedStage)) {
+    if (!(match[1] === '长生' && match[0].startsWith('十二长生'))) found.add(match[1]);
+  }
   for (const label of [...ALL_SHEN_SHA_LABELS].sort((left, right) => right.length - left.length)) {
     if (!text.includes(label)) continue;
     if ([...found].some((existing) => existing.length > label.length && existing.includes(label))) continue;
@@ -1095,17 +1108,24 @@ function connectedFactComponents(facts: readonly ContractFactV2[]): readonly (re
 interface ClauseSegment {
   readonly text: string;
   readonly inheritedPillar: keyof typeof PILLAR_LABELS | null;
+  readonly sentenceId: number;
 }
 
 function pillarKindInText(text: string): keyof typeof PILLAR_LABELS | null {
   for (const kind of ['year', 'month', 'day', 'hour'] as const) {
     if (PILLAR_LABELS[kind].some((label) => text.includes(label))) return kind;
   }
+  for (const [label, kind] of [
+    ['年', 'year'], ['月', 'month'], ['日', 'day'], ['时', 'hour'],
+  ] as const) {
+    if (new RegExp(`${label}(?:柱|干|支)`, 'u').test(text)) return kind;
+  }
   return null;
 }
 
 function clauseSegments(text: string): readonly ClauseSegment[] {
   const result: ClauseSegment[] = [];
+  let sentenceId = 0;
   for (const sentence of text.split(/[。；;\n]+/u)) {
     let inheritedPillar: keyof typeof PILLAR_LABELS | null = null;
     for (const raw of sentence.split(/[，,]+/u)) {
@@ -1113,8 +1133,9 @@ function clauseSegments(text: string): readonly ClauseSegment[] {
       if (!clause) continue;
       const explicit = pillarKindInText(clause);
       if (explicit) inheritedPillar = explicit;
-      result.push({ text: clause, inheritedPillar });
+      result.push({ text: clause, inheritedPillar, sentenceId });
     }
+    sentenceId += 1;
   }
   return result;
 }
@@ -1187,8 +1208,23 @@ function entityAnchorMatches(
 }
 
 function facetTokens(text: string, context: FactContractValidationContextV2): readonly string[] {
-  return extractConcreteTokens(text, context).filter((token) => (
-    token === '本卦'
+  const labelledSingles: string[] = [];
+  for (const match of text.matchAll(/(?:纳干|天干)(?:为|是|属)?([甲乙丙丁戊己庚辛壬癸])/gu)) {
+    labelledSingles.push(match[1]);
+  }
+  for (const match of text.matchAll(/(?:纳支|地支)(?:为|是|属)?([子丑寅卯辰巳午未申酉戌亥])/gu)) {
+    labelledSingles.push(match[1]);
+  }
+  for (const match of text.matchAll(/五行(?:为|是|属)?([木火土金水])/gu)) {
+    labelledSingles.push(match[1]);
+  }
+  for (const match of text.matchAll(/六亲(?:为|是|属)?(父母|兄弟|子孙|妻财|官鬼)/gu)) {
+    labelledSingles.push(match[1]);
+  }
+  const labelledSet = new Set(labelledSingles);
+  return stableUnique([...extractConcreteTokens(text, context), ...labelledSingles]).filter((token) => (
+    labelledSet.has(token)
+    || token === '本卦'
     || token === '变卦'
     || token === '伏神'
     || ALL_GANZHI.includes(token)
@@ -1231,13 +1267,18 @@ function validateEntityAssociations(
   referencedFacts: readonly ContractFactV2[],
   allFacts: readonly ContractFactV2[],
   context: FactContractValidationContextV2,
+  inheritedAnchors: readonly EntityAnchorMatch[] = [],
 ): void {
-  const anchors = entityAnchorMatches(clause.text, allFacts);
+  const explicitAnchors = entityAnchorMatches(clause.text, allFacts);
+  const anchors = explicitAnchors.length > 0
+    ? explicitAnchors
+    : inheritedAnchors.map((anchor) => ({ ...anchor, index: 0, end: 0, label: `继承:${anchor.label}` }));
   if (anchors.length === 0) return;
   for (let index = 0; index < anchors.length; index += 1) {
     const anchor = anchors[index];
     const next = anchors[index + 1];
-    const slice = clause.text.slice(anchor.index, next?.index ?? clause.text.length);
+    const sliceStart = index === 0 ? 0 : anchor.index;
+    const slice = clause.text.slice(sliceStart, next?.index ?? clause.text.length);
     const tokens = facetTokens(slice, context);
     const supporters = referencedFacts.filter((fact) => factTouchesEntityKeys(fact, anchor.entityKeys));
     const structuralSetCoverage = referencedFacts.some((fact) => (
@@ -1311,6 +1352,47 @@ function validateStructuralAssociations(
       fail(`当前排盘事实 ${tokens.join('、')} 在 clause「${clause.text}」中与${PILLAR_LABELS[kind][0]}不属于同一 pillar fact`);
     }
   }
+
+  const kindByLabel = {
+    年: 'year', 月: 'month', 日: 'day', 时: 'hour',
+  } as const;
+  const assertPillarSingle = (
+    kindLabel: keyof typeof kindByLabel,
+    facet: 'stem' | 'branch',
+    expected: string,
+    element: boolean,
+  ) => {
+    const pillarKind = kindByLabel[kindLabel];
+    const fact = referencedFacts.find(({ id }) => id === `contract:plate:pillar:${pillarKind}`);
+    const facetValue = fact?.values[facet];
+    const actual = isPlainRecord(facetValue)
+      ? facetValue[element ? 'element' : 'value']
+      : undefined;
+    if (actual !== expected) {
+      fail(`${kindLabel}${facet === 'stem' ? '干' : '支'}单值 ${expected} 与当前 pillar fact 不匹配`);
+    }
+  };
+  for (const match of clause.text.matchAll(/([年月日时])(?:柱)?(?:天)?干(?:为|是|属)([甲乙丙丁戊己庚辛壬癸])/gu)) {
+    assertPillarSingle(match[1] as keyof typeof kindByLabel, 'stem', match[2], false);
+  }
+  for (const match of clause.text.matchAll(/([年月日时])(?:柱)?(?:地)?支(?:为|是|属)([子丑寅卯辰巳午未申酉戌亥])/gu)) {
+    assertPillarSingle(match[1] as keyof typeof kindByLabel, 'branch', match[2], false);
+  }
+  for (const match of clause.text.matchAll(/([年月日时])(?:柱)?(?:天)?干(?:的)?五行(?:为|是|属)([木火土金水])/gu)) {
+    assertPillarSingle(match[1] as keyof typeof kindByLabel, 'stem', match[2], true);
+  }
+  for (const match of clause.text.matchAll(/([年月日时])(?:柱)?(?:地)?支(?:的)?五行(?:为|是|属)([木火土金水])/gu)) {
+    assertPillarSingle(match[1] as keyof typeof kindByLabel, 'branch', match[2], true);
+  }
+  if (kind) {
+    const kindLabel = ({ year: '年', month: '月', day: '日', hour: '时' } as const)[kind];
+    for (const match of clause.text.matchAll(/(?:其)?(?:天)?干(?:为|是|属)([甲乙丙丁戊己庚辛壬癸])/gu)) {
+      assertPillarSingle(kindLabel, 'stem', match[1], false);
+    }
+    for (const match of clause.text.matchAll(/(?:其)?(?:地)?支(?:为|是|属)([子丑寅卯辰巳午未申酉戌亥])/gu)) {
+      assertPillarSingle(kindLabel, 'branch', match[1], false);
+    }
+  }
 }
 
 function validateElementPredicates(
@@ -1336,9 +1418,24 @@ function validateClauseAssociations(
   context: FactContractValidationContextV2,
 ): void {
   const components = connectedFactComponents(referencedFacts);
+  let sentenceId = -1;
+  let activeEntityAnchors: readonly EntityAnchorMatch[] = [];
   for (const clause of clauseSegments(claim.text)) {
+    if (clause.sentenceId !== sentenceId) {
+      sentenceId = clause.sentenceId;
+      activeEntityAnchors = [];
+    }
+    const explicitAnchors = entityAnchorMatches(clause.text, allFacts);
+    if (pillarKindInText(clause.text) && explicitAnchors.length === 0) activeEntityAnchors = [];
     validateStructuralAssociations(clause, referencedFacts, context);
-    validateEntityAssociations(clause, referencedFacts, allFacts, context);
+    validateEntityAssociations(
+      clause,
+      referencedFacts,
+      allFacts,
+      context,
+      explicitAnchors.length === 0 ? activeEntityAnchors : [],
+    );
+    if (explicitAnchors.length > 0) activeEntityAnchors = [explicitAnchors.at(-1) as EntityAnchorMatch];
     const tokens = extractConcreteTokens(clause.text, context);
     if (tokens.length > 0 && !components.some((component) => (
       tokens.every((token) => component.some((fact) => factCoversTokens(fact, [token])))
@@ -1404,11 +1501,17 @@ function validateRelationPredicates(
         if (sourceLabel === targetLabel) continue;
         const forward = new RegExp(`${escapeRegExp(sourceLabel)}[^。；，,]{0,10}${word}[^。；，,]{0,10}${escapeRegExp(targetLabel)}`, 'u');
         const passive = new RegExp(`${escapeRegExp(targetLabel)}[^。；，,]{0,5}(?:受|被)[^。；，,]{0,5}${escapeRegExp(sourceLabel)}[^。；，,]{0,5}${word}`, 'u');
-        if (!forward.test(claim.text) && !passive.test(claim.text)) continue;
+        const postposed = new RegExp(`${escapeRegExp(sourceLabel)}[^。；，,]{0,5}(?:对|对于)[^。；，,]{0,5}${escapeRegExp(targetLabel)}[^。；，,]{0,8}(?:构成|形成|产生)?[^。；，,]{0,3}相?${word}`, 'u');
+        if (!forward.test(claim.text) && !passive.test(claim.text) && !postposed.test(claim.text)) continue;
         const authorized = referencedPredicates.some((predicate) => (
           predicate.relation === relation
-          && predicate.sourceLabels.includes(sourceLabel)
-          && predicate.targetLabels.includes(targetLabel)
+          && (
+            (predicate.sourceLabels.includes(sourceLabel)
+              && predicate.targetLabels.includes(targetLabel))
+            || (predicate.direction === 'symmetric'
+              && predicate.sourceLabels.includes(targetLabel)
+              && predicate.targetLabels.includes(sourceLabel))
+          )
         ));
         if (!authorized) fail(`claim ${claim.id} 的${sourceLabel}${word}${targetLabel}方向或关系无事实支持`);
       }
@@ -1420,6 +1523,27 @@ function validateRelationPredicates(
   void referencedFacts;
 }
 
+function structuredPrimaryAssertions(text: string): readonly string[] {
+  const assertions = new Set<string>();
+  const clauses = text.split(/[。；;，,\n]+/u).map((entry) => entry.trim()).filter(Boolean);
+  const patterns = [
+    /(?:主)?用神(?:就)?(?:是|为|就在|落在|落于|应取|首取|取作|定作|选定为?)([^。；，,]{1,48})/gu,
+    /([^。；，,]{1,48}?)(?:就是|为|是|作为|取作|定作)(?:本次)?(?:主)?用神/gu,
+    /(?:以|取|定)([^。；，,]{1,48}?)(?:作为|作|为)(?:主)?用神/gu,
+  ];
+  for (const clause of clauses) {
+    if (/(?:候选用神|用神候选)(?:有|包括|包含|可见)/u.test(clause)) continue;
+    for (const pattern of patterns) {
+      for (const match of clause.matchAll(pattern)) {
+        const before = clause.slice(Math.max(0, match.index - 3), match.index);
+        if (/(?:不|非|未|无)$/u.test(before) || /(?:不设|并非|不是|不作为)/u.test(match[0])) continue;
+        assertions.add(clause);
+      }
+    }
+  }
+  return [...assertions];
+}
+
 function validateUseGodClaim(
   claim: AnalysisClaimV2,
   facts: readonly ContractFactV2[],
@@ -1429,12 +1553,14 @@ function validateUseGodClaim(
   const factIds = new Set(claim.factIds);
   const selectionFactId = 'contract:use-god:selection';
   if (!factIds.has(selectionFactId)) fail(`claim ${claim.id} 必须引用用神选择事实`);
+  const primaryAssertions = structuredPrimaryAssertions(claim.text);
 
   if (selection.status === 'needs-user-input') {
     if (claim.confidence !== 'low') fail('needs-user-input 用神 claim 只能为 low');
     if (SINGLE_PRIMARY_RE.test(claim.text) || SPIRIT_ASSERTION_RE.test(claim.text)) {
       fail('needs-user-input 不得虚构已定用神或元忌仇');
     }
+    if (primaryAssertions.length > 0) fail('needs-user-input 状态不得追加主用神 assertion');
     if (!/(?:请|需|需要|补充|明确|澄清).{0,24}(?:占问|目标|对象|关系|用神)|(?:占问|目标).{0,16}(?:待明确|待澄清)/u.test(claim.text)) {
       fail('needs-user-input 必须使用请求澄清占问目标的措辞');
     }
@@ -1445,6 +1571,7 @@ function validateUseGodClaim(
     if (SINGLE_PRIMARY_RE.test(claim.text) || SPIRIT_ASSERTION_RE.test(claim.text)) {
       fail('unresolved 不得虚构已定用神或元忌仇');
     }
+    if (primaryAssertions.length > 0) fail('unresolved 状态不得追加主用神 assertion');
     if (!/(?:缺少|暂无|暂未|未找到|无法确定|候选不足|没有).{0,24}(?:候选|用神|条件)|(?:候选|用神).{0,16}(?:缺失|不足|未解决)/u.test(claim.text)) {
       fail('unresolved 必须明确候选或取用条件缺少的措辞');
     }
@@ -1464,6 +1591,7 @@ function validateUseGodClaim(
     if (SINGLE_PRIMARY_RE.test(claim.text) || SPIRIT_ASSERTION_RE.test(claim.text)) {
       fail('ambiguous 用神不得自动选择单一用神或元忌仇');
     }
+    if (primaryAssertions.length > 0) fail('ambiguous 状态不得追加单一主用神 assertion');
     if (
       selection.candidates.some((candidate) => (
         candidate.certainty === 'disputed' || candidate.entity.type === 'hidden-spirit'
@@ -1480,6 +1608,7 @@ function validateUseGodClaim(
     if (SINGLE_PRIMARY_RE.test(claim.text) || SPIRIT_ASSERTION_RE.test(claim.text)) {
       fail('shi-ying-pair 不得声称单一主用神或元忌仇');
     }
+    if (primaryAssertions.length > 0) fail('shi-ying-pair 状态不得追加单一主用神 assertion');
     const mentionsBoth = claim.text.includes('世应')
       || (/(?:世爻|持世|\b世\b)/u.test(claim.text) && /(?:应爻|持应|\b应\b)/u.test(claim.text));
     if (!mentionsBoth || !/(?:双端|两端|成对|同时|并看|并察|不设单一)/u.test(claim.text)) {
@@ -1495,21 +1624,25 @@ function validateUseGodClaim(
   if (selection.primary.entity.type === 'hidden-spirit' && !claim.text.includes('伏神')) {
     fail('resolved hidden 用神必须明确说明伏神身份');
   }
-  const explicitPrimaryAssertion = SINGLE_PRIMARY_RE.test(claim.text)
+  const explicitPrimaryAssertion = primaryAssertions.length > 0
+    || SINGLE_PRIMARY_RE.test(claim.text)
     || /(?:为|作|作为|取作|定作)(?:本次)?用神|用神(?:为|是|落在)/u.test(claim.text);
   if (explicitPrimaryAssertion) {
     const primaryFact = facts.find((fact) => expectedFocusIds.includes(fact.id));
     if (!primaryFact) fail('resolved single 缺少 primary contract fact');
-    const primaryTokens = facetTokens(claim.text, {
-      schemaVersion: '2.0.0',
-      caseHash: '',
-      allCurrentTokens: [],
-      entityLabels: [],
-      predicates: [],
-      useGod: selection,
-    });
-    if (primaryTokens.length > 0 && !factCoversTokens(primaryFact, primaryTokens)) {
-      fail('resolved 用神断言中的本变 side、爻位、六亲或实体属性与 primary 不匹配');
+    const assertionTexts = primaryAssertions.length > 0 ? primaryAssertions : [claim.text];
+    for (const assertionText of assertionTexts) {
+      const primaryTokens = facetTokens(assertionText, {
+        schemaVersion: '2.0.0',
+        caseHash: '',
+        allCurrentTokens: [],
+        entityLabels: [],
+        predicates: [],
+        useGod: selection,
+      });
+      if (primaryTokens.length > 0 && !factCoversTokens(primaryFact, primaryTokens)) {
+        fail('resolved 用神断言中的本变 side、爻位、六亲、角色或实体属性与 primary 不匹配');
+      }
     }
   }
   const spiritRelations: Readonly<Record<string, FactRelation>> = {
