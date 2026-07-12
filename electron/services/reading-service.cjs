@@ -1,35 +1,12 @@
 const crypto = require('node:crypto');
+const { isDeepStrictEqual } = require('node:util');
+const {
+  assertAuthoritativeFollowUpPairV2,
+  assertValidatedAnalysisBundleV2,
+  assertValidatedFollowUpBundleV2,
+} = require('./bundle-v2.cjs');
 
 const domainPromise = import('../generated/domain/index.js');
-
-const CATEGORY_TERMS = {
-  career: ['事业', '功名', '官禄', '仕宦', '求名', '官鬼', '世爻', '父母'],
-  wealth: ['财运', '求财', '买卖', '妻财', '子孙', '兄弟'],
-  relationship: ['感情', '婚姻', '世爻', '应爻', '官鬼', '妻财'],
-  health: ['健康', '疾病', '世爻', '官鬼', '子孙'],
-  study: ['学业', '考试', '科举', '科甲', '求名', '父母', '官鬼', '世爻'],
-  lost_item: ['寻物', '失物', '用神', '方位', '冲合'],
-  travel: ['出行', '行人', '世爻', '应爻', '动爻'],
-  other: ['世爻', '应爻', '日辰', '月建'],
-};
-
-const TRIGRAMS = {
-  乾: { key: '乾', nature: '天', element: '金', symbol: '☰' },
-  兑: { key: '兑', nature: '泽', element: '金', symbol: '☱' },
-  离: { key: '离', nature: '火', element: '火', symbol: '☲' },
-  震: { key: '震', nature: '雷', element: '木', symbol: '☳' },
-  巽: { key: '巽', nature: '风', element: '木', symbol: '☴' },
-  坎: { key: '坎', nature: '水', element: '水', symbol: '☵' },
-  艮: { key: '艮', nature: '山', element: '土', symbol: '☶' },
-  坤: { key: '坤', nature: '地', element: '土', symbol: '☷' },
-};
-
-const TOSS_FIELDS = {
-  6: { faces: ['text', 'text', 'text'], label: '老阴', moving: true, baseYang: false, changedYang: true },
-  7: { faces: ['text', 'text', 'reverse'], label: '少阳', moving: false, baseYang: true, changedYang: true },
-  8: { faces: ['text', 'reverse', 'reverse'], label: '少阴', moving: false, baseYang: false, changedYang: false },
-  9: { faces: ['reverse', 'reverse', 'reverse'], label: '老阳', moving: true, baseYang: true, changedYang: false },
-};
 
 function nodeHashPort() {
   return {
@@ -128,112 +105,57 @@ function assertCurrentCase(session, expectedFactSetHash) {
   return session.caseSnapshot;
 }
 
-function sideToLegacy(side) {
-  const upper = TRIGRAMS[side?.upperTrigram] || { key: side?.upperTrigram || '', nature: '', element: side?.palaceElement || '', symbol: '' };
-  const lower = TRIGRAMS[side?.lowerTrigram] || { key: side?.lowerTrigram || '', nature: '', element: side?.palaceElement || '', symbol: '' };
+function assertCatalog(value) {
+  if (
+    !isRecord(value)
+    || !Array.isArray(value.entries)
+    || !isRecord(value.corpusRef)
+    || typeof value.hydrate !== 'function'
+  ) throw new TypeError('ReadingService evidenceCatalog 无效');
+  return value;
+}
+
+function rawFromValidated(validated) {
   return {
-    name: side?.name || '',
-    shortName: side?.shortName || side?.name || '',
-    upper,
-    lower,
-    palace: side?.palace || '',
-    palaceElement: side?.palaceElement || '',
-    generation: side?.generation || '',
-    shiLine: side?.shiLine || 0,
-    yingLine: side?.yingLine || 0,
+    schemaVersion: validated.schemaVersion,
+    caseHash: validated.caseHash,
+    claims: structuredClone(validated.claims),
+    uncertainties: structuredClone(validated.uncertainties),
   };
 }
 
-function isLineSide(entity, lineId, side) {
-  return entity?.type === 'line' && entity.id === lineId && entity.side === side;
-}
-
-function factForLine(caseSnapshot, lineId, side, relation, pillar) {
-  return (caseSnapshot.facts || []).find((fact) => (
-    fact?.relation === relation
-    && (isLineSide(fact.source, lineId, side) || isLineSide(fact.target, lineId, side))
-    && (!pillar || (
-      (fact.source?.type === 'pillar' && fact.source.id === pillar)
-      || (fact.target?.type === 'pillar' && fact.target.id === pillar)
-    ))
-  ));
-}
-
-function legacyPlateFromCase(caseSnapshot) {
-  const plate = caseSnapshot.plate;
-  const calendar = plate.calendar || {};
-  const month = calendar.pillars?.month || {};
-  const day = calendar.pillars?.day || {};
-  const voidBranches = Array.isArray(day.voidBranches) ? [...day.voidBranches] : ['', ''];
-  const lines = (plate.lines || []).map((line, zeroIndex) => {
-    const toss = TOSS_FIELDS[line.tossValue] || TOSS_FIELDS[7];
-    const beast = factForLine(caseSnapshot, line.id, 'base', 'is-six-beast');
-    return {
-      ...structuredClone(toss),
-      value: line.tossValue,
-      index: line.position || zeroIndex + 1,
-      stem: line.base?.stem || '',
-      branch: line.base?.branch || '',
-      ganZhi: line.base?.ganZhi || '',
-      element: line.base?.branchElement || '',
-      relation: line.base?.relationToBasePalace || '',
-      changedStem: line.changed?.stem || '',
-      changedBranch: line.changed?.branch || '',
-      changedGanZhi: line.changed?.ganZhi || '',
-      changedElement: line.changed?.branchElement || '',
-      changedRelation: line.changed?.relationToBasePalace || '',
-      void: Boolean(factForLine(caseSnapshot, line.id, 'base', 'is-void')),
-      monthBreak: Boolean(factForLine(caseSnapshot, line.id, 'base', 'is-month-break')),
-      dayClash: Boolean(factForLine(caseSnapshot, line.id, 'base', 'clashes', 'day')),
-      monthCombine: Boolean(factForLine(caseSnapshot, line.id, 'base', 'combines', 'month')),
-      dayCombine: Boolean(factForLine(caseSnapshot, line.id, 'base', 'combines', 'day')),
-      changedVoid: Boolean(factForLine(caseSnapshot, line.id, 'changed', 'is-void')),
-      changedMonthBreak: Boolean(factForLine(caseSnapshot, line.id, 'changed', 'is-month-break')),
-      changedDayClash: Boolean(factForLine(caseSnapshot, line.id, 'changed', 'clashes', 'day')),
-      changedMonthCombine: Boolean(factForLine(caseSnapshot, line.id, 'changed', 'combines', 'month')),
-      changedDayCombine: Boolean(factForLine(caseSnapshot, line.id, 'changed', 'combines', 'day')),
-      role: line.base?.role || null,
-      beast: beast?.values?.spirit || beast?.values?.sixSpirit || '',
-    };
-  });
-  return {
-    id: plate.id,
-    castAt: plate.castAt,
-    dayGanZhi: day.ganZhi || '',
-    monthGanZhi: month.ganZhi || '',
-    monthBranch: month.branch?.value || '',
-    voidBranches,
-    baseHexagram: sideToLegacy(plate.baseHexagram),
-    changedHexagram: sideToLegacy(plate.changedHexagram),
-    movingLines: [...(plate.movingLines || [])],
-    lines,
-  };
-}
-
-function termsForCase(caseSnapshot) {
-  const terms = [
-    ...(CATEGORY_TERMS[caseSnapshot.category] || CATEGORY_TERMS.other),
-    caseSnapshot.plate?.baseHexagram?.shortName,
-    caseSnapshot.plate?.changedHexagram?.shortName,
-    ...(caseSnapshot.plate?.lines || []).flatMap((line) => [
-      line.base?.relationToBasePalace,
-      line.base?.role,
-    ]),
-  ];
-  return [...new Set(terms.filter(nonEmptyString))];
+function exactProviderResult(value, expectedOrigin = 'cloud') {
+  if (!isRecord(value)) throw new TypeError('原始报告 provider 返回无效');
+  const keys = Reflect.ownKeys(value);
+  if (
+    keys.length !== 2
+    || !Object.hasOwn(value, 'raw')
+    || !Object.hasOwn(value, 'analysisOrigin')
+    || keys.some((key) => typeof key !== 'string' || !['raw', 'analysisOrigin'].includes(key))
+    || value.analysisOrigin !== expectedOrigin
+  ) throw new TypeError('原始报告 provider 必须只返回 raw 与 analysisOrigin');
+  return value;
 }
 
 function createReadingService({
   store,
   domain: injectedDomain,
-  searchCorpus = async () => ({ evidence: [], diagnostics: null }),
-  analyze: analyzePort,
-  followUp: followUpPort,
+  reportV2: injectedReportV2,
+  evidenceCatalog: injectedEvidenceCatalog,
+  searchCorpus,
+  cloudProviderConfigured = () => false,
+  analyzeCloudV2,
+  followUpCloudV2,
   now = () => new Date(),
   createId = () => crypto.randomUUID(),
   hashPort = nodeHashPort(),
 }) {
   if (!store || typeof store.getSession !== 'function') throw new TypeError('ReadingService Store 无效');
+  if (typeof searchCorpus !== 'function') throw new TypeError('ReadingService searchCorpus 无效');
+  const evidenceCatalog = assertCatalog(injectedEvidenceCatalog);
+  if (typeof cloudProviderConfigured !== 'function' && typeof cloudProviderConfigured !== 'boolean') {
+    throw new TypeError('ReadingService cloudProviderConfigured 无效');
+  }
   const sessionTails = new Map();
 
   function serializeSession(sessionId, task) {
@@ -247,6 +169,183 @@ function createReadingService({
 
   async function resolveDomain() {
     return injectedDomain ? Promise.resolve(injectedDomain) : domainPromise;
+  }
+
+  async function resolveReportV2() {
+    return injectedReportV2 ? Promise.resolve(injectedReportV2) : resolveDomain();
+  }
+
+  function analysisBundleOptions(domain, caseHash) {
+    if (typeof domain.normalizeValidatedAnalysisReportV2 !== 'function') {
+      throw new Error('ReadingService 缺少同步 normalizeValidatedAnalysisReportV2');
+    }
+    return {
+      expectedCaseHash: caseHash,
+      expectedCorpusRef: evidenceCatalog.corpusRef,
+      normalizeValidatedAnalysisReportV2: domain.normalizeValidatedAnalysisReportV2,
+    };
+  }
+
+  function followUpBundleOptions(domain, caseHash) {
+    if (
+      typeof domain.normalizeValidatedFollowUpV2 !== 'function'
+      || typeof domain.deriveFollowUpContentV2 !== 'function'
+    ) throw new Error('ReadingService 缺少同步 follow-up normalize/derive helper');
+    return {
+      expectedCaseHash: caseHash,
+      expectedCorpusRef: evidenceCatalog.corpusRef,
+      normalizeValidatedFollowUpV2: domain.normalizeValidatedFollowUpV2,
+    };
+  }
+
+  function hydratePersistedEvidence(canonicalEvidence) {
+    const candidateRefs = canonicalEvidence.map((entry, index) => ({ id: entry.id, rank: index + 1 }));
+    const hydrated = evidenceCatalog.hydrate(candidateRefs, candidateRefs.length);
+    if (
+      hydrated.corpusRef.version !== evidenceCatalog.corpusRef.version
+      || hydrated.corpusRef.hash !== evidenceCatalog.corpusRef.hash
+      || !isDeepStrictEqual(hydrated.evidence, canonicalEvidence)
+    ) throw new Error('持久化证据与当前 canonical catalog 不一致');
+    return hydrated.evidence;
+  }
+
+  async function retrievalContextFor(contract, reportV2) {
+    if (typeof reportV2.createAnalysisRetrievalContextV2 !== 'function') {
+      throw new Error('ReadingService 缺少 createAnalysisRetrievalContextV2');
+    }
+    return Promise.resolve(
+      reportV2.createAnalysisRetrievalContextV2(contract.modelContract),
+    );
+  }
+
+  async function assertCurrentRequestedRuleIds(retrievalDiagnostics, contract, reportV2) {
+    const context = await retrievalContextFor(contract, reportV2);
+    if (!isDeepStrictEqual(retrievalDiagnostics.requestedRuleIds, context.ruleIds)) {
+      throw new Error('retrievalDiagnostics.requestedRuleIds 与当前 Case 规则上下文不一致');
+    }
+    return context;
+  }
+
+  async function coherentAnalysisBundle(value, contract, domain, reportV2) {
+    const outer = assertValidatedAnalysisBundleV2(
+      value,
+      analysisBundleOptions(domain, contract.modelContract.caseHash),
+    );
+    await assertCurrentRequestedRuleIds(outer.retrievalDiagnostics, contract, reportV2);
+    const canonicalEvidence = hydratePersistedEvidence(outer.canonicalEvidence);
+    if (typeof reportV2.validateAnalysisReportV2 !== 'function') {
+      throw new Error('ReadingService 缺少 validateAnalysisReportV2');
+    }
+    const revalidated = await Promise.resolve(reportV2.validateAnalysisReportV2(
+      rawFromValidated(outer.report),
+      contract,
+      canonicalEvidence,
+      outer.report.validation.validatedAt,
+    ));
+    if (!isDeepStrictEqual(revalidated, outer.report)) {
+      throw new Error('缓存报告未通过当前 Case 语义复验');
+    }
+    return assertValidatedAnalysisBundleV2({
+      ...outer,
+      report: revalidated,
+      canonicalEvidence: [...canonicalEvidence],
+    }, analysisBundleOptions(domain, contract.modelContract.caseHash));
+  }
+
+  async function maybeCoherentAnalysisBundle(value, contract, domain, reportV2) {
+    try {
+      if (!isRecord(value)) return null;
+      return await coherentAnalysisBundle(value, contract, domain, reportV2);
+    } catch {
+      return null;
+    }
+  }
+
+  async function coherentFollowUpBundle(value, contract, domain, reportV2) {
+    const outer = assertValidatedFollowUpBundleV2(
+      value,
+      followUpBundleOptions(domain, contract.modelContract.caseHash),
+    );
+    await assertCurrentRequestedRuleIds(outer.retrievalDiagnostics, contract, reportV2);
+    const canonicalEvidence = hydratePersistedEvidence(outer.canonicalEvidence);
+    if (typeof reportV2.validateFollowUpV2 !== 'function') {
+      throw new Error('ReadingService 缺少 validateFollowUpV2');
+    }
+    const revalidated = await Promise.resolve(reportV2.validateFollowUpV2(
+      rawFromValidated(outer.followUp),
+      contract,
+      canonicalEvidence,
+      outer.followUp.validation.validatedAt,
+    ));
+    if (!isDeepStrictEqual(revalidated, outer.followUp)) {
+      throw new Error('缓存追问未通过当前 Case 语义复验');
+    }
+    return assertValidatedFollowUpBundleV2({
+      ...outer,
+      followUp: revalidated,
+      canonicalEvidence: [...canonicalEvidence],
+    }, followUpBundleOptions(domain, contract.modelContract.caseHash));
+  }
+
+  async function currentV2History(messages, contract, domain, reportV2) {
+    const history = [];
+    const source = Array.isArray(messages) ? messages : [];
+    for (let index = 0; index + 1 < source.length;) {
+      const candidatePair = [source[index], source[index + 1]];
+      try {
+        const normalized = assertAuthoritativeFollowUpPairV2(candidatePair, {
+          ...followUpBundleOptions(domain, contract.modelContract.caseHash),
+          deriveFollowUpContentV2: domain.deriveFollowUpContentV2,
+        });
+        const coherent = await coherentFollowUpBundle(
+          normalized[1].followUpBundle,
+          contract,
+          domain,
+          reportV2,
+        );
+        if (!isDeepStrictEqual(coherent, normalized[1].followUpBundle)) {
+          throw new Error('追问 bundle 不一致');
+        }
+        history.push(
+          { role: 'user', content: normalized[0].content },
+          { role: 'assistant', content: normalized[1].content },
+        );
+        index += 2;
+      } catch {
+        index += 1;
+      }
+    }
+    return history;
+  }
+
+  async function retrievalFor(contract, query) {
+    const reportV2 = await resolveReportV2();
+    const context = await retrievalContextFor(contract, reportV2);
+    const found = await searchCorpus({
+      query,
+      domainTerms: [...context.queryTerms],
+      ruleIds: [...context.ruleIds],
+      limit: 8,
+    });
+    if (!isRecord(found) || !isRecord(found.diagnostics)) {
+      throw new Error('检索服务没有返回有效 diagnostics');
+    }
+    if (!isDeepStrictEqual(found.diagnostics.requestedRuleIds, context.ruleIds)) {
+      throw new Error('检索 diagnostics 未精确回显当前请求 ruleIds');
+    }
+    const hydrated = evidenceCatalog.hydrate(found.candidateRefs, 8);
+    return {
+      canonicalEvidence: hydrated.evidence,
+      retrievalDiagnostics: structuredClone(found.diagnostics),
+    };
+  }
+
+  async function isCloudConfigured() {
+    return Boolean(await Promise.resolve(
+      typeof cloudProviderConfigured === 'function'
+        ? cloudProviderConfigured()
+        : cloudProviderConfigured,
+    ));
   }
 
   async function buildAndPersist(session, clarification, expectedFactSetHash) {
@@ -326,42 +425,83 @@ function createReadingService({
     return serializeSession(sessionId, async () => {
       const session = store.getSession(sessionId);
       const caseSnapshot = assertCurrentCase(session, expectedFactSetHash);
-      const found = await searchCorpus({
-        query: caseSnapshot.question,
-        domainTerms: termsForCase(caseSnapshot),
-        limit: 8,
-      });
-      const evidence = Array.isArray(found?.evidence) ? structuredClone(found.evidence) : [];
-      const retrievalDiagnostics = found?.diagnostics ? structuredClone(found.diagnostics) : null;
-      const current = store.getSession(sessionId);
-      const currentCase = assertCurrentCase(current, expectedFactSetHash);
-      if (isRecord(current.analysis)) {
-        return {
-          caseSnapshot: structuredClone(currentCase),
-          runtimeTrust: current.caseRuntimeTrust || 'authoritative',
-          report: structuredClone(current.analysis),
-          evidence,
-          retrievalDiagnostics,
+      const [domain, reportV2] = await Promise.all([resolveDomain(), resolveReportV2()]);
+      if (typeof reportV2.createFactContractV2 !== 'function') {
+        throw new Error('ReadingService 缺少 createFactContractV2');
+      }
+      const contract = await Promise.resolve(reportV2.createFactContractV2(caseSnapshot));
+
+      const cached = await maybeCoherentAnalysisBundle(
+        session.analysisBundle,
+        contract,
+        domain,
+        reportV2,
+      );
+      if (cached) {
+        const latest = store.getSession(sessionId);
+        const latestCase = assertCurrentCase(latest, expectedFactSetHash);
+        const latestCached = await maybeCoherentAnalysisBundle(
+          latest.analysisBundle,
+          contract,
+          domain,
+          reportV2,
+        );
+        if (latestCached) {
+          return {
+            caseSnapshot: structuredClone(latestCase),
+            runtimeTrust: latest.caseRuntimeTrust || 'authoritative',
+            analysisBundle: latestCached,
+          };
+        }
+      }
+
+      const { canonicalEvidence, retrievalDiagnostics } = await retrievalFor(
+        contract,
+        contract.modelContract.question,
+      );
+      let providerResult;
+      if (await isCloudConfigured()) {
+        if (typeof analyzeCloudV2 !== 'function') throw new Error('云端分析 provider 未配置');
+        providerResult = exactProviderResult(await analyzeCloudV2({
+          modelContract: contract.modelContract,
+          canonicalEvidence,
+          responseSchema: reportV2.REPORT_V2_SCHEMA,
+        }));
+      } else {
+        if (typeof reportV2.createLocalRawReportV2 !== 'function') {
+          throw new Error('ReadingService 缺少 createLocalRawReportV2');
+        }
+        providerResult = {
+          raw: await Promise.resolve(reportV2.createLocalRawReportV2(contract, canonicalEvidence)),
+          analysisOrigin: 'local',
         };
       }
-      if (typeof analyzePort !== 'function') throw new Error('分析服务未配置');
-      const legacyPlate = legacyPlateFromCase(caseSnapshot);
-      const raw = await analyzePort({
-        question: caseSnapshot.question,
-        category: caseSnapshot.category,
-        plate: legacyPlate,
-        evidence,
+      if (typeof reportV2.validateAnalysisReportV2 !== 'function') {
+        throw new Error('ReadingService 缺少 validateAnalysisReportV2');
+      }
+      const report = await Promise.resolve(reportV2.validateAnalysisReportV2(
+        providerResult.raw,
+        contract,
+        canonicalEvidence,
+        nowIso(now),
+      ));
+      const bundle = assertValidatedAnalysisBundleV2({
+        schemaVersion: '2.0.0',
+        caseHash: expectedFactSetHash,
+        analysisOrigin: providerResult.analysisOrigin,
+        report,
+        canonicalEvidence: [...canonicalEvidence],
         retrievalDiagnostics,
-        caseSnapshot: structuredClone(caseSnapshot),
+        corpusRef: { ...evidenceCatalog.corpusRef },
+      }, analysisBundleOptions(domain, expectedFactSetHash));
+      const saved = store.saveAuthoritativeAnalysisBundle(sessionId, bundle, {
+        expectedFactSetHash,
+        expectedCorpusRef: evidenceCatalog.corpusRef,
       });
-      const report = isRecord(raw?.report) ? raw.report : raw;
-      const saved = store.saveAuthoritativeAnalysis(sessionId, report, { expectedFactSetHash });
       return {
         caseSnapshot: structuredClone(saved.caseSnapshot),
         runtimeTrust: saved.caseRuntimeTrust || 'authoritative',
-        report: structuredClone(saved.analysis),
-        evidence,
-        retrievalDiagnostics,
+        analysisBundle: bundle,
       };
     });
   }
@@ -376,50 +516,83 @@ function createReadingService({
       if (!question || question.length > 500) throw new TypeError('追问内容无效');
       const session = store.getSession(sessionId);
       const caseSnapshot = assertCurrentCase(session, expectedFactSetHash);
-      const userMessage = {
+      const [domain, reportV2] = await Promise.all([resolveDomain(), resolveReportV2()]);
+      const contract = await Promise.resolve(reportV2.createFactContractV2(caseSnapshot));
+      const analysisBundle = await maybeCoherentAnalysisBundle(
+        session.analysisBundle,
+        contract,
+        domain,
+        reportV2,
+      );
+      if (!analysisBundle) {
+        throw new Error('当前会话缺少 coherent analysisBundle，请先重新分析后再追问');
+      }
+      const history = await currentV2History(session.messages, contract, domain, reportV2);
+      const { canonicalEvidence, retrievalDiagnostics } = await retrievalFor(contract, question);
+      let providerResult;
+      if (await isCloudConfigured()) {
+        if (typeof followUpCloudV2 !== 'function') throw new Error('云端追问 provider 未配置');
+        providerResult = exactProviderResult(await followUpCloudV2({
+          question,
+          modelContract: contract.modelContract,
+          analysisReport: analysisBundle.report,
+          canonicalEvidence,
+          currentV2History: history,
+          responseSchema: reportV2.FOLLOW_UP_V2_SCHEMA,
+        }));
+      } else {
+        if (typeof reportV2.createLocalRawFollowUpV2 !== 'function') {
+          throw new Error('ReadingService 缺少 createLocalRawFollowUpV2');
+        }
+        providerResult = {
+          raw: await Promise.resolve(reportV2.createLocalRawFollowUpV2(contract)),
+          analysisOrigin: 'local',
+        };
+      }
+      const operationAt = nowIso(now);
+      const followUpReport = await Promise.resolve(reportV2.validateFollowUpV2(
+        providerResult.raw,
+        contract,
+        canonicalEvidence,
+        operationAt,
+      ));
+      const followUpBundle = assertValidatedFollowUpBundleV2({
+        schemaVersion: '2.0.0',
+        caseHash: expectedFactSetHash,
+        analysisOrigin: providerResult.analysisOrigin,
+        followUp: followUpReport,
+        canonicalEvidence: [...canonicalEvidence],
+        retrievalDiagnostics,
+        corpusRef: { ...evidenceCatalog.corpusRef },
+      }, followUpBundleOptions(domain, expectedFactSetHash));
+      const pair = assertAuthoritativeFollowUpPairV2([{
+        schemaVersion: '2.0.0',
         id: createId(),
         role: 'user',
         content: question,
-        createdAt: nowIso(now),
-      };
-      const found = await searchCorpus({
-        query: question,
-        domainTerms: termsForCase(caseSnapshot),
-        limit: 8,
-      });
-      const evidence = Array.isArray(found?.evidence) ? structuredClone(found.evidence) : [];
-      if (typeof followUpPort !== 'function') throw new Error('追问服务未配置');
-      const legacyPlate = legacyPlateFromCase(caseSnapshot);
-      const raw = await followUpPort({
-        question,
-        session: { ...structuredClone(session), plate: legacyPlate },
-        plate: legacyPlate,
-        evidence,
-        caseSnapshot: structuredClone(caseSnapshot),
-      });
-      const answer = isRecord(raw?.answer) ? raw.answer : raw;
-      if (!isRecord(answer) || !nonEmptyString(answer.content)) throw new Error('追问服务没有返回有效回答');
-      const allowedEvidence = new Set(evidence.map((entry) => entry.id));
-      const evidenceIds = Array.isArray(answer.evidenceIds)
-        ? answer.evidenceIds.filter((id) => typeof id === 'string' && allowedEvidence.has(id))
-        : [];
-      const assistantMessage = {
+        caseHash: expectedFactSetHash,
+        createdAt: operationAt,
+      }, {
+        schemaVersion: '2.0.0',
         id: createId(),
         role: 'assistant',
-        content: answer.content.trim(),
-        evidenceIds,
-        createdAt: nowIso(now),
-      };
-      const saved = store.appendAuthoritativeMessages(
-        sessionId,
-        [userMessage, assistantMessage],
-        { expectedFactSetHash },
-      );
+        content: domain.deriveFollowUpContentV2(followUpReport),
+        caseHash: expectedFactSetHash,
+        followUpBundle,
+        createdAt: operationAt,
+      }], {
+        ...followUpBundleOptions(domain, expectedFactSetHash),
+        deriveFollowUpContentV2: domain.deriveFollowUpContentV2,
+      });
+      const saved = store.appendAuthoritativeFollowUpPair(sessionId, pair, {
+        expectedFactSetHash,
+        expectedCorpusRef: evidenceCatalog.corpusRef,
+      });
       return {
         caseSnapshot: structuredClone(saved.caseSnapshot),
         runtimeTrust: saved.caseRuntimeTrust || 'authoritative',
-        answer: { content: assistantMessage.content, evidenceIds },
-        messages: [structuredClone(userMessage), structuredClone(assistantMessage)],
+        followUpBundle,
+        messages: pair,
       };
     });
   }
@@ -429,7 +602,6 @@ function createReadingService({
 
 module.exports = {
   createReadingService,
-  legacyPlateFromCase,
   nodeHashPort,
   normalizeClarification,
 };

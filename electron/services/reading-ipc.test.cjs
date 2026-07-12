@@ -39,15 +39,23 @@ test('reading IPC handlers sanitize payloads again in the main process', async (
   ]);
 });
 
-test('main startup migrates raw bytes before Store construction and exposes no legacy business IPC', () => {
+test('main startup loads canonical evidence fail-closed, migrates before Store and wires only V2 reading ports', () => {
   const root = path.resolve(__dirname, '../..');
   const main = fs.readFileSync(path.join(root, 'electron/main.cjs'), 'utf8');
   const packageJson = JSON.parse(fs.readFileSync(path.join(root, 'package.json'), 'utf8'));
   const migrationCall = main.indexOf('await migrateDataFile(dataPath()');
   const storeConstruction = main.indexOf('new JsonStore(dataPath()');
+  const catalogLoad = main.indexOf('await loadEvidenceCatalog({');
 
+  assert.ok(catalogLoad >= 0, 'main must await the canonical evidence catalog');
+  assert.ok(catalogLoad < migrationCall, 'corrupt or missing catalog must fail before data migration/store startup');
   assert.ok(migrationCall >= 0, 'main must await raw migration');
   assert.ok(storeConstruction > migrationCall, 'Store must be constructed after migration');
+  assert.match(main, /normalizeValidatedAnalysisReportV2:\s*domainRuntime\.normalizeValidatedAnalysisReportV2/);
+  assert.match(main, /evidenceCatalog,\s*\n\s*searchCorpus/);
+  assert.match(main, /ruleIds:\s*Array\.isArray\(payload\.ruleIds\)\s*\?\s*payload\.ruleIds\s*:\s*\[\]/);
+  assert.doesNotMatch(main, /function\s+(?:loadCorpus|hashCorpus)\b/);
+  assert.doesNotMatch(main, /\b(?:createLocalReport|validateCloudReport|analyzeCloud|followUpCloud)\b/);
   assert.doesNotMatch(main, /ipcMain\.handle\(['"](?:ai:|retrieval:search)/);
   assert.match(main, /registerReadingIpc/);
   assert.equal(packageJson.scripts.start, 'npm run build:domain && electron .');

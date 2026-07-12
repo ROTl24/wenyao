@@ -392,16 +392,12 @@ test('authoritative analysis bundle validates, deep-clones and commits in one re
     expectedInteractionFingerprint: store.getInteractionFingerprint('session-1'),
     runtimeTrust: 'authoritative',
   });
-  const withLegacy = store.saveAuthoritativeAnalysis('session-1', {
-    mode: 'local', summary: '即将被 V2 替代的旧报告', generatedAt: '2026-07-12T07:59:00.000Z',
-  }, { expectedFactSetHash: CASE_HASH });
   const input = validAnalysisBundle();
   const saved = store.saveAuthoritativeAnalysisBundle('session-1', input, {
     expectedFactSetHash: caseSnapshot.factSetHash,
     expectedCorpusRef: CORPUS_REF,
   });
-  assert.equal(withLegacy.authoritativeRevision, withCase.authoritativeRevision + 1);
-  assert.equal(saved.authoritativeRevision, withLegacy.authoritativeRevision + 1);
+  assert.equal(saved.authoritativeRevision, withCase.authoritativeRevision + 1);
   assert.equal(saved.analysis, undefined);
   input.report.claims[0].text = '后续篡改';
   input.canonicalEvidence[0].text = '后续伪造正文';
@@ -427,11 +423,8 @@ test('invalid authoritative analysis bundles are zero-write across the failure m
     expectedFactSetHash: CASE_HASH,
     expectedCorpusRef: CORPUS_REF,
   });
-  store.saveAuthoritativeAnalysis('session-1', {
-    mode: 'local', summary: '失败时必须保留的旧报告', generatedAt: '2026-07-12T08:00:01.000Z',
-  }, { expectedFactSetHash: CASE_HASH });
   const before = store.getSession('session-1');
-  assert.equal(before.analysis.summary, '失败时必须保留的旧报告');
+  assert.equal(before.analysis, undefined);
   assert.equal(before.analysisBundle.report.validation.status, 'validated');
   const attempts = [
     [{ ...validAnalysisBundle(), schemaVersion: '1.0.0' }, CASE_HASH, CORPUS_REF],

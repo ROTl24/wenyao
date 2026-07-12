@@ -7,7 +7,8 @@ const { migrateDataFile } = require('./services/migration.cjs');
 const { createReadingService } = require('./services/reading-service.cjs');
 const { registerReadingIpc } = require('./services/reading-ipc.cjs');
 const { sanitizeRendererSession } = require('./services/ipc-payload.cjs');
-const { analyzeCloud, createLocalReport, followUpCloud } = require('./services/ai.cjs');
+const { analyzeCloudV2: analyzeCloudRawV2, followUpCloudV2: followUpCloudRawV2 } = require('./services/ai.cjs');
+const { loadEvidenceCatalog } = require('./services/evidence-catalog.cjs');
 const { createAlibabaClient } = require('./services/alibaba.cjs');
 const { LocalVectorIndex } = require('./services/vector-index.cjs');
 const { hybridSearch } = require('./services/retrieval.cjs');
@@ -33,6 +34,8 @@ let corpusHash = '';
 let vectorIndex;
 let vectorBuildPromise = null;
 let readingService;
+let evidenceCatalog;
+let domainRuntime;
 
 function resourcePath(name) {
   const candidates = [path.join(app.getAppPath(), 'resources', name), path.join(process.resourcesPath, 'resources', name)];
@@ -48,27 +51,6 @@ function registerAppProtocol() {
     distRoot: path.join(app.getAppPath(), 'dist'),
     fetchFile: (url, options) => net.fetch(url, options),
   }));
-}
-
-function loadCorpus() {
-  const found = resourcePath('corpus.json');
-  if (!found) return [];
-  try {
-    const parsed = JSON.parse(fs.readFileSync(found, 'utf8'));
-    if (!Array.isArray(parsed)) return [];
-    let knowledge = new Map();
-    try {
-      const index = JSON.parse(fs.readFileSync(resourcePath('knowledge-index.json'), 'utf8'));
-      knowledge = new Map((index.units || []).map((unit) => [unit.id, unit]));
-    } catch {}
-    return parsed.map((entry) => ({ ...entry, knowledgeKind: knowledge.get(entry.id)?.kind || 'doctrine', topics: knowledge.get(entry.id)?.topics || entry.tags || [] }));
-  } catch {
-    return [];
-  }
-}
-
-function hashCorpus(entries) {
-  return crypto.createHash('sha256').update(entries.map((entry) => `${entry.id}:${entry.title}:${entry.text}`).join('\n')).digest('hex');
 }
 
 function loadVectorIndex(model) {
@@ -183,40 +165,42 @@ async function searchCorpus(payload) {
     corpus,
     query: String(payload.query || ''),
     domainTerms: Array.isArray(payload.domainTerms) ? payload.domainTerms : [],
+    ruleIds: Array.isArray(payload.ruleIds) ? payload.ruleIds : [],
     limit: Math.min(12, Math.max(1, Number(payload.limit) || 8)),
     vectorSearch: client && vectorIndex?.vectors ? async (query) => vectorIndex.search((await client.embed([query], { model: settings.embeddingModel, dimensions: 1024, signal: AbortSignal.timeout(30000) }))[0], 40) : undefined,
     rerank: client && settings.rerankUrl ? async (query, documents) => client.rerank(query, documents, { model: settings.rerankModel, topN: 12, signal: AbortSignal.timeout(60000) }) : undefined,
   });
 }
 
-async function analyzeReading(payload) {
+function cloudProviderConfigured() {
   const settings = store.getRawSettings();
   const apiKey = getApiKey();
-  if (!apiKey || !settings.model) return createLocalReport(payload);
-  return analyzeCloud({
-    ...payload,
+  return Boolean(apiKey && settings.model);
+}
+
+async function analyzeReadingV2(payload) {
+  const settings = store.getRawSettings();
+  const apiKey = getApiKey();
+  if (!apiKey || !settings.model) throw new Error('云端解卦服务尚未配置');
+  return analyzeCloudRawV2({
     baseUrl: validateBaseUrl(settings.baseUrl),
     model: settings.model,
     apiKey,
     signal: AbortSignal.timeout(180000),
+    ...payload,
   });
 }
 
-async function followUpReading(payload) {
+async function followUpReadingV2(payload) {
   const settings = store.getRawSettings();
   const apiKey = getApiKey();
-  if (!apiKey || !settings.model) {
-    return {
-      content: '当前未配置云端 AI。排盘和历史已安全保存；配置模型后可继续围绕同一卦象追问。',
-      evidenceIds: payload.evidence.slice(0, 2).map((item) => item.id),
-    };
-  }
-  return followUpCloud({
-    ...payload,
+  if (!apiKey || !settings.model) throw new Error('云端追问服务尚未配置');
+  return followUpCloudRawV2({
     baseUrl: validateBaseUrl(settings.baseUrl),
     model: settings.model,
     apiKey,
     signal: AbortSignal.timeout(180000),
+    ...payload,
   });
 }
 
@@ -288,16 +272,29 @@ function registerIpc() {
 
 app.whenReady().then(async () => {
   registerAppProtocol();
+  domainRuntime = await import('./generated/domain/index.js');
+  evidenceCatalog = await loadEvidenceCatalog({
+    resourcesDir: path.dirname(resourcePath('corpus.json')),
+    domain: domainRuntime,
+  });
   await migrateDataFile(dataPath());
-  store = new JsonStore(dataPath());
-  corpus = loadCorpus();
-  corpusHash = hashCorpus(corpus);
+  store = new JsonStore(dataPath(), {
+    normalizeValidatedAnalysisReportV2: domainRuntime.normalizeValidatedAnalysisReportV2,
+    normalizeValidatedFollowUpV2: domainRuntime.normalizeValidatedFollowUpV2,
+    deriveFollowUpContentV2: domainRuntime.deriveFollowUpContentV2,
+  });
+  corpus = evidenceCatalog.entries;
+  corpusHash = evidenceCatalog.corpusRef.hash;
   vectorIndex = loadVectorIndex(store.getRawSettings().embeddingModel);
   readingService = createReadingService({
     store,
+    domain: domainRuntime,
+    reportV2: domainRuntime,
+    evidenceCatalog,
     searchCorpus,
-    analyze: analyzeReading,
-    followUp: followUpReading,
+    cloudProviderConfigured,
+    analyzeCloudV2: analyzeReadingV2,
+    followUpCloudV2: followUpReadingV2,
   });
   if (process.argv.includes('--configure-api-key-env')) {
     try {
@@ -336,23 +333,53 @@ app.whenReady().then(async () => {
   }
   if (process.argv.includes('--verify-analysis')) {
     const apiKey = getApiKey();
-    const settings = store.getRawSettings();
-    const plate = {
-      baseHexagram: { name: '乾为天', shortName: '乾', palace: '乾', palaceElement: '金', shiLine: 6, yingLine: 3 },
-      changedHexagram: { name: '天风姤', shortName: '姤', palace: '乾', palaceElement: '金', shiLine: 1, yingLine: 4 },
-      movingLines: [1], monthGanZhi: '乙未', monthBranch: '未', dayGanZhi: '丙戌', voidBranches: ['午', '未'],
-      lines: [
-        { index: 1, ganZhi: '甲子', branch: '子', element: '水', relation: '子孙', role: null, moving: true, changedGanZhi: '辛丑', changedBranch: '丑', changedElement: '土', changedRelation: '父母' },
-        { index: 2, ganZhi: '甲寅', branch: '寅', element: '木', relation: '妻财', role: null, moving: false, changedGanZhi: '辛亥', changedBranch: '亥', changedElement: '水', changedRelation: '子孙' },
-        { index: 3, ganZhi: '甲辰', branch: '辰', element: '土', relation: '父母', role: '应', moving: false, changedGanZhi: '辛酉', changedBranch: '酉', changedElement: '金', changedRelation: '兄弟' },
-        { index: 4, ganZhi: '壬午', branch: '午', element: '火', relation: '官鬼', role: null, moving: false, changedGanZhi: '壬午', changedBranch: '午', changedElement: '火', changedRelation: '官鬼' },
-        { index: 5, ganZhi: '壬申', branch: '申', element: '金', relation: '兄弟', role: null, moving: false, changedGanZhi: '壬申', changedBranch: '申', changedElement: '金', changedRelation: '兄弟' },
-        { index: 6, ganZhi: '壬戌', branch: '戌', element: '土', relation: '父母', role: '世', moving: false, changedGanZhi: '壬戌', changedBranch: '戌', changedElement: '土', changedRelation: '父母' },
-      ],
-    };
-    void searchCorpus({ query: '近期事业升迁是否有机会', domainTerms: ['事业', '功名', '官鬼', '世爻'], limit: 8 })
-      .then(async ({ evidence, diagnostics }) => analyzeCloud({ baseUrl: validateBaseUrl(settings.baseUrl), model: settings.model, apiKey, question: '近期事业升迁是否有机会？', category: 'career', plate, evidence, retrievalDiagnostics: diagnostics, signal: AbortSignal.timeout(180000) }))
-      .then((report) => { process.stdout.write(`${JSON.stringify({ mode: report.mode, claims: report.claims.length, pipeline: report.pipeline, summary: report.summary })}\n`); app.quit(); })
+    if (!apiKey) { process.stderr.write('尚未配置 API 密钥。\n'); app.exit(1); return; }
+    const question = '近期事业升迁是否有机会？';
+    const builtAt = new Date().toISOString();
+    const caseSnapshot = domainRuntime.buildDivinationCase({
+      sessionId: 'verify-analysis-v2',
+      plateId: 'plate:verify-analysis-v2:v2',
+      question,
+      category: 'career',
+      explicitIntentId: 'career.rank-or-office',
+      castAt: '2026-07-12T00:00:00.000Z',
+      builtAt,
+      tossValues: [9, 7, 8, 7, 8, 7],
+      ruleContext: domainRuntime.DEFAULT_RULE_CONTEXT,
+    }, {
+      sha256: (value) => crypto.createHash('sha256').update(value).digest('hex'),
+    });
+    const contract = domainRuntime.createFactContractV2(caseSnapshot);
+    const retrievalContext = domainRuntime.createAnalysisRetrievalContextV2(contract.modelContract);
+    void searchCorpus({
+      query: question,
+      domainTerms: [...retrievalContext.queryTerms],
+      ruleIds: [...retrievalContext.ruleIds],
+      limit: 8,
+    })
+      .then(async (found) => {
+        const hydrated = evidenceCatalog.hydrate(found.candidateRefs, 8);
+        const provided = await analyzeReadingV2({
+          modelContract: contract.modelContract,
+          canonicalEvidence: hydrated.evidence,
+          responseSchema: domainRuntime.REPORT_V2_SCHEMA,
+        });
+        return domainRuntime.validateAnalysisReportV2(
+          provided.raw,
+          contract,
+          hydrated.evidence,
+          new Date().toISOString(),
+        );
+      })
+      .then((report) => {
+        process.stdout.write(`${JSON.stringify({
+          schemaVersion: report.schemaVersion,
+          caseHash: report.caseHash,
+          claims: report.claims.length,
+          validatedAt: report.validation.validatedAt,
+        })}\n`);
+        app.quit();
+      })
       .catch((error) => { process.stderr.write(`${error.message}\n`); app.exit(1); });
     return;
   }

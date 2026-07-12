@@ -1,14 +1,26 @@
 const assert = require('node:assert/strict');
+const crypto = require('node:crypto');
 const fs = require('node:fs');
 const os = require('node:os');
 const path = require('node:path');
 const test = require('node:test');
-const { createReadingService, legacyPlateFromCase } = require('./reading-service.cjs');
+const { createReadingService } = require('./reading-service.cjs');
 const { JsonStore } = require('./store.cjs');
 
-const domainPromise = import('../generated/domain/index.js');
-
 const FIXED_NOW = '2026-07-12T02:00:00.000Z';
+const CORPUS_REF = Object.freeze({ version: 2, hash: 'c'.repeat(64) });
+let domain;
+
+test.before(async () => {
+  domain = await import('../generated/domain/index.js');
+});
+
+function deepFreeze(value, seen = new Set()) {
+  if (!value || typeof value !== 'object' || seen.has(value)) return value;
+  seen.add(value);
+  Reflect.ownKeys(value).forEach((key) => deepFreeze(value[key], seen));
+  return Object.freeze(value);
+}
 
 function deferred() {
   let resolve;
@@ -39,11 +51,19 @@ function confirmedToss(value, lineIndex) {
   };
 }
 
-function createCompletedStore({ id = 'session-1', category = 'career', question = '事业是否顺利' } = {}) {
-  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'wenyao-reading-'));
-  const store = new JsonStore(path.join(dir, 'app-data.json'), {
+function storeOptions(overrides = {}) {
+  return {
     now: () => new Date(FIXED_NOW),
-  });
+    normalizeValidatedAnalysisReportV2: domain.normalizeValidatedAnalysisReportV2,
+    normalizeValidatedFollowUpV2: domain.normalizeValidatedFollowUpV2,
+    deriveFollowUpContentV2: domain.deriveFollowUpContentV2,
+    ...overrides,
+  };
+}
+
+function createCompletedStore({ id = 'session-1', category = 'career', question = '事业是否顺利' } = {}) {
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'wenyao-reading-v2-'));
+  const store = new JsonStore(path.join(dir, 'app-data.json'), storeOptions());
   store.saveRendererSession({
     id,
     question,
@@ -55,418 +75,570 @@ function createCompletedStore({ id = 'session-1', category = 'career', question 
   return store;
 }
 
-function servicePorts(store, overrides = {}) {
+function canonicalEvidence(overrides = {}) {
+  const text = overrides.text || '经过核验的事业规则正文。';
+  return deepFreeze({
+    id: 'evidence:career',
+    title: '事业规则',
+    source: '测试语料',
+    sourceType: 'original',
+    location: '第一节',
+    text,
+    contentHash: crypto.createHash('sha256').update(text, 'utf8').digest('hex'),
+    tags: ['事业'],
+    knowledgeKind: 'rule',
+    topics: ['事业'],
+    supportsRuleIds: [],
+    ...overrides,
+  });
+}
+
+function createCatalog(entries = [canonicalEvidence()]) {
+  const ownedEntries = entries.map((entry) => deepFreeze(structuredClone(entry)));
+  const byId = new Map(ownedEntries.map((entry) => [entry.id, entry]));
+  return deepFreeze({
+    entries: ownedEntries,
+    corpusRef: { ...CORPUS_REF },
+    hydrate(candidates, limit = 8) {
+      const seen = new Set();
+      const ranked = (Array.isArray(candidates) ? candidates : [])
+        .map((candidate, index) => ({
+          id: typeof candidate === 'string' ? candidate : candidate?.id,
+          rank: Number.isSafeInteger(candidate?.rank) ? candidate.rank : index + 1,
+        }))
+        .filter((candidate) => byId.has(candidate.id) && !seen.has(candidate.id) && seen.add(candidate.id))
+        .sort((left, right) => left.rank - right.rank || left.id.localeCompare(right.id));
+      return deepFreeze({
+        evidence: ranked.slice(0, limit).map(({ id }) => byId.get(id)),
+        corpusRef: { ...CORPUS_REF },
+      });
+    },
+  });
+}
+
+function diagnostics({ requestedRuleIds = [], candidateCount = 1, overrides = {} } = {}) {
   return {
+    mode: 'lexical-fallback',
+    lexicalCandidates: candidateCount,
+    vectorCandidates: 0,
+    fusedCandidates: candidateCount,
+    vectorUsed: false,
+    rerankUsed: false,
+    requestedRuleIds: [...requestedRuleIds],
+    matchedRuleIds: [],
+    ruleCandidateIds: [],
+    ruleBoost: 12,
+    warnings: ['测试使用关键词召回。'],
+    ...overrides,
+  };
+}
+
+function harness(store, overrides = {}) {
+  const state = { searches: 0, analyzeCalls: 0, followUpCalls: 0, searchInputs: [] };
+  const evidenceCatalog = overrides.evidenceCatalog || createCatalog();
+  const ports = {
     store,
+    domain,
+    reportV2: domain,
+    evidenceCatalog,
     now: () => new Date(FIXED_NOW),
     createId: (() => {
       let value = 0;
       return () => `service-message-${++value}`;
     })(),
-    searchCorpus: async () => ({
-      evidence: [{ id: 'E1', title: '证据', text: '官鬼为事业用神', tags: [], source: '测试', sourceType: 'original' }],
-      diagnostics: { mode: 'lexical-fallback', warnings: [] },
-    }),
-    analyze: async () => ({
-      mode: 'local', summary: '权威分析', generatedAt: FIXED_NOW,
-    }),
-    followUp: async () => ({ content: '权威追问回答', evidenceIds: ['E1', 'forged'] }),
+    cloudProviderConfigured: () => false,
+    searchCorpus: async (input) => {
+      state.searches += 1;
+      state.searchInputs.push(structuredClone(input));
+      return {
+        candidateRefs: [{ id: 'evidence:career', rank: 1 }],
+        evidence: [{ id: 'evidence:career', text: '搜索层伪造正文', supportsRuleIds: ['forged'] }],
+        diagnostics: diagnostics({ requestedRuleIds: input.ruleIds }),
+      };
+    },
+    analyzeCloudV2: async () => {
+      state.analyzeCalls += 1;
+      throw new Error('不应调用 cloud analyze');
+    },
+    followUpCloudV2: async () => {
+      state.followUpCalls += 1;
+      throw new Error('不应调用 cloud follow-up');
+    },
     ...overrides,
   };
+  delete ports.state;
+  return { service: createReadingService(ports), state, evidenceCatalog };
 }
 
-test('buildCase ignores renderer authority fields and persists one stable authoritative Case', async () => {
-  const store = createCompletedStore();
-  const service = createReadingService(servicePorts(store));
-  const first = await service.buildCase({
-    sessionId: 'session-1',
-    plate: { baseHexagram: { name: '伪造卦' } },
-    facts: [{ id: 'fake' }],
-    evidence: [{ id: 'fake' }],
-    useGod: { status: 'resolved' },
-    validation: { status: 'validated' },
-    analysis: { summary: 'fake' },
-  });
+async function build(service, sessionId = 'session-1') {
+  return service.buildCase({ sessionId });
+}
 
+function contractFor(caseSnapshot) {
+  return domain.createFactContractV2(caseSnapshot);
+}
+
+test('buildCase persists one authoritative Case and concurrent callers serialize per session', async () => {
+  const store = createCompletedStore();
+  const { service } = harness(store);
+  const [first, second] = await Promise.all([
+    service.buildCase({ sessionId: 'session-1', facts: [{ id: 'forged' }] }),
+    service.buildCase({ sessionId: 'session-1' }),
+  ]);
+  assert.deepEqual(second, first);
   assert.equal(first.runtimeTrust, 'authoritative');
   assert.equal(first.caseSnapshot.plate.id, 'plate:session-1:v2');
-  assert.equal(first.caseSnapshot.plate.baseHexagram.name, '乾为天');
-  assert.equal(first.caseSnapshot.facts.some((fact) => fact.id === 'fake'), false);
-  assert.equal(Object.hasOwn(first.caseSnapshot, 'runtimeTrust'), false);
-  assert.equal(store.getSession('session-1').caseRuntimeTrust, 'authoritative');
-
-  const second = await service.buildCase({ sessionId: 'session-1' });
-  assert.deepEqual(second, first);
+  assert.equal(first.caseSnapshot.facts.some((fact) => fact.id === 'forged'), false);
 });
 
-test('selectIntent is a hash-bound structured delta over authoritative intent provenance', async () => {
-  const store = createCompletedStore({
-    id: 'health-session',
-    category: 'health',
-    question: '替家中长辈看身体情况',
-  });
-  const service = createReadingService(servicePorts(store));
-  const initial = await service.buildCase({ sessionId: 'health-session' });
-
-  await assert.rejects(service.selectIntent({
-    sessionId: 'health-session',
-    clarification: { explicitIntentId: 'health.other-person' },
-    expectedFactSetHash: 'stale-hash',
-  }), /权威 Case 已变化/);
-  await assert.rejects(service.selectIntent({
-    sessionId: 'health-session',
-    intentId: 'health.other-person',
-    expectedFactSetHash: initial.caseSnapshot.factSetHash,
-  }), /必须提交结构化澄清/);
-
-  const choseIntent = await service.selectIntent({
-    sessionId: 'health-session',
-    clarification: { explicitIntentId: 'health.other-person' },
-    expectedFactSetHash: initial.caseSnapshot.factSetHash,
-  });
-  assert.equal(choseIntent.caseSnapshot.useGod.intent.id, 'health.other-person');
-
-  const choseRelation = await service.selectIntent({
-    sessionId: 'health-session',
-    clarification: { subjectRelation: '父母' },
-    expectedFactSetHash: choseIntent.caseSnapshot.factSetHash,
-  });
-  assert.equal(choseRelation.caseSnapshot.useGod.intent.id, 'health.other-person');
-  assert.equal(choseRelation.caseSnapshot.useGod.intent.subjectRelation, '父母');
-  assert.equal(choseRelation.runtimeTrust, 'authoritative');
-
-  const switchedIntent = await service.selectIntent({
-    sessionId: 'health-session',
-    clarification: { explicitIntentId: 'health.self' },
-    expectedFactSetHash: choseRelation.caseSnapshot.factSetHash,
-  });
-  assert.equal(switchedIntent.caseSnapshot.useGod.intent.id, 'health.self');
-  assert.equal(switchedIntent.caseSnapshot.useGod.intent.subjectRelation, undefined);
-});
-
-test('legacy AI projection keeps base and changed calendar facts side-aware', async () => {
-  const domain = await domainPromise;
-  const caseSnapshot = domain.buildDivinationCase({
-    sessionId: 'side-aware-case',
-    plateId: 'plate:side-aware-case:v2',
-    question: '变爻月破投影',
-    category: 'career',
-    explicitIntentId: null,
-    castAt: '2026-07-08T00:00:00.000Z',
-    builtAt: FIXED_NOW,
-    tossValues: [6, 9, 7, 8, 7, 8],
-    ruleContext: domain.DEFAULT_RULE_CONTEXT,
-  }, {
-    sha256: (value) => require('node:crypto').createHash('sha256').update(value).digest('hex'),
-  });
-
-  const second = legacyPlateFromCase(caseSnapshot).lines[1];
-  assert.equal(second.monthBreak, false);
-  assert.equal(second.changedMonthBreak, true);
-});
-
-test('legacy AI projection keeps raw day clash when classified as dark-moving', async () => {
-  const domain = await domainPromise;
-  const caseSnapshot = domain.buildDivinationCase({
-    sessionId: 'raw-day-clash',
-    plateId: 'plate:raw-day-clash:v2',
-    question: '日冲投影',
-    category: 'career',
-    explicitIntentId: null,
-    castAt: '2026-07-01T00:00:00.000Z',
-    builtAt: FIXED_NOW,
-    tossValues: [7, 7, 7, 7, 7, 7],
-    ruleContext: domain.DEFAULT_RULE_CONTEXT,
-  }, {
-    sha256: (value) => require('node:crypto').createHash('sha256').update(value).digest('hex'),
-  });
-  assert.equal(caseSnapshot.facts.some((fact) => (
-    fact.relation === 'is-day-break' && fact.target?.id === 'line:4'
-  )), false);
-  assert.equal(legacyPlateFromCase(caseSnapshot).lines[3].dayClash, true);
-});
-
-test('buildCase rejects a late persistence after the session was deleted', async () => {
+test('buildCase late persistence cannot recreate a deleted session', async () => {
   const store = createCompletedStore({ id: 'deleted-during-build' });
   const gate = deferred();
   const started = deferred();
   const fakeDomain = {
-    DEFAULT_RULE_CONTEXT: { schemaVersion: '2.0.0', sources: [] },
-    async buildDivinationCase(input) {
+    ...domain,
+    async buildDivinationCase(input, hashPort) {
       started.resolve();
       await gate.promise;
-      return {
-        schemaVersion: '2.0.0',
-        sessionId: input.sessionId,
-        question: input.question,
-        category: input.category,
-        ruleContext: input.ruleContext,
-        ruleContextHash: 'rule-hash',
-        plate: { id: input.plateId, sessionId: input.sessionId, castAt: input.castAt, baseHexagram: { name: '乾为天' } },
-        useGod: { status: 'needs-user-input', intent: null },
-        facts: [],
-        factSetHash: 'case-hash',
-        builtAt: input.builtAt,
-      };
+      return domain.buildDivinationCase(input, hashPort);
     },
   };
-  const service = createReadingService(servicePorts(store, { domain: fakeDomain }));
+  const { service } = harness(store, { domain: fakeDomain });
   const pending = service.buildCase({ sessionId: 'deleted-during-build' });
   await started.promise;
   store.deleteSession('deleted-during-build');
   gate.resolve();
   await assert.rejects(pending, /会话已删除/);
+  assert.equal(store.getSession('deleted-during-build'), null);
 });
 
-test('concurrent duplicate buildCase calls are deduplicated per session', async () => {
-  const store = createCompletedStore({ id: 'dedupe-session' });
-  const gate = deferred();
-  let buildCount = 0;
-  const fakeDomain = {
-    DEFAULT_RULE_CONTEXT: { schemaVersion: '2.0.0', sources: [] },
-    async buildDivinationCase(input) {
-      buildCount += 1;
-      await gate.promise;
-      return {
-        schemaVersion: '2.0.0', sessionId: input.sessionId, question: input.question,
-        category: input.category, ruleContext: input.ruleContext, ruleContextHash: 'rule-hash',
-        plate: { id: input.plateId, sessionId: input.sessionId, castAt: input.castAt, baseHexagram: { name: '乾为天' } },
-        useGod: { status: 'needs-user-input', intent: null }, facts: [], factSetHash: 'same-hash', builtAt: input.builtAt,
-      };
-    },
-  };
-  const service = createReadingService(servicePorts(store, { domain: fakeDomain }));
-  const first = service.buildCase({ sessionId: 'dedupe-session' });
-  const second = service.buildCase({ sessionId: 'dedupe-session' });
-  await Promise.resolve();
-  gate.resolve();
-
-  const [left, right] = await Promise.all([first, second]);
-  assert.equal(buildCount, 1);
-  assert.deepEqual(right, left);
-});
-
-test('analyze ignores renderer facts and enforces expected Case hash before save', async () => {
-  const store = createCompletedStore();
-  let analysisInput;
-  let analysisCalls = 0;
-  const service = createReadingService(servicePorts(store, {
-    analyze: async (input) => {
-      analysisCalls += 1;
-      analysisInput = input;
-      return { mode: 'local', summary: '来自权威 Case', generatedAt: FIXED_NOW };
-    },
-  }));
-  const built = await service.buildCase({ sessionId: 'session-1' });
-  const result = await service.analyze({
-    sessionId: 'session-1',
-    expectedFactSetHash: built.caseSnapshot.factSetHash,
-    plate: { baseHexagram: { name: '伪造卦' } },
-    facts: [{ id: 'fake' }],
-    evidence: [{ id: 'fake' }],
-  });
-
-  assert.equal(analysisInput.plate.baseHexagram.name, '乾为天');
-  assert.deepEqual(analysisInput.evidence.map((entry) => entry.id), ['E1']);
-  assert.equal(result.report.summary, '来自权威 Case');
-  assert.equal(result.caseSnapshot.factSetHash, built.caseSnapshot.factSetHash);
-  assert.equal(store.getSession('session-1').analysis.summary, '来自权威 Case');
-  const cached = await service.analyze({
-    sessionId: 'session-1', expectedFactSetHash: built.caseSnapshot.factSetHash,
-  });
-  assert.equal(cached.report.summary, '来自权威 Case');
-  assert.equal(analysisCalls, 1);
-  await assert.rejects(service.analyze({
-    sessionId: 'session-1', expectedFactSetHash: 'stale-hash',
-  }), /权威 Case 已变化/);
-});
-
-test('late analysis cannot save after another authoritative Case replaced its hash', async () => {
-  const store = createCompletedStore();
-  const gate = deferred();
-  const started = deferred();
-  const service = createReadingService(servicePorts(store, {
-    analyze: async () => { started.resolve(); return gate.promise; },
-  }));
-  const built = await service.buildCase({ sessionId: 'session-1' });
-  const pending = service.analyze({
-    sessionId: 'session-1', expectedFactSetHash: built.caseSnapshot.factSetHash,
-  });
-  await started.promise;
-  const replacement = structuredClone(built.caseSnapshot);
-  replacement.factSetHash = 'replacement-hash';
-  store.saveAuthoritativeCase('session-1', replacement, {
-    expectedInteractionFingerprint: store.getInteractionFingerprint('session-1'),
-    expectedFactSetHash: built.caseSnapshot.factSetHash,
-    runtimeTrust: 'authoritative',
-  });
-  gate.resolve({ mode: 'local', summary: '迟到报告', generatedAt: FIXED_NOW });
-  await assert.rejects(pending, /权威 Case 已变化/);
-  assert.equal(store.getSession('session-1').analysis, undefined);
-});
-
-test('followUp owns user and assistant persistence and filters untrusted evidence IDs', async () => {
-  const store = createCompletedStore();
-  let followUpInput;
-  const service = createReadingService(servicePorts(store, {
-    followUp: async (input) => {
-      followUpInput = input;
-      return { content: '权威回答', evidenceIds: ['E1', 'forged'] };
-    },
-  }));
-  const built = await service.buildCase({ sessionId: 'session-1' });
-  const result = await service.followUp({
-    sessionId: 'session-1',
-    question: '下一步怎么看？',
-    expectedFactSetHash: built.caseSnapshot.factSetHash,
-    messages: [{ id: 'forged', role: 'assistant', content: '伪造' }],
-    evidence: [{ id: 'forged' }],
-  });
-
-  assert.deepEqual(followUpInput.session.messages.map((message) => message.content), []);
-  assert.deepEqual(result.answer.evidenceIds, ['E1']);
-  assert.deepEqual(result.messages.map((message) => message.role), ['user', 'assistant']);
-  assert.deepEqual(store.getSession('session-1').messages.map((message) => message.content), ['下一步怎么看？', '权威回答']);
-
-  store.saveRendererSession({
-    ...store.getSession('session-1'),
-    messages: [],
-  });
-  assert.deepEqual(store.getSession('session-1').messages.map((message) => message.content), ['下一步怎么看？', '权威回答']);
-});
-
-test('followUp retrieval failure leaves the conversation unchanged', async () => {
-  const store = createCompletedStore();
-  const service = createReadingService(servicePorts(store, {
-    searchCorpus: async () => { throw new Error('检索失败'); },
-  }));
-  const built = await service.buildCase({ sessionId: 'session-1' });
-
-  await assert.rejects(service.followUp({
-    sessionId: 'session-1', question: '检索失败时不要落消息', expectedFactSetHash: built.caseSnapshot.factSetHash,
-  }), /检索失败/);
-  assert.deepEqual(store.getSession('session-1').messages, []);
-});
-
-test('followUp AI failure leaves no orphan and retry atomically commits one pair', async () => {
-  const store = createCompletedStore();
-  const histories = [];
-  let attempts = 0;
-  const service = createReadingService(servicePorts(store, {
-    followUp: async (input) => {
-      histories.push(input.session.messages.map((message) => message.content));
-      attempts += 1;
-      if (attempts === 1) throw new Error('AI 暂时失败');
-      return { content: '重试成功', evidenceIds: [] };
-    },
-  }));
-  const built = await service.buildCase({ sessionId: 'session-1' });
-  const payload = {
-    sessionId: 'session-1', question: '失败后重试', expectedFactSetHash: built.caseSnapshot.factSetHash,
-  };
-
-  await assert.rejects(service.followUp(payload), /AI 暂时失败/);
-  assert.deepEqual(store.getSession('session-1').messages, []);
-  await service.followUp(payload);
-  assert.deepEqual(histories, [[], []]);
-  assert.deepEqual(
-    store.getSession('session-1').messages.map((message) => [message.role, message.content]),
-    [['user', '失败后重试'], ['assistant', '重试成功']],
-  );
-});
-
-test('selectIntent with a changed Case starts followUp from an empty conversation', async () => {
-  const store = createCompletedStore({
-    id: 'health-conversation',
-    category: 'health',
-    question: '替家中长辈看身体情况',
-  });
-  const histories = [];
-  const service = createReadingService(servicePorts(store, {
-    followUp: async (input) => {
-      histories.push(input.session.messages.map((message) => message.content));
-      return { content: `回答${histories.length}`, evidenceIds: [] };
-    },
-  }));
-  const initial = await service.buildCase({ sessionId: 'health-conversation' });
-  await service.followUp({
-    sessionId: 'health-conversation', question: '旧 Case 追问', expectedFactSetHash: initial.caseSnapshot.factSetHash,
-  });
-  const selected = await service.selectIntent({
-    sessionId: 'health-conversation',
-    clarification: { explicitIntentId: 'health.other-person', subjectRelation: '父母' },
-    expectedFactSetHash: initial.caseSnapshot.factSetHash,
-  });
-  assert.notEqual(selected.caseSnapshot.factSetHash, initial.caseSnapshot.factSetHash);
-  assert.deepEqual(store.getSession('health-conversation').messages, []);
-
-  await service.followUp({
-    sessionId: 'health-conversation', question: '新 Case 追问', expectedFactSetHash: selected.caseSnapshot.factSetHash,
-  });
-  assert.deepEqual(histories, [[], []]);
-  assert.deepEqual(
-    store.getSession('health-conversation').messages.map((message) => message.content),
-    ['新 Case 追问', '回答2'],
-  );
-});
-
-test('late follow-up answer cannot append after Case hash changes', async () => {
-  const store = createCompletedStore();
-  const gate = deferred();
-  const started = deferred();
-  const service = createReadingService(servicePorts(store, {
-    followUp: async () => { started.resolve(); return gate.promise; },
-  }));
-  const built = await service.buildCase({ sessionId: 'session-1' });
-  const pending = service.followUp({
-    sessionId: 'session-1', question: '迟到追问', expectedFactSetHash: built.caseSnapshot.factSetHash,
-  });
-  await started.promise;
-  assert.deepEqual(store.getSession('session-1').messages, []);
-  const replacement = structuredClone(built.caseSnapshot);
-  replacement.factSetHash = 'replacement-hash';
-  store.saveAuthoritativeCase('session-1', replacement, {
-    expectedInteractionFingerprint: store.getInteractionFingerprint('session-1'),
-    expectedFactSetHash: built.caseSnapshot.factSetHash,
-    runtimeTrust: 'authoritative',
-  });
-  gate.resolve({ content: '迟到回答', evidenceIds: [] });
-  await assert.rejects(pending, /权威 Case 已变化/);
-  assert.deepEqual(store.getSession('session-1').messages, []);
-});
-
-test('late follow-up after deletion cannot recreate messages', async () => {
-  const store = createCompletedStore({ id: 'deleted-follow-up' });
-  const gate = deferred();
-  const started = deferred();
-  const service = createReadingService(servicePorts(store, {
-    followUp: async () => { started.resolve(); return gate.promise; },
-  }));
-  const built = await service.buildCase({ sessionId: 'deleted-follow-up' });
-  const pending = service.followUp({
-    sessionId: 'deleted-follow-up', question: '删除期间追问', expectedFactSetHash: built.caseSnapshot.factSetHash,
-  });
-  await started.promise;
-  store.deleteSession('deleted-follow-up');
-  gate.resolve({ content: '迟到回答', evidenceIds: [] });
-
-  await assert.rejects(pending, /会话已删除/);
-  assert.equal(store.getSession('deleted-follow-up'), null);
-});
-
-test('needs-review sessions cannot be promoted through the normal build route', async () => {
-  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'wenyao-reading-'));
+test('needs-review sessions cannot enter the authoritative build route', async () => {
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'wenyao-reading-v2-'));
   const filePath = path.join(dir, 'app-data.json');
   fs.writeFileSync(filePath, JSON.stringify({
     migrationVersion: 2,
     sessions: [{
-      id: 'review-session', question: '待复核', category: 'other', castAt: '2026-07-12T00:00:00.000Z',
-      status: 'complete', tosses: [7, 7, 7, 7, 7, 7].map((value, index) => confirmedToss(value, index + 1)), messages: [],
-      migrationState: 'needs-review', plate: { baseHexagram: { name: '旧卦' } },
+      id: 'review-session', question: '待复核', category: 'other',
+      castAt: '2026-07-12T00:00:00.000Z', status: 'complete',
+      tosses: [7, 7, 7, 7, 7, 7].map((value, index) => confirmedToss(value, index + 1)),
+      messages: [], migrationState: 'needs-review',
     }],
     settings: {},
   }));
-  const store = new JsonStore(filePath);
-  const service = createReadingService(servicePorts(store));
+  const store = new JsonStore(filePath, storeOptions());
+  const { service } = harness(store);
   await assert.rejects(service.buildCase({ sessionId: 'review-session' }), /需要人工复核/);
+  assert.equal(store.getSession('review-session').caseSnapshot, undefined);
+});
+
+test('selectIntent remains a hash-bound structured delta and clears changed-Case V2 state', async () => {
+  const store = createCompletedStore({
+    id: 'health-session', category: 'health', question: '替家中长辈看身体情况',
+  });
+  const { service } = harness(store);
+  const initial = await build(service, 'health-session');
+  await assert.rejects(service.selectIntent({
+    sessionId: 'health-session',
+    clarification: { explicitIntentId: 'health.other-person' },
+    expectedFactSetHash: 'stale',
+  }), /权威 Case 已变化/);
+  const selected = await service.selectIntent({
+    sessionId: 'health-session',
+    clarification: { explicitIntentId: 'health.other-person', subjectRelation: '父母' },
+    expectedFactSetHash: initial.caseSnapshot.factSetHash,
+  });
+  assert.equal(selected.caseSnapshot.useGod.intent.id, 'health.other-person');
+  assert.equal(selected.caseSnapshot.useGod.intent.subjectRelation, '父母');
+  assert.notEqual(selected.caseSnapshot.factSetHash, initial.caseSnapshot.factSetHash);
+  assert.equal(store.getSession('health-session').analysisBundle, undefined);
+  assert.deepEqual(store.getSession('health-session').messages, []);
+
+  const relationOnly = await service.selectIntent({
+    sessionId: 'health-session',
+    clarification: { subjectRelation: '子孙' },
+    expectedFactSetHash: selected.caseSnapshot.factSetHash,
+  });
+  assert.equal(relationOnly.caseSnapshot.useGod.intent.id, 'health.other-person');
+  assert.equal(relationOnly.caseSnapshot.useGod.intent.subjectRelation, '子孙');
+
+  const switchedIntent = await service.selectIntent({
+    sessionId: 'health-session',
+    clarification: { explicitIntentId: 'health.self' },
+    expectedFactSetHash: relationOnly.caseSnapshot.factSetHash,
+  });
+  assert.equal(switchedIntent.caseSnapshot.useGod.intent.id, 'health.self');
+  assert.equal(switchedIntent.caseSnapshot.useGod.intent.subjectRelation, undefined);
+});
+
+test('local analysis uses shared contract/retrieval/validator, hydrates IDs only and caches the complete bundle', async () => {
+  const store = createCompletedStore();
+  const { service, state } = harness(store);
+  const built = await build(service);
+  const first = await service.analyze({
+    sessionId: 'session-1',
+    expectedFactSetHash: built.caseSnapshot.factSetHash,
+    facts: [{ id: 'renderer-forged' }],
+  });
+
+  assert.deepEqual(Object.keys(first).sort(), ['analysisBundle', 'caseSnapshot', 'runtimeTrust']);
+  assert.equal(first.analysisBundle.analysisOrigin, 'local');
+  assert.equal(first.analysisBundle.caseHash, built.caseSnapshot.factSetHash);
+  assert.equal(first.analysisBundle.report.validation.validatedAt, FIXED_NOW);
+  assert.equal(first.analysisBundle.canonicalEvidence[0].text, '经过核验的事业规则正文。');
+  assert.equal(first.analysisBundle.canonicalEvidence[0].text.includes('搜索层伪造'), false);
+  const retrievalContext = domain.createAnalysisRetrievalContextV2(
+    domain.createFactContractV2(built.caseSnapshot).modelContract,
+  );
+  assert.deepEqual(state.searchInputs[0].domainTerms, retrievalContext.queryTerms);
+  assert.deepEqual(state.searchInputs[0].ruleIds, retrievalContext.ruleIds);
+  assert.deepEqual(first.analysisBundle.retrievalDiagnostics.requestedRuleIds, state.searchInputs[0].ruleIds);
+
+  const cached = await service.analyze({
+    sessionId: 'session-1', expectedFactSetHash: built.caseSnapshot.factSetHash,
+  });
+  assert.deepEqual(cached.analysisBundle, first.analysisBundle);
+  assert.equal(state.searches, 1, 'cache hit must skip search');
+  assert.equal(state.analyzeCalls, 0, 'local path must skip cloud provider');
+  assert.equal(Object.isFrozen(cached.analysisBundle), true);
+  assert.equal(Object.isFrozen(cached.analysisBundle.canonicalEvidence[0]), true);
+});
+
+test('cloud analysis provider receives only model boundary and shares the exact validator clock', async () => {
+  const store = createCompletedStore();
+  let providerInput;
+  let expectedRaw;
+  const { service } = harness(store, {
+    cloudProviderConfigured: () => true,
+    analyzeCloudV2: async (input) => {
+      providerInput = input;
+      return { raw: expectedRaw, analysisOrigin: 'cloud' };
+    },
+  });
+  const built = await build(service);
+  const contract = contractFor(built.caseSnapshot);
+  expectedRaw = domain.createLocalRawReportV2(contract, []);
+  const result = await service.analyze({
+    sessionId: 'session-1', expectedFactSetHash: built.caseSnapshot.factSetHash,
+  });
+
+  assert.deepEqual(Object.keys(providerInput).sort(), ['canonicalEvidence', 'modelContract', 'responseSchema']);
+  assert.deepEqual(providerInput.modelContract, contract.modelContract);
+  assert.equal(Object.hasOwn(providerInput, 'validationContext'), false);
+  assert.equal(Object.hasOwn(providerInput, 'caseSnapshot'), false);
+  assert.equal(providerInput.canonicalEvidence[0].text, '经过核验的事业规则正文。');
+  assert.equal(providerInput.responseSchema, domain.REPORT_V2_SCHEMA);
+  assert.equal(result.analysisBundle.analysisOrigin, 'cloud');
+  assert.equal(result.analysisBundle.report.validation.validatedAt, FIXED_NOW);
+});
+
+test('cache revalidation rejects wrong case/corpus, semantic forgery and same-ID catalog spoof, then rebuilds', async () => {
+  const store = createCompletedStore();
+  const { service, state } = harness(store);
+  const built = await build(service);
+  const payload = { sessionId: 'session-1', expectedFactSetHash: built.caseSnapshot.factSetHash };
+  const initial = await service.analyze(payload);
+  const original = structuredClone(initial.analysisBundle);
+  const session = () => store.state.sessions.find((entry) => entry.id === 'session-1');
+  const corruptions = [
+    (bundle) => { bundle.caseHash = 'd'.repeat(64); },
+    (bundle) => { bundle.corpusRef.hash = 'e'.repeat(64); },
+    (bundle) => { bundle.retrievalDiagnostics.requestedRuleIds = []; },
+    (bundle) => {
+      const summary = bundle.report.claims.find((claim) => claim.section === 'summary');
+      summary.text = '本卦坤为地，变卦坤为地。';
+    },
+    (bundle) => {
+      bundle.canonicalEvidence[0].text = '同 ID 伪造正文。';
+      bundle.canonicalEvidence[0].contentHash = crypto.createHash('sha256')
+        .update(bundle.canonicalEvidence[0].text, 'utf8').digest('hex');
+      bundle.canonicalEvidence[0].supportsRuleIds = ['rule:forged'];
+      bundle.canonicalEvidence[0].title = '同 ID 伪造元数据';
+      bundle.canonicalEvidence[0].topics = ['伪造主题'];
+    },
+  ];
+  for (const corrupt of corruptions) {
+    session().analysisBundle = structuredClone(original);
+    corrupt(session().analysisBundle);
+    const before = state.searches;
+    const rebuilt = await service.analyze(payload);
+    assert.equal(state.searches, before + 1);
+    assert.deepEqual(rebuilt.analysisBundle, initial.analysisBundle);
+  }
+});
+
+test('analysis search/provider/validator/CAS/delete failures are zero-write', async () => {
+  const scenarios = [
+    {
+      name: 'search',
+      overrides: { searchCorpus: async () => { throw new Error('检索失败'); } },
+      error: /检索失败/,
+    },
+    {
+      name: 'provider',
+      overrides: {
+        cloudProviderConfigured: () => true,
+        analyzeCloudV2: async () => { throw new Error('模型失败'); },
+      },
+      error: /模型失败/,
+    },
+    {
+      name: 'stale-diagnostics',
+      overrides: {
+        searchCorpus: async () => ({
+          candidateRefs: [],
+          diagnostics: diagnostics({ requestedRuleIds: [], candidateCount: 0 }),
+        }),
+      },
+      error: /diagnostics|ruleIds/,
+    },
+    {
+      name: 'validator',
+      overrides: {
+        cloudProviderConfigured: () => true,
+        analyzeCloudV2: async () => ({ raw: { schemaVersion: '2.0.0' }, analysisOrigin: 'cloud' }),
+      },
+      error: /校验|字段|caseHash/,
+    },
+  ];
+  for (const scenario of scenarios) {
+    const store = createCompletedStore({ id: `failure-${scenario.name}` });
+    const { service } = harness(store, scenario.overrides);
+    const built = await build(service, `failure-${scenario.name}`);
+    await assert.rejects(service.analyze({
+      sessionId: `failure-${scenario.name}`, expectedFactSetHash: built.caseSnapshot.factSetHash,
+    }), scenario.error);
+    assert.equal(store.getSession(`failure-${scenario.name}`).analysisBundle, undefined);
+  }
+
+  const deletedStore = createCompletedStore({ id: 'deleted-analysis' });
+  const gate = deferred();
+  const started = deferred();
+  let raw;
+  const { service } = harness(deletedStore, {
+    cloudProviderConfigured: () => true,
+    analyzeCloudV2: async () => { started.resolve(); await gate.promise; return { raw, analysisOrigin: 'cloud' }; },
+  });
+  const built = await build(service, 'deleted-analysis');
+  raw = domain.createLocalRawReportV2(contractFor(built.caseSnapshot), []);
+  const pending = service.analyze({
+    sessionId: 'deleted-analysis', expectedFactSetHash: built.caseSnapshot.factSetHash,
+  });
+  await started.promise;
+  deletedStore.deleteSession('deleted-analysis');
+  gate.resolve();
+  await assert.rejects(pending, /会话已删除/);
+  assert.equal(deletedStore.getSession('deleted-analysis'), null);
+});
+
+test('late cloud analysis cannot cross a same-session Case hash replacement', async () => {
+  const store = createCompletedStore({ id: 'stale-analysis' });
+  const gate = deferred();
+  const started = deferred();
+  let raw;
+  const { service } = harness(store, {
+    cloudProviderConfigured: () => true,
+    analyzeCloudV2: async () => {
+      started.resolve();
+      await gate.promise;
+      return { raw, analysisOrigin: 'cloud' };
+    },
+  });
+  const built = await build(service, 'stale-analysis');
+  raw = domain.createLocalRawReportV2(contractFor(built.caseSnapshot), []);
+  const pending = service.analyze({
+    sessionId: 'stale-analysis', expectedFactSetHash: built.caseSnapshot.factSetHash,
+  });
+  await started.promise;
+  const replacement = structuredClone(built.caseSnapshot);
+  replacement.factSetHash = 'd'.repeat(64);
+  store.saveAuthoritativeCase('stale-analysis', replacement, {
+    expectedInteractionFingerprint: store.getInteractionFingerprint('stale-analysis'),
+    expectedFactSetHash: built.caseSnapshot.factSetHash,
+    runtimeTrust: 'authoritative',
+  });
+  gate.resolve();
+  await assert.rejects(pending, /权威 Case 已变化/);
+  assert.equal(store.getSession('stale-analysis').caseSnapshot.factSetHash, 'd'.repeat(64));
+  assert.equal(store.getSession('stale-analysis').analysisBundle, undefined);
+});
+
+test('follow-up requires a coherent analysis bundle and persists one derived V2 pair atomically', async () => {
+  const store = createCompletedStore();
+  let followInput;
+  let followRaw;
+  const { service } = harness(store, {
+    cloudProviderConfigured: () => true,
+    analyzeCloudV2: async () => {
+      throw new Error('analysis raw not initialized');
+    },
+    followUpCloudV2: async (input) => {
+      followInput = input;
+      return { raw: followRaw, analysisOrigin: 'cloud' };
+    },
+  });
+  const built = await build(service);
+  await assert.rejects(service.followUp({
+    sessionId: 'session-1', question: '先追问', expectedFactSetHash: built.caseSnapshot.factSetHash,
+  }), /重新分析|analysisBundle|解卦/);
+
+  const contract = contractFor(built.caseSnapshot);
+  const localAnalysisHarness = harness(store);
+  await localAnalysisHarness.service.analyze({
+    sessionId: 'session-1', expectedFactSetHash: built.caseSnapshot.factSetHash,
+  });
+  followRaw = domain.createLocalRawFollowUpV2(contract);
+  const result = await service.followUp({
+    sessionId: 'session-1', question: '下一步如何？', expectedFactSetHash: built.caseSnapshot.factSetHash,
+  });
+
+  assert.deepEqual(Object.keys(followInput).sort(), [
+    'analysisReport', 'canonicalEvidence', 'currentV2History', 'modelContract', 'question', 'responseSchema',
+  ]);
+  assert.equal(followInput.question, '下一步如何？');
+  assert.deepEqual(followInput.currentV2History, []);
+  assert.equal(followInput.canonicalEvidence[0].text, '经过核验的事业规则正文。');
+  assert.equal(result.followUpBundle.analysisOrigin, 'cloud');
+  assert.equal(result.messages.length, 2);
+  assert.deepEqual(result.messages.map((message) => message.role), ['user', 'assistant']);
+  assert.equal(result.messages[0].schemaVersion, '2.0.0');
+  assert.equal(result.messages[0].caseHash, built.caseSnapshot.factSetHash);
+  assert.equal(
+    result.messages[1].content,
+    domain.deriveFollowUpContentV2(result.messages[1].followUpBundle.followUp),
+  );
+  assert.equal(Object.hasOwn(result, 'answer'), false);
+  assert.equal(store.getSession('session-1').messages.length, 2);
+
+  const reloaded = new JsonStore(store.filePath, storeOptions()).getSession('session-1');
+  assert.deepEqual(reloaded.messages[1].followUpBundle.canonicalEvidence, result.followUpBundle.canonicalEvidence);
+  assert.deepEqual(reloaded.messages[1].followUpBundle.retrievalDiagnostics, result.followUpBundle.retrievalDiagnostics);
+  assert.equal(reloaded.messages[1].followUpBundle.corpusRef.hash, CORPUS_REF.hash);
+});
+
+test('follow-up provider history includes only coherent current-case V2 pairs', async () => {
+  const store = createCompletedStore();
+  const local = harness(store);
+  const built = await build(local.service);
+  await local.service.analyze({
+    sessionId: 'session-1', expectedFactSetHash: built.caseSnapshot.factSetHash,
+  });
+  await local.service.followUp({
+    sessionId: 'session-1', question: '本地第一问', expectedFactSetHash: built.caseSnapshot.factSetHash,
+  });
+
+  const session = store.state.sessions.find((entry) => entry.id === 'session-1');
+  session.messages.push(
+    { id: 'legacy', role: 'assistant', content: '旧自由文本', createdAt: FIXED_NOW },
+    { schemaVersion: '2.0.0', id: 'old-case', role: 'user', content: '旧 Case', caseHash: 'd'.repeat(64), createdAt: FIXED_NOW },
+    { schemaVersion: '2.0.0', id: 'orphan', role: 'user', content: '孤立消息', caseHash: built.caseSnapshot.factSetHash, createdAt: FIXED_NOW },
+  );
+  let history;
+  const followRaw = domain.createLocalRawFollowUpV2(contractFor(built.caseSnapshot));
+  const cloud = harness(store, {
+    cloudProviderConfigured: () => true,
+    createId: (() => {
+      let value = 100;
+      return () => `service-message-${++value}`;
+    })(),
+    followUpCloudV2: async (input) => {
+      history = input.currentV2History;
+      return { raw: followRaw, analysisOrigin: 'cloud' };
+    },
+  });
+  await cloud.service.followUp({
+    sessionId: 'session-1', question: '第二问', expectedFactSetHash: built.caseSnapshot.factSetHash,
+  });
+  assert.deepEqual(history.map((message) => message.content), [
+    '本地第一问',
+    domain.deriveFollowUpContentV2(session.messages[1].followUpBundle.followUp),
+  ]);
+});
+
+test('follow-up search/provider/validator/delete failures append neither message', async () => {
+  const scenarios = [
+    { name: 'search', overrides: { searchCorpus: async () => { throw new Error('追问检索失败'); } }, error: /检索失败/ },
+    {
+      name: 'provider',
+      overrides: { cloudProviderConfigured: () => true, followUpCloudV2: async () => { throw new Error('追问模型失败'); } },
+      error: /模型失败/,
+    },
+    {
+      name: 'validator',
+      overrides: {
+        cloudProviderConfigured: () => true,
+        followUpCloudV2: async () => ({ raw: { schemaVersion: '2.0.0' }, analysisOrigin: 'cloud' }),
+      },
+      error: /校验|字段|caseHash/,
+    },
+  ];
+  for (const scenario of scenarios) {
+    const store = createCompletedStore({ id: `follow-${scenario.name}` });
+    const local = harness(store);
+    const built = await build(local.service, `follow-${scenario.name}`);
+    await local.service.analyze({
+      sessionId: `follow-${scenario.name}`, expectedFactSetHash: built.caseSnapshot.factSetHash,
+    });
+    const before = structuredClone(store.getSession(`follow-${scenario.name}`).messages);
+    const failing = harness(store, scenario.overrides).service;
+    await assert.rejects(failing.followUp({
+      sessionId: `follow-${scenario.name}`, question: '失败追问', expectedFactSetHash: built.caseSnapshot.factSetHash,
+    }), scenario.error);
+    assert.deepEqual(store.getSession(`follow-${scenario.name}`).messages, before);
+  }
+
+  const store = createCompletedStore({ id: 'follow-delete' });
+  const local = harness(store);
+  const built = await build(local.service, 'follow-delete');
+  await local.service.analyze({ sessionId: 'follow-delete', expectedFactSetHash: built.caseSnapshot.factSetHash });
+  const gate = deferred();
+  const started = deferred();
+  const raw = domain.createLocalRawFollowUpV2(contractFor(built.caseSnapshot));
+  const failing = harness(store, {
+    cloudProviderConfigured: () => true,
+    followUpCloudV2: async () => { started.resolve(); await gate.promise; return { raw, analysisOrigin: 'cloud' }; },
+  }).service;
+  const pending = failing.followUp({
+    sessionId: 'follow-delete', question: '删除时追问', expectedFactSetHash: built.caseSnapshot.factSetHash,
+  });
+  await started.promise;
+  store.deleteSession('follow-delete');
+  gate.resolve();
+  await assert.rejects(pending, /会话已删除/);
+  assert.equal(store.getSession('follow-delete'), null);
+});
+
+test('late cloud follow-up cannot append across a Case hash replacement', async () => {
+  const store = createCompletedStore({ id: 'stale-follow' });
+  const local = harness(store);
+  const built = await build(local.service, 'stale-follow');
+  await local.service.analyze({
+    sessionId: 'stale-follow', expectedFactSetHash: built.caseSnapshot.factSetHash,
+  });
+  const gate = deferred();
+  const started = deferred();
+  const raw = domain.createLocalRawFollowUpV2(contractFor(built.caseSnapshot));
+  const cloud = harness(store, {
+    cloudProviderConfigured: () => true,
+    followUpCloudV2: async () => {
+      started.resolve();
+      await gate.promise;
+      return { raw, analysisOrigin: 'cloud' };
+    },
+  });
+  const pending = cloud.service.followUp({
+    sessionId: 'stale-follow', question: '迟到追问',
+    expectedFactSetHash: built.caseSnapshot.factSetHash,
+  });
+  await started.promise;
+  const replacement = structuredClone(built.caseSnapshot);
+  replacement.factSetHash = 'd'.repeat(64);
+  store.saveAuthoritativeCase('stale-follow', replacement, {
+    expectedInteractionFingerprint: store.getInteractionFingerprint('stale-follow'),
+    expectedFactSetHash: built.caseSnapshot.factSetHash,
+    runtimeTrust: 'authoritative',
+  });
+  gate.resolve();
+  await assert.rejects(pending, /权威 Case 已变化/);
+  assert.equal(store.getSession('stale-follow').analysisBundle, undefined);
+  assert.deepEqual(store.getSession('stale-follow').messages, []);
 });
