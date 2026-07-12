@@ -133,11 +133,24 @@ export interface RuleContext {
       version: '1.0.0';
       artifactHash: string;
     };
-    dayClashPolicy: 'strength-aware';
     changedRelationReference: 'base-palace';
     harmPolicy: 'liuren-six-harms-v1';
     breakPolicy: 'cross-source-common-four-breaks-v1';
     punishmentPolicy: 'liuren-directional-core-v1';
+  };
+  effectsProfile: {
+    id: 'yehe_effects_v1';
+    bundle: {
+      id: 'liuyao_effects_v1';
+      version: '1.0.0';
+      artifactHash: string;
+    };
+    monthStrengthPolicy: 'yehe-month-status-v1';
+    dayClashPolicy: 'yehe-strength-aware-v1';
+    advanceRetreatPolicy: 'yehe-seven-pair-v1';
+    transitionGrowthPolicy: 'five-element-forward-earth-follows-water-v1';
+    threeHarmonyPolicy: 'yehe-restricted-members-v1';
+    fanFuPolicy: 'yehe-corresponding-branches-v1';
   };
   growthProfile: {
     id: 'five-element-forward_v1';
@@ -298,9 +311,10 @@ export type UseGodEntityRef = Extract<EntityRef, { type: 'line' | 'hidden-spirit
 export type FactRelation =
   | 'generates' | 'controls' | 'same-element'
   | 'clashes' | 'combines' | 'punishes' | 'harms' | 'breaks'
-  | 'is-void' | 'is-month-break' | 'is-day-break' | 'is-dark-moving'
+  | 'has-month-status' | 'is-void' | 'is-month-break' | 'is-day-break' | 'is-dark-moving'
   | 'returns-generate' | 'returns-control' | 'returns-clash' | 'returns-combine'
-  | 'advances' | 'retreats' | 'forms-three-harmony'
+  | 'advances' | 'retreats' | 'changes-to-tomb' | 'changes-to-absolute'
+  | 'forms-three-harmony' | 'has-three-harmony-candidate'
   | 'is-six-harmony' | 'is-six-clash' | 'is-fan-yin' | 'is-fu-yin'
   | 'is-growth-stage' | 'is-six-beast' | 'is-shen-sha'
   | 'is-source-spirit' | 'is-avoid-spirit' | 'is-enemy-spirit'
@@ -340,6 +354,8 @@ export interface DerivedFact {
 `DerivedFact` 描述关系，不预存“吉/凶”字符串。吉凶倾向必须是依用神、旺衰、问意和 profile 生成的解释 claim。
 
 基础地支关系分层：六合、六冲在默认关系包中是 `structural + computed`；六害是来源特定的 `profile-dependent + computed`；六破与三刑存在明确表法分歧，只能以命名 profile 输出 `profile-dependent + disputed`。默认六破仅取两份来源交集的子酉、丑辰、卯午、未戌四对；默认三刑采用来源明确的有向核心，不把 `申→寅`、`未→丑` 静默补成循环。一个支对同时命中合、破、刑、害时必须保留全部 facts。
+
+日月动变事实使用独立 `liuyao_effects_v1` bundle，不回写结构盘或关系 bundle。月令状态按“同支当令 → 同五行 → 月令生爻 → 未月火余气/丑月水余气 → 休囚”唯一分类；同时保留 `effectiveSupport`，月破与余气不能直接充当默认暗动生扶。旬空只据日柱作用于本卦六爻和真实化爻，其他三柱的旬空只展示。回头事实固定 `changed → base`，进退与化墓绝固定 `base → changed`。默认进退采用《增删卜易》七对表；《卜筮正宗》增加戌丑的一套必须另立审计 profile。默认反吟按本变化爻对应地支全冲、伏吟按对应地支全同且该内/外卦确有变化；方位卦反吟等其他表法不得混入默认 profile。
 
 ### 4.5 UseGodSelection
 

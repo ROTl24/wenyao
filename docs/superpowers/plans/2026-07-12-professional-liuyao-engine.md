@@ -606,12 +606,30 @@ git commit -m "feat(domain): 建立可追溯六爻关系事实图"
 - Create: `src/domain/liuyao/facts/moving-effects.test.ts`
 - Create: `src/domain/liuyao/facts/formations.ts`
 - Create: `src/domain/liuyao/facts/formations.test.ts`
+- Create: `src/domain/liuyao/facts/effects-core-v1.ts`
+- Create: `src/domain/liuyao/facts/effects-registry.ts`
+- Create: `docs/domain/liuyao-effects-v1-review.md`
+- Create: `docs/domain/reviews/liuyao-effects-v1-review-a.md`
+- Create: `docs/domain/reviews/liuyao-effects-v1-review-b.md`
+- Create: `scripts/review-effects-candidate.mjs`
+- Modify: `src/domain/liuyao/model.ts`
 - Modify: `src/domain/liuyao/facts/derive.ts`
+- Modify: `src/domain/liuyao/rules/model.ts`
+- Modify: `src/domain/liuyao/rules/default-context.ts`
 - Modify: `src/domain/liuyao/rules/registry.ts`
+- Modify: `src/domain/liuyao/plate.test.ts`
+- Modify: `src/domain/liuyao/index.ts`
 
 **Interfaces:**
-- Consumes: `PlateV2`、四柱、基础关系 facts。
-- Produces: 月破、旬空、日冲、暗动/日破、回头生克冲合、进退、墓绝、三合、六合六冲、反吟伏吟 facts。
+- Consumes: `PlateV2`、四柱、Task 4 基础关系 facts 与其稳定 factId。
+- Produces: 独立受审 `liuyao_effects_v1` artifact、月令状态、月破、旬空、暗动/日破、回头生克冲合、进退、墓绝、三合、六合六冲、反吟伏吟 facts。
+
+**执行前决议：**
+
+- 本任务新增独立 `liuyao_effects_v1` bundle，并绑定 Task 3 结构 artifactHash 与 Task 4 关系 artifactHash；不得修改两者 canonical payload。
+- `RuleContext.relationProfile` 不再承载日冲强弱策略；新增 `effectsProfile` 固定默认月令、暗动日破、七对进退、土从水墓绝、受限三合成员与对应地支反伏口径。Plate gate 只核验自己消费的结构字段，不应因 effects/growth/shensha/useGod profile 增字段而失效。
+- 原始日支冲爻、transition 生克冲合均消费 Task 4 factId，不生成第二份。`values.basisFactIds` 以 code-unit 顺序固定。
+- 不生成单一旺衰分数，不让静态变卦 facet 冒充真实化爻，不把空破自动解释成吉凶。
 
 - [ ] **Step 1: 写“日冲不等于一律日破”的红灯测试**
 
@@ -629,15 +647,18 @@ it('records raw clash and classifies dark-moving/day-break only with strength co
 
 fixture 明确给出月令、日辰、生扶/克制和动静输入，不由被测函数反推 expected。
 
-- [ ] **Step 2: 写动化与卦局红灯测试**
+- [ ] **Step 2: 写月令、动化与卦局红灯测试**
 
 ```ts
-it.each([
-  ['木', '水', 'returns-generate'],
-  ['木', '金', 'returns-control'],
-])('classifies changed line relation', (baseElement, changedElement, relation) => {
-  expect(deriveMovingEffects(movingFixture(baseElement, changedElement), DEFAULT_RULE_CONTEXT))
-    .toEqual(expect.arrayContaining([expect.objectContaining({ relation })]));
+it('covers the exact 12x12 month-status matrix', () => {
+  const counts = countMonthStatuses();
+  expect(counts).toEqual({ commanding: 12, sameElement: 20, generatedByMonth: 28, residualQi: 4, resting: 80 });
+});
+
+it('reuses transition basis facts and preserves overlapping return relations', () => {
+  const facts = deriveMovingEffects(overlappingReturnFixture(), DEFAULT_RULE_CONTEXT, TASK_4_FACTS);
+  expect(facts.map(({ relation }) => relation)).toEqual(expect.arrayContaining(['returns-control', 'returns-combine']));
+  expect(facts.every(({ values }) => Array.isArray(values.basisFactIds))).toBe(true);
 });
 
 it('does not form a three-harmony fact without the configured completion conditions', () => {
@@ -651,33 +672,41 @@ it('does not form a three-harmony fact without the configured completion conditi
 Run: `cmd /c npx vitest run src/domain/liuyao/facts/calendar-effects.test.ts src/domain/liuyao/facts/moving-effects.test.ts src/domain/liuyao/facts/formations.test.ts`
 Expected: FAIL，三个模块不存在。
 
-- [ ] **Step 4: 分离原始事实与条件分类**
+- [ ] **Step 4: 冻结 effects artifact 并完成双审**
 
-`clashes` 是 structural fact；`is-dark-moving/is-day-break` 是 `profile-dependent + conditional`。`is-void` 只使用日柱旬空。月柱、年柱、时柱旬空仍在 `CalendarPillar` 展示，但不自动变成核心空亡 fact。
+`effects-core-v1.ts` 的 canonical artifact 至少覆盖：依赖 hashes、月令唯一分类及余气表、默认暗动/日破门槛、七对与八对进退两套表、五行墓绝与土从水、四组三合和允许的三种成员模式、六合 8 卦/六冲 10 卦黄金表、对应地支反伏与方位卦反吟两套 profile、authority/certainty/sourceRefs/version。
 
-`moving-effects.ts` 只处理动爻；静爻 `transition === null` 时返回空数组。进退、化墓绝以受审表和 profile 计算，不用字符串包含判断。
+来源绑定本地 `resources/corpus.json` 已定位的《增删卜易》《卜筮正宗》条目及固定 Wikisource 修订：四时旺相 `oldid=2100321`、日辰 `2100338`、六合三合 `2100447`、六冲 `2100449`、反伏 `2100458`、旬空 `2100460`、生旺墓绝 `2100461`。先保持 `unverified + fixture-only` 并复算 SHA-256，再由两个互不读对方结果的独立自动审阅核同一 hash；不得把电子转录或自动审阅冒充人工定本。
 
-`formations.ts` 对三合、六合六冲、反吟伏吟分别产出 facts；六合/六冲静态分类表在本任务登记，不回写 `HexagramSideV2`。“形成某结构”和“该结构对本占吉凶”分开。
+- [ ] **Step 5: 分离原始事实、月令状态与条件分类**
 
-- [ ] **Step 5: 加入来源和条件断言**
+每个本卦爻恰好一条 `has-month-status`：同支当令 → 同五行 → 月令生爻 → 未月火余气/丑月水余气 → 休囚。另存 `effectiveSupport`；月破时即使同五行也不能支持暗动，余气也不进入默认暗动门槛。
 
-```ts
-expect(fact).toMatchObject({
-  authority: 'profile-dependent',
-  profileId: 'yehe_core_v1',
-  certainty: 'conditional',
-});
-expect(fact.ruleId).not.toBe('');
-expect(fact.sourceRefs.length).toBeGreaterThan(0);
-```
+`is-month-break` 检查本卦六爻及真实动爻的 changed facet；`is-void` 只使用日柱旬空，检查范围相同。年/月/时旬空只展示。Task 4 的 `clashes` 是原始 structural fact；这里只对静爻派生互斥的 `is-dark-moving/is-day-break`：不月破且月令同支、同五行或月生爻才暗动；月破，或月令克爻且无白名单生扶才日破。白名单只含月、日、其他明动本卦爻和本位化爻；年时柱与单纯合不算生扶。其余只保留原始日冲。
 
-- [ ] **Step 6: 验证与提交**
+- [ ] **Step 6: 实现方向明确的动变化事实**
 
-Run: `cmd /c npx vitest run src/domain/liuyao/facts && npm run typecheck`
-Expected: PASS。
+`moving-effects.ts` 只处理 `transition !== null`。回头生克冲合固定 `changed → base` 并引用 Task 4 basis fact；进退与化墓绝固定 `base → changed`。默认七进为亥→子、寅→卯、巳→午、申→酉、丑→辰、辰→未、未→戌，七退为反向；《卜筮正宗》增加戌→丑/丑→戌的八对表只在命名审计 profile 中出现。墓绝为木墓未绝申、火墓戌绝亥、金墓丑绝寅、水墓辰绝巳、土从水；土→巳必须同时保留化绝和可能的回头生。
+
+- [ ] **Step 7: 实现受限卦局而不做任意跨侧组合**
+
+三合仅允许：本卦三支齐且至少一员明动/暗动；或内卦初、三爻同为明动，以两原爻加其中一个本位化爻补成；外卦四、六同理。禁止任意 base/changed 跨位取三项；全静完整三支不成局。受空破/入墓阻断时如输出，只能是 `has-three-harmony-candidate`，不能冒充已成局。
+
+卦级六合/六冲分别检查每一侧 `(1,4)、(2,5)、(3,6)` 三对全合/全冲；静卦只输出 base，有动爻才输出 changed，不补三条重复 pair facts。默认反吟要求内或外三个位本变地支全部相冲且该卦体确有变化；伏吟要求全部相同且该卦体确有变化。乾坤字面反吟与方位卦反吟不得混入默认 profile。
+
+- [ ] **Step 8: 加入精确全矩阵、去重和门禁断言**
+
+测试至少覆盖：12×12 月令计数 `12/20/28/4/80`；60 甲子×12 支旬空且每日恰好 2 支；暗动/日破正反例与全局互斥；5×5 回头元素和 12×12 回头支矩阵；默认 7 进 7 退、审计 8 进 8 退；5 元素×12 支仅 5 墓 5 绝；四局三合所有允许/禁止成员模式；64 卦恰好 8 六合、10 六冲且不重叠；4096 状态下 base 六合 512、六冲 640，changed（静卦不重复）分别 504/630；默认内外反吟各 128、伏吟各 128、任一各 252。专测比→井内反吟、临→中孚外反吟、姤→恒外伏吟及未变化半卦反例。
+
+所有 Task 5 facts 的 `ruleId/profileId/authority/certainty/sourceRefs` 非空且与 artifact 对应；basisFactIds 有序、无第二份 raw relation；bundle/source/hash 门禁拒绝缺失、重复或伪造来源。启用后 `buildPlateV2(DEFAULT_RULE_CONTEXT)` 仍通过，Task 3/4 artifactHash 不变。
+
+- [ ] **Step 9: 验证与提交**
+
+Run: `cmd /c npx vitest run src/domain/liuyao/facts src/domain/liuyao/plate.test.ts && npm run build:domain && npm run typecheck`
+Expected: PASS；effects artifact/review/hash 可独立复算，结构与关系 artifact payload/hash 完全不变。
 
 ```bash
-git add src/domain/liuyao
+git add src/domain/liuyao docs/domain/liuyao-effects-v1-review.md docs/domain/reviews/liuyao-effects-v1-review-a.md docs/domain/reviews/liuyao-effects-v1-review-b.md scripts/review-effects-candidate.mjs
 git commit -m "feat(domain): 派生日月动变与卦局条件事实"
 ```
 
