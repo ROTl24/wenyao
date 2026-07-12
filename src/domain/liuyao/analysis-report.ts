@@ -77,6 +77,8 @@ export interface ContractFactV2 {
   readonly target: EntityRef | null;
   readonly sourceLabels: readonly string[];
   readonly targetLabels: readonly string[];
+  readonly sourceFacetTokens: readonly string[];
+  readonly targetFacetTokens: readonly string[];
   readonly authority: 'structural' | 'profile-dependent' | 'secondary';
   readonly certainty: 'computed' | 'conditional' | 'disputed';
   readonly ruleIds: readonly string[];
@@ -192,7 +194,7 @@ const SECTION_SET = new Set<string>(ANALYSIS_REPORT_V2_SECTIONS);
 const CONFIDENCE_SET = new Set<string>(ANALYSIS_CONFIDENCE_LEVELS);
 const CASE_HASH_RE = /^[0-9a-f]{64}$/;
 const CONTROL_RE = /[\u0000-\u001f\u007f]/u;
-const PROMPT_INJECTION_RE = /(?:ignore\s+(?:all\s+)?(?:previous|prior)|system\s*(?:prompt|message)|developer\s*message|prompt\s*injection|jailbreak|忽略.{0,12}(?:指令|提示|规则)|系统提示词|开发者消息|越狱|提示词注入)/iu;
+const PROMPT_INJECTION_RE = /(?:ignore\s+(?:all\s+)?(?:previous|prior)|bypass.{0,20}(?:validation|rules?|safety)|override.{0,20}(?:instructions?|rules?)|reveal.{0,20}(?:system|hidden).{0,12}(?:prompt|instructions?)|system\s*(?:prompt|message)|developer\s*message|prompt\s*injection|jailbreak|(?:忽略|无视).{0,12}(?:指令|提示|规则)|(?:绕过|跳过|规避).{0,10}(?:事实校验|校验|规则|限制|安全机制)|(?:改为|直接).{0,4}输出.{0,12}(?:系统|规则|提示|隐藏)|隐藏.{0,8}(?:规则|指令|提示)|不要遵循.{0,8}(?:规则|指令)|系统提示词|开发者消息|越狱|提示词注入)/iu;
 const ANCIENT_SOURCE_RE = /(?:古籍|原文|占例|卜筮正宗|增删卜易|黄金策|易隐|易冒)/u;
 const SINGLE_PRIMARY_RE = /(?:已(?:定|取)|确定|选定|取.{0,12}为用神|唯一(?:的)?主用神)/u;
 const SPIRIT_ASSERTION_RE = /(?:元神|忌神|仇神)/u;
@@ -307,13 +309,25 @@ function strictClone<T>(value: T, label = '输入', ancestors = new Set<object>(
   ancestors.add(value);
   try {
     if (Array.isArray(value)) {
+      if (Object.getPrototypeOf(value) !== Array.prototype) {
+        fail(`${label} 必须使用标准 Array.prototype`);
+      }
       for (let index = 0; index < value.length; index += 1) {
         if (!Object.prototype.hasOwnProperty.call(value, index)) fail(`${label} 数组不得稀疏`);
+        const descriptor = Object.getOwnPropertyDescriptor(value, String(index));
+        if (
+          !descriptor
+          || !descriptor.enumerable
+          || !Object.prototype.hasOwnProperty.call(descriptor, 'value')
+        ) fail(`${label}[${index}] 索引必须是可枚举 data 描述符`);
       }
       const keys = Reflect.ownKeys(value);
-      if (keys.some((key) => typeof key === 'symbol'
-        || (key !== 'length' && !/^\d+$/u.test(String(key))))) {
-        fail(`${label} 数组含额外字段`);
+      for (const key of keys) {
+        if (typeof key === 'symbol') fail(`${label} 数组含额外字段`);
+        if (key === 'length') continue;
+        if (!/^(?:0|[1-9]\d*)$/u.test(key) || String(Number(key)) !== key) {
+          fail(`${label} 数组含非规范索引或额外字段`);
+        }
       }
       return value.map((entry, index) => strictClone(entry, `${label}[${index}]`, ancestors)) as T;
     }
@@ -443,8 +457,47 @@ function pillarTokens(pillar: CalendarPillar): readonly string[] {
   ]);
 }
 
-function createContractFact(input: ContractFactV2): ContractFactV2 {
-  return strictClone(input, `contract fact ${input.id}`);
+function entityFacetClaimTokens(
+  caseSnapshot: DivinationCaseV2,
+  entity: EntityRef,
+): readonly string[] {
+  if (entity.type === 'pillar') return pillarTokens(caseSnapshot.plate.calendar.pillars[entity.id]);
+  if (entity.type === 'hexagram') {
+    const side = entity.id === 'base'
+      ? caseSnapshot.plate.baseHexagram
+      : caseSnapshot.plate.changedHexagram;
+    return stableUnique([
+      entity.id === 'base' ? '本卦' : '变卦',
+      side.name, side.shortName, side.palaceElement, `${side.palaceElement}行`,
+    ]);
+  }
+  if (entity.type === 'use-god') return ['用神', '主用神'];
+  if (entity.type === 'line') {
+    const line = caseSnapshot.plate.lines.find(({ id }) => id === entity.id);
+    return line ? lineFacetTokens(line, entity.side) : [];
+  }
+  const hidden = caseSnapshot.plate.lines.flatMap((line) => line.hiddenSpiritCandidates)
+    .find(({ id }) => id === entity.id);
+  return hidden
+    ? stableUnique([
+      '伏神', hidden.relation, `${hidden.relation}伏神`, hidden.ganZhi,
+      hidden.stem, hidden.branch, hidden.element, `${hidden.element}行`,
+      ...POSITION_LABELS[hidden.sourceLine],
+    ])
+    : ['伏神'];
+}
+
+type ContractFactInputV2 = Omit<ContractFactV2, 'sourceFacetTokens' | 'targetFacetTokens'> & {
+  readonly sourceFacetTokens?: readonly string[];
+  readonly targetFacetTokens?: readonly string[];
+};
+
+function createContractFact(input: ContractFactInputV2): ContractFactV2 {
+  return strictClone({
+    ...input,
+    sourceFacetTokens: input.sourceFacetTokens ?? [],
+    targetFacetTokens: input.targetFacetTokens ?? [],
+  }, `contract fact ${input.id}`);
 }
 
 function structuralFacts(caseSnapshot: DivinationCaseV2): ContractFactV2[] {
@@ -517,6 +570,7 @@ function entityFacts(caseSnapshot: DivinationCaseV2): ContractFactV2[] {
         label: `${side === 'base' ? '本卦' : '变卦'}${POSITION_LABELS[line.position][0]} ${facet.relationToBasePalace} ${facet.ganZhi}`,
         relation: null, source: entity, target: null,
         sourceLabels: labelsForEntity(caseSnapshot, entity), targetLabels: [],
+        sourceFacetTokens: lineFacetTokens(line, side),
         authority: 'structural', certainty: 'computed', ruleIds: [], conditions: [],
         values: {
           position: line.position,
@@ -544,6 +598,11 @@ function entityFacts(caseSnapshot: DivinationCaseV2): ContractFactV2[] {
         relation: null, source: entity, target: { type: 'line', id: line.id, side: 'base' },
         sourceLabels: labelsForEntity(caseSnapshot, entity),
         targetLabels: labelsForEntity(caseSnapshot, { type: 'line', id: line.id, side: 'base' }),
+        sourceFacetTokens: stableUnique([
+          '伏神', `${hidden.relation}伏神`, hidden.relation, hidden.ganZhi,
+          hidden.stem, hidden.branch, hidden.element, `${hidden.element}行`,
+          ...POSITION_LABELS[line.position],
+        ]),
         authority: 'profile-dependent', certainty: 'disputed', ruleIds: [], conditions: ['hidden-use-disputed'],
         values: { ...hidden },
         claimTokens: stableUnique([
@@ -583,6 +642,8 @@ function candidateFact(
     label: `${role === 'candidate' ? '用神候选' : '用神焦点'} ${entityLabels[0]}`,
     relation: null, source: { type: 'use-god', id: 'primary' }, target: entity,
     sourceLabels: ['用神', '主用神'], targetLabels: entityLabels,
+    sourceFacetTokens: ['用神', '主用神'],
+    targetFacetTokens: lineTokens,
     authority: candidate?.authority ?? 'profile-dependent',
     certainty: candidate?.certainty ?? (entity.type === 'hidden-spirit' ? 'disputed' : 'computed'),
     ruleIds: candidate?.reasonRuleIds ? [...candidate.reasonRuleIds] : [...caseSnapshot.useGod.ruleIds],
@@ -677,6 +738,8 @@ function derivedContractFact(caseSnapshot: DivinationCaseV2, fact: DerivedFact):
     target: fact.target ? strictClone(fact.target) : null,
     sourceLabels,
     targetLabels,
+    sourceFacetTokens: entityFacetClaimTokens(caseSnapshot, fact.source),
+    targetFacetTokens: fact.target ? entityFacetClaimTokens(caseSnapshot, fact.target) : [],
     authority: fact.authority,
     certainty: fact.certainty,
     ruleIds: [fact.ruleId],
@@ -686,6 +749,8 @@ function derivedContractFact(caseSnapshot: DivinationCaseV2, fact: DerivedFact):
       relationLabel,
       ...sourceLabels,
       ...targetLabels,
+      ...entityFacetClaimTokens(caseSnapshot, fact.source),
+      ...(fact.target ? entityFacetClaimTokens(caseSnapshot, fact.target) : []),
       ...tokensFromValues(fact.values),
     ]),
   });
@@ -895,6 +960,13 @@ const ALL_GANZHI = Array.from({ length: 60 }, (_, index) => (
 const ALL_HEXAGRAM_NAMES = stableUnique(WENWANG_NAJIA_V2_ARTIFACT.hexagrams.map(({ name }) => name));
 const ALL_POSITION_TOKENS = stableUnique(Object.values(POSITION_LABELS).flat());
 const ALL_SIX_RELATIONS = ['父母', '兄弟', '子孙', '妻财', '官鬼'] as const;
+const ALL_GROWTH_STAGES = [
+  '长生', '沐浴', '冠带', '临官', '帝旺', '衰', '病', '死', '墓', '绝', '胎', '养',
+] as const;
+const ALL_SHEN_SHA_LABELS = [
+  '天乙贵人', '驿马', '禄神', '天喜', '桃花', '羊刃', '文昌', '华盖',
+  '劫煞', '灾煞', '将星', '贵人',
+] as const;
 const STATIC_CONCRETE_TOKENS = stableUnique([
   ...ALL_HEXAGRAM_NAMES,
   ...ALL_GANZHI,
@@ -905,7 +977,6 @@ const STATIC_CONCRETE_TOKENS = stableUnique([
   '动爻', '静爻', '发动', '安静',
   '木行', '火行', '土行', '金行', '水行',
   '甲子旬', '甲戌旬', '甲申旬', '甲午旬', '甲辰旬', '甲寅旬',
-  '长生', '沐浴', '冠带', '临官', '帝旺',
   '青龙', '朱雀', '勾陈', '螣蛇', '腾蛇', '白虎', '玄武',
 ]);
 
@@ -919,6 +990,37 @@ function extractConcreteTokens(text: string, context: FactContractValidationCont
   }
   for (const match of text.matchAll(/[子丑寅卯辰巳午未申酉戌亥]{2}(?:空|旬空|空亡)/gu)) {
     found.add(match[0]);
+  }
+  for (const match of text.matchAll(/(?:旬空|空亡)([子丑寅卯辰巳午未申酉戌亥]{2})/gu)) {
+    found.add(`${match[1]}空`);
+  }
+  const stageAlternation = ALL_GROWTH_STAGES.join('|');
+  const stageContext = new RegExp(`(?:十二长生|长生阶段|长生位)(?:为|是|见|临|处于)?(${stageAlternation})?`, 'gu');
+  for (const match of text.matchAll(stageContext)) {
+    found.add('十二长生');
+    if (match[1]) found.add(match[1]);
+  }
+  for (const stage of ALL_GROWTH_STAGES.filter((candidate) => candidate.length >= 2)) {
+    let offset = text.indexOf(stage);
+    while (offset >= 0) {
+      if (!(stage === '长生' && text.slice(Math.max(0, offset - 2), offset) === '十二')) found.add(stage);
+      offset = text.indexOf(stage, offset + stage.length);
+    }
+  }
+  const singleStages = ALL_GROWTH_STAGES.filter((candidate) => candidate.length === 1).join('|');
+  const positionAlternation = [...ALL_POSITION_TOKENS]
+    .sort((left, right) => right.length - left.length)
+    .map(escapeRegExp)
+    .join('|');
+  const standaloneStage = new RegExp(
+    `(?:${positionAlternation})[^。；，,]{0,8}(?:为|是|临|处于)?(${singleStages})(?:地|位|阶段)?`,
+    'gu',
+  );
+  for (const match of text.matchAll(standaloneStage)) found.add(match[1]);
+  for (const label of [...ALL_SHEN_SHA_LABELS].sort((left, right) => right.length - left.length)) {
+    if (!text.includes(label)) continue;
+    if ([...found].some((existing) => existing.length > label.length && existing.includes(label))) continue;
+    found.add(label);
   }
   for (const token of context.allCurrentTokens) {
     if (
@@ -950,17 +1052,327 @@ function includesNear(text: string, token: string, index: number, radius = 12): 
   return text.slice(start, end).includes(token);
 }
 
+function entityRefKey(entity: EntityRef | null): string | null {
+  if (!entity) return null;
+  if (entity.type === 'line') return `line:${entity.id}:${entity.side}`;
+  return `${entity.type}:${entity.id}`;
+}
+
+function factEntityKeys(fact: ContractFactV2): readonly string[] {
+  return stableUnique([
+    entityRefKey(fact.source),
+    entityRefKey(fact.target),
+  ].filter((value): value is string => value !== null));
+}
+
+function factsTouch(left: ContractFactV2, right: ContractFactV2): boolean {
+  const leftKeys = new Set(factEntityKeys(left));
+  return factEntityKeys(right).some((key) => leftKeys.has(key));
+}
+
+function connectedFactComponents(facts: readonly ContractFactV2[]): readonly (readonly ContractFactV2[])[] {
+  const remaining = new Set(facts.map((_, index) => index));
+  const components: ContractFactV2[][] = [];
+  while (remaining.size > 0) {
+    const [seed] = remaining;
+    remaining.delete(seed);
+    const component = [facts[seed]];
+    const queue = [facts[seed]];
+    while (queue.length > 0) {
+      const current = queue.shift() as ContractFactV2;
+      for (const index of [...remaining]) {
+        if (!factsTouch(current, facts[index])) continue;
+        remaining.delete(index);
+        component.push(facts[index]);
+        queue.push(facts[index]);
+      }
+    }
+    components.push(component);
+  }
+  return components;
+}
+
+interface ClauseSegment {
+  readonly text: string;
+  readonly inheritedPillar: keyof typeof PILLAR_LABELS | null;
+}
+
+function pillarKindInText(text: string): keyof typeof PILLAR_LABELS | null {
+  for (const kind of ['year', 'month', 'day', 'hour'] as const) {
+    if (PILLAR_LABELS[kind].some((label) => text.includes(label))) return kind;
+  }
+  return null;
+}
+
+function clauseSegments(text: string): readonly ClauseSegment[] {
+  const result: ClauseSegment[] = [];
+  for (const sentence of text.split(/[。；;\n]+/u)) {
+    let inheritedPillar: keyof typeof PILLAR_LABELS | null = null;
+    for (const raw of sentence.split(/[，,]+/u)) {
+      const clause = raw.trim();
+      if (!clause) continue;
+      const explicit = pillarKindInText(clause);
+      if (explicit) inheritedPillar = explicit;
+      result.push({ text: clause, inheritedPillar });
+    }
+  }
+  return result;
+}
+
+function calendarTokens(text: string, context: FactContractValidationContextV2): readonly string[] {
+  return extractConcreteTokens(text, context).filter((token) => (
+    ALL_GANZHI.includes(token)
+    || token.endsWith('旬')
+    || /[子丑寅卯辰巳午未申酉戌亥]{2}(?:空|旬空|空亡)$/u.test(token)
+  ));
+}
+
+function factCoversTokens(fact: ContractFactV2, tokens: readonly string[]): boolean {
+  const allowed = new Set(fact.claimTokens);
+  return tokens.every((token) => tokenAuthorized(token, allowed));
+}
+
+interface EntityAnchorMatch {
+  readonly index: number;
+  readonly end: number;
+  readonly label: string;
+  readonly entityFactIds: readonly string[];
+  readonly entityKeys: readonly string[];
+}
+
+function entityAnchorMatches(
+  text: string,
+  allFacts: readonly ContractFactV2[],
+): readonly EntityAnchorMatch[] {
+  const candidates: Array<{
+    index: number;
+    end: number;
+    label: string;
+    factId: string;
+    entityKey: string;
+  }> = [];
+  for (const fact of allFacts) {
+    if (fact.provenance !== 'entity' || !fact.source) continue;
+    const key = entityRefKey(fact.source);
+    if (!key) continue;
+    for (const label of fact.sourceLabels.filter((entry) => entry.length >= 2)) {
+      let index = text.indexOf(label);
+      while (index >= 0) {
+        candidates.push({ index, end: index + label.length, label, factId: fact.id, entityKey: key });
+        index = text.indexOf(label, index + label.length);
+      }
+    }
+  }
+  const maximal = candidates.filter((candidate) => !candidates.some((other) => (
+    other.index <= candidate.index
+    && other.end >= candidate.end
+    && other.label.length > candidate.label.length
+  )));
+  const grouped = new Map<string, typeof maximal>();
+  for (const candidate of maximal) {
+    const key = `${candidate.index}:${candidate.end}:${candidate.label}`;
+    const entries = grouped.get(key) ?? [];
+    entries.push(candidate);
+    grouped.set(key, entries);
+  }
+  return [...grouped.values()]
+    .map((entries) => ({
+      index: entries[0].index,
+      end: entries[0].end,
+      label: entries[0].label,
+      entityFactIds: stableUnique(entries.map(({ factId }) => factId)),
+      entityKeys: stableUnique(entries.map(({ entityKey }) => entityKey)),
+    }))
+    .sort((left, right) => left.index - right.index || right.label.length - left.label.length);
+}
+
+function facetTokens(text: string, context: FactContractValidationContextV2): readonly string[] {
+  return extractConcreteTokens(text, context).filter((token) => (
+    token === '本卦'
+    || token === '变卦'
+    || token === '伏神'
+    || ALL_GANZHI.includes(token)
+    || ALL_POSITION_TOKENS.includes(token)
+    || ALL_SIX_RELATIONS.includes(token as typeof ALL_SIX_RELATIONS[number])
+    || ['世爻', '应爻', '持世', '持应', '世应', '动爻', '静爻', '发动', '安静'].includes(token)
+    || /^[木火土金水]行$/u.test(token)
+  ));
+}
+
+function factTouchesEntityKeys(fact: ContractFactV2, keys: readonly string[]): boolean {
+  const factKeys = factEntityKeys(fact);
+  return keys.some((key) => factKeys.includes(key));
+}
+
+function factCoversEntityFacet(
+  fact: ContractFactV2,
+  keys: readonly string[],
+  tokens: readonly string[],
+): boolean {
+  const sourceKey = entityRefKey(fact.source);
+  if (sourceKey && keys.includes(sourceKey)) {
+    const allowed = new Set(fact.sourceFacetTokens);
+    if (tokens.every((token) => tokenAuthorized(token, allowed))) return true;
+  }
+  const targetKey = entityRefKey(fact.target);
+  if (targetKey && keys.includes(targetKey)) {
+    const allowed = new Set(fact.targetFacetTokens);
+    if (tokens.every((token) => tokenAuthorized(token, allowed))) return true;
+  }
+  return false;
+}
+
+function normalizeSpiritToken(token: string): string {
+  return token === '腾蛇' ? '螣蛇' : token;
+}
+
+function validateEntityAssociations(
+  clause: ClauseSegment,
+  referencedFacts: readonly ContractFactV2[],
+  allFacts: readonly ContractFactV2[],
+  context: FactContractValidationContextV2,
+): void {
+  const anchors = entityAnchorMatches(clause.text, allFacts);
+  if (anchors.length === 0) return;
+  for (let index = 0; index < anchors.length; index += 1) {
+    const anchor = anchors[index];
+    const next = anchors[index + 1];
+    const slice = clause.text.slice(anchor.index, next?.index ?? clause.text.length);
+    const tokens = facetTokens(slice, context);
+    const supporters = referencedFacts.filter((fact) => factTouchesEntityKeys(fact, anchor.entityKeys));
+    const structuralSetCoverage = referencedFacts.some((fact) => (
+      fact.provenance === 'plate' && factCoversTokens(fact, tokens)
+    ));
+    if (
+      tokens.length > 0
+      && !structuralSetCoverage
+      && !supporters.some((fact) => factCoversEntityFacet(fact, anchor.entityKeys, tokens))
+    ) {
+      fail(`当前排盘事实 clause「${slice}」的爻位、side 与实体属性不能由同一事实关联`);
+    }
+
+    const spiritTokens = extractConcreteTokens(slice, context)
+      .filter((token) => ['青龙', '朱雀', '勾陈', '螣蛇', '腾蛇', '白虎', '玄武'].includes(token))
+      .map(normalizeSpiritToken);
+    if (slice.includes('六神') || spiritTokens.length > 0) {
+      const candidates = supporters.filter(({ relation }) => relation === 'is-six-beast');
+      if (!candidates.some((fact) => factCoversTokens(fact, spiritTokens))) {
+        fail(`clause「${slice}」的六神与爻实体关联无效`);
+      }
+    }
+
+    const stageTokens = extractConcreteTokens(slice, context)
+      .filter((token) => ALL_GROWTH_STAGES.includes(token as typeof ALL_GROWTH_STAGES[number]));
+    if (slice.includes('十二长生') || stageTokens.length > 0) {
+      const candidates = supporters.filter((fact) => (
+        fact.relation === 'is-growth-stage'
+        && (!clause.inheritedPillar
+          || fact.source?.type !== 'pillar'
+          || fact.source.id === clause.inheritedPillar)
+      ));
+      if (!candidates.some((fact) => factCoversTokens(fact, stageTokens))) {
+        fail(`clause「${slice}」的十二长生阶段与实体关联无效`);
+      }
+    }
+
+    const shenShaTokens = extractConcreteTokens(slice, context)
+      .filter((token) => ALL_SHEN_SHA_LABELS.includes(token as typeof ALL_SHEN_SHA_LABELS[number]));
+    if (slice.includes('神煞') || shenShaTokens.length > 0) {
+      const candidates = supporters.filter(({ relation }) => relation === 'is-shen-sha');
+      if (!candidates.some((fact) => factCoversTokens(fact, shenShaTokens))) {
+        fail(`clause「${slice}」的神煞与实体关联无效`);
+      }
+    }
+  }
+}
+
+function validateStructuralAssociations(
+  clause: ClauseSegment,
+  referencedFacts: readonly ContractFactV2[],
+  context: FactContractValidationContextV2,
+): void {
+  const hexagramNames = ALL_HEXAGRAM_NAMES.filter((name) => clause.text.includes(name));
+  for (const [sideLabel, factId] of [
+    ['本卦', 'contract:plate:hexagram:base'],
+    ['变卦', 'contract:plate:hexagram:changed'],
+  ] as const) {
+    if (!clause.text.includes(sideLabel) || hexagramNames.length === 0) continue;
+    const fact = referencedFacts.find(({ id }) => id === factId);
+    if (!fact || !factCoversTokens(fact, [sideLabel, ...hexagramNames])) {
+      fail(`当前排盘事实 clause「${clause.text}」的${sideLabel}与卦名不属于同一 structural fact`);
+    }
+  }
+
+  const tokens = calendarTokens(clause.text, context);
+  const kind = pillarKindInText(clause.text) ?? clause.inheritedPillar;
+  if (tokens.length > 0 && kind) {
+    const fact = referencedFacts.find(({ id }) => id === `contract:plate:pillar:${kind}`);
+    if (!fact || !factCoversTokens(fact, tokens)) {
+      fail(`当前排盘事实 ${tokens.join('、')} 在 clause「${clause.text}」中与${PILLAR_LABELS[kind][0]}不属于同一 pillar fact`);
+    }
+  }
+}
+
+function validateElementPredicates(
+  claim: AnalysisClaimV2,
+  referencedFacts: readonly ContractFactV2[],
+): void {
+  for (const match of claim.text.matchAll(/([木火土金水])(?:行)?(生|克)([木火土金水])(?:行)?/gu)) {
+    const [, source, word, target] = match;
+    const relation = word === '生' ? 'generates' : 'controls';
+    const supported = referencedFacts.some((fact) => (
+      fact.relation === relation
+      && fact.values.sourceElement === source
+      && fact.values.targetElement === target
+    ));
+    if (!supported) fail(`claim ${claim.id} 的${source}${word}${target}元素方向无事实支持`);
+  }
+}
+
+function validateClauseAssociations(
+  claim: AnalysisClaimV2,
+  referencedFacts: readonly ContractFactV2[],
+  allFacts: readonly ContractFactV2[],
+  context: FactContractValidationContextV2,
+): void {
+  const components = connectedFactComponents(referencedFacts);
+  for (const clause of clauseSegments(claim.text)) {
+    validateStructuralAssociations(clause, referencedFacts, context);
+    validateEntityAssociations(clause, referencedFacts, allFacts, context);
+    const tokens = extractConcreteTokens(clause.text, context);
+    if (tokens.length > 0 && !components.some((component) => (
+      tokens.every((token) => component.some((fact) => factCoversTokens(fact, [token])))
+    ))) {
+      fail(`clause「${clause.text}」的当前排盘属性不能跨事实链拼接`);
+    }
+  }
+  validateElementPredicates(claim, referencedFacts);
+}
+
 function validateRelationPredicates(
   claim: AnalysisClaimV2,
   referencedFacts: readonly ContractFactV2[],
   context: FactContractValidationContextV2,
 ): void {
+  if (/(?:并非|不是|不属|不为|未|无|否认)(?:相)?(?:生|克|冲|合|刑|害|破|月破|日破|暗动|回头生|回头克|回头冲|回头合|进神|退神|化墓|化绝|元神|忌神|仇神)/u.test(claim.text)) {
+    fail(`claim ${claim.id} 含事实契约尚未建模的负向关系断言`);
+  }
   const referencedPredicates = context.predicates.filter(({ factId }) => claim.factIds.includes(factId));
   for (const special of SPECIAL_PREDICATES) {
     const match = special.pattern.exec(claim.text);
     if (!match) continue;
     const candidates = referencedPredicates.filter(({ relation }) => special.relations.includes(relation));
-    if (candidates.length === 0) fail(`claim ${claim.id} 的${special.label}关系无对应事实`);
+    const structuralVoid = special.relations.includes('is-void') && referencedFacts.some((fact) => (
+      fact.provenance === 'plate'
+      && fact.kind.endsWith('-pillar')
+      && extractConcreteTokens(claim.text, context)
+        .filter((token) => token.includes('空'))
+        .some((token) => factCoversTokens(fact, [token]))
+    ));
+    if (candidates.length === 0 && !structuralVoid) {
+      fail(`claim ${claim.id} 的${special.label}关系无对应事实`);
+    }
+    if (structuralVoid && candidates.length === 0) continue;
     const nearbyLabels = context.entityLabels.filter((label) => (
       label.length >= 2 && includesNear(claim.text, label, match.index)
     ));
@@ -1023,12 +1435,18 @@ function validateUseGodClaim(
     if (SINGLE_PRIMARY_RE.test(claim.text) || SPIRIT_ASSERTION_RE.test(claim.text)) {
       fail('needs-user-input 不得虚构已定用神或元忌仇');
     }
+    if (!/(?:请|需|需要|补充|明确|澄清).{0,24}(?:占问|目标|对象|关系|用神)|(?:占问|目标).{0,16}(?:待明确|待澄清)/u.test(claim.text)) {
+      fail('needs-user-input 必须使用请求澄清占问目标的措辞');
+    }
     return;
   }
   if (selection.status === 'unresolved') {
     if (claim.confidence !== 'low') fail('unresolved 用神 claim 只能为 low');
     if (SINGLE_PRIMARY_RE.test(claim.text) || SPIRIT_ASSERTION_RE.test(claim.text)) {
       fail('unresolved 不得虚构已定用神或元忌仇');
+    }
+    if (!/(?:缺少|暂无|暂未|未找到|无法确定|候选不足|没有).{0,24}(?:候选|用神|条件)|(?:候选|用神).{0,16}(?:缺失|不足|未解决)/u.test(claim.text)) {
+      fail('unresolved 必须明确候选或取用条件缺少的措辞');
     }
     return;
   }
@@ -1052,6 +1470,9 @@ function validateUseGodClaim(
       ))
       && claim.confidence !== 'low'
     ) fail('ambiguous 含 disputed/hidden 候选时只能 low');
+    if (!/(?:保留.{0,12}全部|全部.{0,12}候选|多个.{0,12}候选.{0,12}(?:并列|保留)|不(?:自动)?选择|不择一)/u.test(claim.text)) {
+      fail('ambiguous 必须明确保留全部候选且不择一');
+    }
     return;
   }
 
@@ -1059,12 +1480,37 @@ function validateUseGodClaim(
     if (SINGLE_PRIMARY_RE.test(claim.text) || SPIRIT_ASSERTION_RE.test(claim.text)) {
       fail('shi-ying-pair 不得声称单一主用神或元忌仇');
     }
+    const mentionsBoth = claim.text.includes('世应')
+      || (/(?:世爻|持世|\b世\b)/u.test(claim.text) && /(?:应爻|持应|\b应\b)/u.test(claim.text));
+    if (!mentionsBoth || !/(?:双端|两端|成对|同时|并看|并察|不设单一)/u.test(claim.text)) {
+      fail('shi-ying-pair 必须明确世应双端且不设单一用神');
+    }
     return;
   }
 
   if (!selection.primary) fail('resolved single 缺少 primary');
   if (selection.primary.entity.type === 'hidden-spirit' && claim.confidence !== 'low') {
     fail('resolved hidden 用神 claim 只能为 low');
+  }
+  if (selection.primary.entity.type === 'hidden-spirit' && !claim.text.includes('伏神')) {
+    fail('resolved hidden 用神必须明确说明伏神身份');
+  }
+  const explicitPrimaryAssertion = SINGLE_PRIMARY_RE.test(claim.text)
+    || /(?:为|作|作为|取作|定作)(?:本次)?用神|用神(?:为|是|落在)/u.test(claim.text);
+  if (explicitPrimaryAssertion) {
+    const primaryFact = facts.find((fact) => expectedFocusIds.includes(fact.id));
+    if (!primaryFact) fail('resolved single 缺少 primary contract fact');
+    const primaryTokens = facetTokens(claim.text, {
+      schemaVersion: '2.0.0',
+      caseHash: '',
+      allCurrentTokens: [],
+      entityLabels: [],
+      predicates: [],
+      useGod: selection,
+    });
+    if (primaryTokens.length > 0 && !factCoversTokens(primaryFact, primaryTokens)) {
+      fail('resolved 用神断言中的本变 side、爻位、六亲或实体属性与 primary 不匹配');
+    }
   }
   const spiritRelations: Readonly<Record<string, FactRelation>> = {
     元神: 'is-source-spirit', 忌神: 'is-avoid-spirit', 仇神: 'is-enemy-spirit',
@@ -1080,10 +1526,21 @@ function validateUseGodClaim(
   }
 }
 
-function confidenceCeiling(facts: readonly ContractFactV2[]): AnalysisConfidenceV2 {
+function confidenceCeiling(facts: readonly ContractFactV2[], text: string): AnalysisConfidenceV2 {
   if (facts.some(({ certainty }) => certainty === 'disputed')) return 'low';
   if (facts.some(({ certainty }) => certainty === 'conditional')) return 'medium';
   if (facts.length > 0 && facts.every(({ authority }) => authority === 'secondary')) return 'medium';
+  const materialSecondary = facts.some((fact) => {
+    if (fact.authority !== 'secondary') return false;
+    if (fact.relation === 'is-six-beast') {
+      return /(?:六神|青龙|朱雀|勾陈|螣蛇|腾蛇|白虎|玄武)/u.test(text);
+    }
+    if (fact.relation === 'is-shen-sha') {
+      return text.includes('神煞') || ALL_SHEN_SHA_LABELS.some((label) => text.includes(label));
+    }
+    return fact.claimTokens.some((token) => token.length >= 2 && text.includes(token));
+  });
+  if (materialSecondary) return 'medium';
   return 'high';
 }
 
@@ -1129,17 +1586,16 @@ function validateClaim(
     }
   }
 
-  const allowedTokens = new Set(facts.flatMap(({ claimTokens }) => claimTokens));
-  const concreteTokens = extractConcreteTokens(claim.text, contract.validationContext);
-  for (const token of concreteTokens) {
-    if (!tokenAuthorized(token, allowedTokens)) {
-      fail(`claim ${claim.id} 含未由本 claim 事实授权的当前排盘事实词元：${token}`);
-    }
-  }
+  validateClauseAssociations(
+    claim,
+    facts,
+    contract.modelContract.facts,
+    contract.validationContext,
+  );
   validateRelationPredicates(claim, facts, contract.validationContext);
   validateUseGodClaim(claim, facts, contract.validationContext.useGod);
 
-  const ceiling = facts.length === 0 ? 'low' : confidenceCeiling(facts);
+  const ceiling = facts.length === 0 ? 'low' : confidenceCeiling(facts, claim.text);
   if (CONFIDENCE_RANK[claim.confidence] > CONFIDENCE_RANK[ceiling]) {
     fail(`claim ${claim.id} 的 confidence 超过 ${ceiling} 上限`);
   }
@@ -1182,6 +1638,16 @@ function validateReportInternal(
   for (const [index, uncertainty] of normalized.uncertainties.entries()) {
     if (extractConcreteTokens(uncertainty, ownedContract.validationContext).length > 0) {
       fail(`uncertainties[${index}] 含当前排盘事实词元`);
+    }
+    const mentionedEntities = stableUnique(ownedContract.validationContext.entityLabels.filter((label) => (
+      label.length >= 2 && uncertainty.includes(label)
+    )));
+    if (
+      mentionedEntities.length >= 2
+      || (mentionedEntities.length >= 1
+        && /(?:相同|相异|一致|不同|强于|弱于|生|克|冲|合|刑|害|破|旺|衰)/u.test(uncertainty))
+    ) {
+      fail(`uncertainties[${index}] 含实体比较式具体断言`);
     }
     if (SPECIAL_PREDICATES.some(({ pattern }) => pattern.test(uncertainty))) {
       fail(`uncertainties[${index}] 含当前排盘关系断言`);
