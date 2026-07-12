@@ -1,11 +1,16 @@
 {
-  "id": "wenyao-ritual-stills-v1",
-  "version": 1,
-  "mode": "still-occlusion-cut",
+  "id": "wenyao-rigged-ink-hands-v2",
+  "version": 2,
+  "mode": "skeletal-glb",
   "closedPoster": "/images/ritual-hands-closed.png",
   "openPoster": "/images/ritual-hands.png",
   "width": 1672,
   "height": 941,
   "colorSpace": "srgb",
-  "alphaMode": "none"
+  "alphaMode": "none",
+  "model": "/models/rigged-hand.glb",
+  "animationClip": "Scene",
+  "qualityStatus": "final-approved",
+  "backgroundAssetId": "wenyao-paper-mountains-v1",
+  "modelSha256": "32705e2ee2badc9df04886cc0705545d6640c34e927d4db67afff2802aec945e"
 }

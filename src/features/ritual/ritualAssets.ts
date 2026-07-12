@@ -2,7 +2,8 @@ export type RitualHandsMode =
   | 'still-occlusion-cut'
   | 'opaque-video'
   | 'alpha-video'
-  | 'image-sequence';
+  | 'image-sequence'
+  | 'skeletal-glb';
 
 export type RitualAlphaMode = 'none' | 'straight' | 'premultiplied';
 
@@ -36,10 +37,21 @@ export interface ImageSequenceRitualHandsManifest extends RitualHandsManifestBas
   readonly frameRate: number;
 }
 
+export interface SkeletalRitualHandsManifest extends RitualHandsManifestBase {
+  readonly mode: 'skeletal-glb';
+  readonly alphaMode: 'none';
+  readonly model: string;
+  readonly animationClip: string;
+  readonly qualityStatus: 'technical-preview' | 'final-approved';
+  readonly backgroundAssetId: string;
+  readonly modelSha256: string;
+}
+
 export type RitualHandsManifest =
   | StillRitualHandsManifest
   | VideoRitualHandsManifest
-  | ImageSequenceRitualHandsManifest;
+  | ImageSequenceRitualHandsManifest
+  | SkeletalRitualHandsManifest;
 
 export const DEFAULT_RITUAL_HANDS_MANIFEST: StillRitualHandsManifest = {
   id: 'wenyao-ritual-stills-v1',
@@ -84,6 +96,14 @@ export function resolveRitualHandsManifestUrls(
   manifest: RitualHandsManifest,
   baseUrl: string,
 ): RitualHandsManifest {
+  if (manifest.mode === 'skeletal-glb') {
+    return {
+      ...manifest,
+      closedPoster: resolveRitualAssetUrl(manifest.closedPoster, baseUrl),
+      openPoster: resolveRitualAssetUrl(manifest.openPoster, baseUrl),
+      model: resolveRitualAssetUrl(manifest.model, baseUrl),
+    };
+  }
   if (manifest.mode === 'opaque-video' || manifest.mode === 'alpha-video') {
     return {
       ...manifest,
@@ -148,6 +168,7 @@ export function parseRitualHandsManifest(value: unknown): RitualHandsManifest {
     && mode !== 'opaque-video'
     && mode !== 'alpha-video'
     && mode !== 'image-sequence'
+    && mode !== 'skeletal-glb'
   ) {
     throw new TypeError('mode must name a supported ritual hands adapter');
   }
@@ -187,6 +208,26 @@ export function parseRitualHandsManifest(value: unknown): RitualHandsManifest {
       source: nonEmptyString(input.source, 'source'),
       duration: positiveNumber(input.duration, 'duration'),
       ...(mimeType === undefined ? {} : { mimeType }),
+    };
+  }
+
+  if (mode === 'skeletal-glb') {
+    if (common.alphaMode !== 'none') {
+      throw new TypeError('alphaMode must be none for skeletal-glb');
+    }
+    const qualityStatus = input.qualityStatus;
+    if (qualityStatus !== 'technical-preview' && qualityStatus !== 'final-approved') {
+      throw new TypeError('qualityStatus must be technical-preview or final-approved');
+    }
+    return {
+      ...common,
+      mode,
+      alphaMode: 'none',
+      model: nonEmptyString(input.model, 'model'),
+      animationClip: nonEmptyString(input.animationClip, 'animationClip'),
+      qualityStatus,
+      backgroundAssetId: nonEmptyString(input.backgroundAssetId, 'backgroundAssetId'),
+      modelSha256: nonEmptyString(input.modelSha256, 'modelSha256'),
     };
   }
 

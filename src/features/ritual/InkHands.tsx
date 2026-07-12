@@ -1,10 +1,22 @@
-import { useEffect, useMemo, useRef, useState } from 'react';
+import {
+  lazy,
+  Suspense,
+  useCallback,
+  useEffect,
+  useMemo,
+  useRef,
+  useState,
+} from 'react';
 import {
   DEFAULT_RITUAL_HANDS_MANIFEST,
   loadRitualHandsManifest,
   parseRitualHandsManifest,
   type RitualHandsManifest,
+  type SkeletalRitualHandsManifest,
 } from './ritualAssets';
+import type { InkHandRigHandle } from './InkHandScene';
+
+const InkHandScene = lazy(() => import('./InkHandScene'));
 
 export interface InkHandsTargets {
   readonly root: HTMLElement;
@@ -76,7 +88,96 @@ interface LoadedInkHandsProps extends Omit<InkHandsProps, 'manifest'> {
   readonly manifest: RitualHandsManifest;
 }
 
-function LoadedInkHands({
+interface SkeletalInkHandsProps extends Omit<InkHandsProps, 'manifest' | 'reducedMotion'> {
+  readonly manifest: SkeletalRitualHandsManifest;
+}
+
+function SkeletalInkHands({
+  manifest,
+  className = '',
+  onReady,
+}: SkeletalInkHandsProps) {
+  const rootRef = useRef<HTMLDivElement>(null);
+  const closedProxyRef = useRef<HTMLSpanElement>(null);
+  const openProxyRef = useRef<HTMLSpanElement>(null);
+  const inkRef = useRef<HTMLDivElement>(null);
+  const desiredProgressRef = useRef(0);
+  const [rig, setRig] = useState<InkHandRigHandle | null>(null);
+  const handleRigReady = useCallback((next: InkHandRigHandle | null) => {
+    if (next) next.setProgress(desiredProgressRef.current);
+    setRig(next);
+  }, []);
+
+  useEffect(() => {
+    const root = rootRef.current;
+    const closedHands = closedProxyRef.current;
+    const openHands = openProxyRef.current;
+    const inkCover = inkRef.current;
+    if (!root || !closedHands || !openHands || !inkCover || !rig) return;
+
+    const setMediaProgress = (progress: number) => {
+      desiredProgressRef.current = clampProgress(progress);
+      rig.setProgress(desiredProgressRef.current);
+    };
+    onReady?.({ root, closedHands, openHands, inkCover, setMediaProgress });
+    return () => onReady?.(null);
+  }, [onReady, rig]);
+
+  return (
+    <div
+      aria-hidden="true"
+      className={`ink-hands-runtime ink-hands-runtime--skeletal ${className}`.trim()}
+      data-asset-id={manifest.id}
+      data-mode={manifest.mode}
+      data-quality-status={manifest.qualityStatus}
+      ref={rootRef}
+      style={{ backgroundImage: `url("${manifest.closedPoster}")` }}
+    >
+      <span
+        className="ink-hands-runtime__state-proxy"
+        data-testid="ritual-hands-closed"
+        ref={closedProxyRef}
+        style={{ opacity: 1 }}
+      />
+      <span
+        className="ink-hands-runtime__state-proxy"
+        data-testid="ritual-hands-open"
+        ref={openProxyRef}
+        style={{ opacity: 0 }}
+      />
+      <Suspense fallback={<div className="ink-hand-scene-loading" /> }>
+        <InkHandScene
+          animationClip={manifest.animationClip}
+          model={manifest.model}
+          onReady={handleRigReady}
+        />
+      </Suspense>
+      <div
+        className="ink-hands-runtime__cover"
+        data-testid="ritual-ink-cover"
+        ref={inkRef}
+        style={{ opacity: 0 }}
+      />
+    </div>
+  );
+}
+
+function LoadedInkHands(props: LoadedInkHandsProps) {
+  if (props.manifest.mode === 'skeletal-glb' && !props.reducedMotion) {
+    return (
+      <SkeletalInkHands
+        className={props.className}
+        firstLine={props.firstLine}
+        manifest={props.manifest}
+        onReady={props.onReady}
+      />
+    );
+  }
+
+  return <LegacyInkHands {...props} manifest={props.manifest} />;
+}
+
+function LegacyInkHands({
   manifest: parsed = DEFAULT_RITUAL_HANDS_MANIFEST,
   reducedMotion = false,
   className = '',
@@ -134,7 +235,11 @@ function LoadedInkHands({
   }, [onReady, parsed, reducedMotion]);
 
   const openLayer = (() => {
-    if (reducedMotion || parsed.mode === 'still-occlusion-cut') {
+    if (
+      reducedMotion
+      || parsed.mode === 'still-occlusion-cut'
+      || parsed.mode === 'skeletal-glb'
+    ) {
       return (
         <img
           alt=""

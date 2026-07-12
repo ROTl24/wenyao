@@ -7,11 +7,12 @@ function rule(selector: string): string {
 }
 
 describe('RitualScreen 固定几何与唯一动画时钟', () => {
-  it('水平居中只属于固定按钮槽，内部按钮保持 relative 且只做纵向 transform', () => {
+  it('水平居中只属于固定按钮槽，内部按钮悬停与按下均不改变几何位置', () => {
     expect(rule('.ritual-confirm-slot')).toMatch(/transform:\s*translateX\(-50%\)/);
     expect(rule('.ritual-confirm')).toMatch(/position:\s*relative/);
     expect(rule('.ritual-confirm')).not.toMatch(/left:|bottom:|translateX/);
-    expect(rule('.ritual-confirm:hover:not(:disabled)')).toMatch(/translateY\(-1px\)/);
+    expect(rule('.ritual-confirm:hover:not(:disabled)')).toMatch(/transform:\s*none/);
+    expect(rule('.ritual-confirm:active:not(:disabled)')).toMatch(/transform:\s*none/);
   });
 
   it('手掌媒体铺满舞台，但墨幕保留明确顶部保护区并以羽化边缘进入手部区', () => {

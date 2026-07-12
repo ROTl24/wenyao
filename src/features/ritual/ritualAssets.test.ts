@@ -59,6 +59,17 @@ describe('手掌资产 manifest', () => {
       frames: ['/frame-0001.png', '/frame-0002.png'],
       frameRate: 24,
     },
+    {
+      ...common,
+      version: 2,
+      mode: 'skeletal-glb',
+      alphaMode: 'none',
+      model: '/models/rigged-hand.glb',
+      animationClip: 'Scene',
+      qualityStatus: 'technical-preview',
+      backgroundAssetId: 'wenyao-paper-mountains-v1',
+      modelSha256: '32705e2ee2badc9df04886cc0705545d6640c34e927d4db67afff2802aec945e',
+    },
   ])('解析并保留 $mode 清单', (manifest) => {
     expect(parseRitualHandsManifest(manifest)).toEqual(manifest);
   });
@@ -84,6 +95,51 @@ describe('手掌资产 manifest', () => {
       source: '/alpha.webm',
       duration: 3.2,
     })).toThrow(/alphaMode/);
+  });
+
+  it.each([
+    ['alphaMode', { alphaMode: 'straight' }],
+    ['model', { model: '' }],
+    ['animationClip', { animationClip: '' }],
+    ['qualityStatus', { qualityStatus: 'draft' }],
+    ['backgroundAssetId', { backgroundAssetId: '' }],
+    ['modelSha256', { modelSha256: '' }],
+  ])('拒绝 skeletal-glb 的无效 %s 字段', (field, override) => {
+    const manifest = {
+      ...common,
+      version: 2,
+      mode: 'skeletal-glb',
+      alphaMode: 'none',
+      model: '/models/rigged-hand.glb',
+      animationClip: 'Scene',
+      qualityStatus: 'technical-preview',
+      backgroundAssetId: 'wenyao-paper-mountains-v1',
+      modelSha256: '32705e2ee2badc9df04886cc0705545d6640c34e927d4db67afff2802aec945e',
+      ...override,
+    };
+
+    expect(() => parseRitualHandsManifest(manifest)).toThrow(new RegExp(field));
+  });
+
+  it('解析 skeletal-glb 时只补全可加载资产 URL，并保留动画与校验元数据', () => {
+    const manifest: RitualHandsManifest = {
+      ...common,
+      version: 2,
+      mode: 'skeletal-glb',
+      alphaMode: 'none',
+      model: '/models/rigged-hand.glb',
+      animationClip: 'Scene',
+      qualityStatus: 'final-approved',
+      backgroundAssetId: 'wenyao-paper-mountains-v1',
+      modelSha256: '32705e2ee2badc9df04886cc0705545d6640c34e927d4db67afff2802aec945e',
+    };
+
+    expect(resolveRitualHandsManifestUrls(manifest, 'https://app.test/ui/index.html')).toEqual({
+      ...manifest,
+      closedPoster: 'https://app.test/ui/closed.png',
+      openPoster: 'https://app.test/ui/open.png',
+      model: 'https://app.test/ui/models/rigged-hand.glb',
+    });
   });
 
   it('从 public manifest URL 加载并解析运行时视频清单', async () => {

@@ -64,6 +64,10 @@ button:focus-visible, input:focus-visible, textarea:focus-visible { outline: 2px
 .ink-hands-runtime { position: absolute; inset: -3%; z-index: 2; overflow: hidden; background: #ded7c9; pointer-events: none; }
 .ink-hands-runtime > img, .ink-hands-runtime > video { position: absolute; inset: 0; width: 100%; height: 100%; object-fit: cover; object-position: center; filter: saturate(.82) contrast(1.04); will-change: opacity; }
 .ink-hands-runtime__cover { position: absolute; z-index: 2; top: 26%; right: -8%; bottom: -8%; left: -8%; pointer-events: none; background-color: #171916; background-image: radial-gradient(ellipse at 50% 58%, #171916 0 34%, rgba(24,27,23,.99) 64%, rgba(36,38,32,.98) 100%); -webkit-mask-image: linear-gradient(to bottom, transparent 0, rgba(0,0,0,.46) 8%, #000 18%); mask-image: linear-gradient(to bottom, transparent 0, rgba(0,0,0,.46) 8%, #000 18%); filter: blur(8px); will-change: opacity; }
+.ink-hands-runtime--skeletal { inset: 0; z-index: 6; background: transparent !important; }
+.ink-hands-runtime--skeletal .ink-hands-runtime__cover, .ink-hands-runtime__state-proxy { display: none; }
+.ink-hand-canvas { position: absolute !important; inset: 0; z-index: 1; width: 100% !important; height: 100% !important; }
+.ink-hand-scene-loading { position: absolute; inset: 0; z-index: 1; background: radial-gradient(circle at 50% 62%, rgba(47,47,42,.08), transparent 34%); }
 .paper-vignette { position: absolute; inset: 0; z-index: 5; pointer-events: none; box-shadow: inset 0 0 150px rgba(28,25,20,.26); background: radial-gradient(circle at 50% 54%, transparent 0 24%, rgba(220,212,195,.04) 44%, rgba(211,203,188,.28) 86%); }
 .coin-accessible-results { position: absolute; z-index: 8; left: 50%; bottom: 165px; transform: translateX(-50%); display: flex; gap: 18px; }
 .coin-accessible-results span { width: 34px; height: 34px; display: grid; place-items: center; border: 1px solid rgba(54,44,29,.36); border-radius: 50%; background: rgba(229,220,198,.72); font: 13px var(--serif); }
@@ -72,8 +76,8 @@ button:focus-visible, input:focus-visible, textarea:focus-visible { outline: 2px
 .line-result span { color: #73736c; font-size: 12px; letter-spacing: .12em; }
 .ritual-confirm-slot { position: absolute; z-index: 9; left: 50%; bottom: 35px; transform: translateX(-50%); }
 .ritual-confirm { position: relative; margin: 0; transform: none; }
-.ritual-confirm-slot .ritual-confirm:hover:not(:disabled) { transform: translateY(-1px); }
-.ritual-confirm-slot .ritual-confirm:active:not(:disabled) { transform: translateY(0) scale(.99); }
+.ritual-confirm-slot .ritual-confirm:hover:not(:disabled) { transform: none; box-shadow: 0 15px 34px rgba(90,25,20,.24); }
+.ritual-confirm-slot .ritual-confirm:active:not(:disabled) { transform: none; box-shadow: 0 8px 20px rgba(90,25,20,.2); }
 .coin-static-fallback { position: absolute; z-index: 4; inset: 0; display: grid; place-items: center; pointer-events: none; }
 .coin-static-fallback__notice { position: absolute; top: 102px; color: #765f50; font: 11px var(--serif); letter-spacing: .08em; }
 .coin-static-fallback__coins { display: flex; gap: 24px; perspective: 700px; }
