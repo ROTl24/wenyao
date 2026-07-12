@@ -52,6 +52,7 @@ test('main startup loads canonical evidence fail-closed, migrates before Store a
   assert.ok(migrationCall >= 0, 'main must await raw migration');
   assert.ok(storeConstruction > migrationCall, 'Store must be constructed after migration');
   assert.match(main, /normalizeValidatedAnalysisReportV2:\s*domainRuntime\.normalizeValidatedAnalysisReportV2/);
+  assert.match(main, /domain:\s*domainRuntime,\s*\n\s*reportV2,/);
   assert.match(main, /evidenceCatalog,\s*\n\s*searchCorpus/);
   assert.match(main, /ruleIds:\s*Array\.isArray\(payload\.ruleIds\)\s*\?\s*payload\.ruleIds\s*:\s*\[\]/);
   assert.doesNotMatch(main, /function\s+(?:loadCorpus|hashCorpus)\b/);

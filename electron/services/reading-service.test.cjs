@@ -5,6 +5,7 @@ const os = require('node:os');
 const path = require('node:path');
 const test = require('node:test');
 const { createReadingService } = require('./reading-service.cjs');
+const reportV2Facade = require('./report-v2.cjs');
 const { JsonStore } = require('./store.cjs');
 
 const FIXED_NOW = '2026-07-12T02:00:00.000Z';
@@ -308,6 +309,7 @@ test('cloud analysis provider receives only model boundary and shares the exact 
   let providerInput;
   let expectedRaw;
   const { service } = harness(store, {
+    reportV2: reportV2Facade,
     cloudProviderConfigured: () => true,
     analyzeCloudV2: async (input) => {
       providerInput = input;

@@ -348,6 +348,18 @@ function createReadingService({
     ));
   }
 
+  async function responseSchemaFor(reportV2, kind) {
+    const directKey = kind === 'analysis' ? 'REPORT_V2_SCHEMA' : 'FOLLOW_UP_V2_SCHEMA';
+    const getterKey = kind === 'analysis' ? 'getReportV2Schema' : 'getFollowUpV2Schema';
+    if (isRecord(reportV2[directKey])) return reportV2[directKey];
+    if (typeof reportV2[getterKey] !== 'function') {
+      throw new Error(`ReadingService 缺少 ${directKey}`);
+    }
+    const schema = await Promise.resolve(reportV2[getterKey]());
+    if (!isRecord(schema)) throw new Error(`ReadingService ${directKey} 无效`);
+    return schema;
+  }
+
   async function buildAndPersist(session, clarification, expectedFactSetHash) {
     const tossValues = assertBuildableSession(session);
     const interaction = store.getInteractionFingerprint(session.id);
@@ -465,7 +477,7 @@ function createReadingService({
         providerResult = exactProviderResult(await analyzeCloudV2({
           modelContract: contract.modelContract,
           canonicalEvidence,
-          responseSchema: reportV2.REPORT_V2_SCHEMA,
+          responseSchema: await responseSchemaFor(reportV2, 'analysis'),
         }));
       } else {
         if (typeof reportV2.createLocalRawReportV2 !== 'function') {
@@ -538,7 +550,7 @@ function createReadingService({
           analysisReport: analysisBundle.report,
           canonicalEvidence,
           currentV2History: history,
-          responseSchema: reportV2.FOLLOW_UP_V2_SCHEMA,
+          responseSchema: await responseSchemaFor(reportV2, 'follow-up'),
         }));
       } else {
         if (typeof reportV2.createLocalRawFollowUpV2 !== 'function') {

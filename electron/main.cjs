@@ -9,6 +9,7 @@ const { registerReadingIpc } = require('./services/reading-ipc.cjs');
 const { sanitizeRendererSession } = require('./services/ipc-payload.cjs');
 const { analyzeCloudV2: analyzeCloudRawV2, followUpCloudV2: followUpCloudRawV2 } = require('./services/ai.cjs');
 const { loadEvidenceCatalog } = require('./services/evidence-catalog.cjs');
+const reportV2 = require('./services/report-v2.cjs');
 const { createAlibabaClient } = require('./services/alibaba.cjs');
 const { LocalVectorIndex } = require('./services/vector-index.cjs');
 const { hybridSearch } = require('./services/retrieval.cjs');
@@ -289,7 +290,7 @@ app.whenReady().then(async () => {
   readingService = createReadingService({
     store,
     domain: domainRuntime,
-    reportV2: domainRuntime,
+    reportV2,
     evidenceCatalog,
     searchCorpus,
     cloudProviderConfigured,
