@@ -10,6 +10,16 @@ async function createLocalRawReportV2(contract, canonicalEvidence = []) {
   return domain.createLocalRawReportV2(contract, canonicalEvidence);
 }
 
+async function createLocalRawFollowUpV2(contract) {
+  const domain = await domainPromise;
+  return domain.createLocalRawFollowUpV2(contract);
+}
+
+async function deriveFollowUpContentV2(validated) {
+  const domain = await domainPromise;
+  return domain.deriveFollowUpContentV2(validated);
+}
+
 async function validateAnalysisReportV2(raw, contract, canonicalEvidence, validatedAt) {
   const domain = await domainPromise;
   return domain.validateAnalysisReportV2(raw, contract, canonicalEvidence, validatedAt);
@@ -38,7 +48,9 @@ async function getFollowUpV2Schema() {
 module.exports = {
   createAnalysisRetrievalContextV2,
   createFactContractV2,
+  createLocalRawFollowUpV2,
   createLocalRawReportV2,
+  deriveFollowUpContentV2,
   getFollowUpV2Schema,
   getReportV2Schema,
   validateAnalysisReportV2,

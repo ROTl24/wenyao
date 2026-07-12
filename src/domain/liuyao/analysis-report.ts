@@ -159,12 +159,12 @@ export interface CanonicalEvidenceV2 {
   readonly id: string;
   readonly title: string;
   readonly source: string;
-  readonly sourceType: string;
+  readonly sourceType: 'original' | 'summary';
   readonly location: string;
   readonly text: string;
   readonly contentHash: string;
   readonly tags: readonly string[];
-  readonly knowledgeKind: string;
+  readonly knowledgeKind: 'rule' | 'case' | 'doctrine';
   readonly topics: readonly string[];
   readonly pageImage?: string;
   readonly supportsRuleIds: readonly string[];
@@ -180,6 +180,12 @@ export interface AnalysisRetrievalContextV2 {
 type StrictRecord = Record<string, unknown>;
 
 const REPORT_KEYS = new Set(['schemaVersion', 'caseHash', 'claims', 'uncertainties']);
+const VALIDATED_REPORT_KEYS = new Set([
+  'schemaVersion', 'caseHash', 'claims', 'uncertainties', 'validation',
+]);
+const VALIDATION_KEYS = new Set([
+  'status', 'factCheckPassed', 'citationCheckPassed', 'validatedAt',
+]);
 const CLAIM_KEYS = new Set([
   'id', 'section', 'text', 'factIds', 'ruleIds', 'evidenceIds', 'confidence',
 ]);
@@ -208,6 +214,14 @@ const CONFIDENCE_RANK: Readonly<Record<AnalysisConfidenceV2, number>> = {
   low: 0,
   medium: 1,
   high: 2,
+};
+const SECTION_DISPLAY_LABELS: Readonly<Record<AnalysisSectionV2, string>> = {
+  summary: '总览',
+  'use-god': '用神',
+  calendar: '日月时令',
+  moving: '动变',
+  synthesis: '综合判断',
+  guidance: '行动建议',
 };
 
 const PILLAR_LABELS = {
@@ -930,12 +944,12 @@ function assertEvidence(value: unknown, index: number): CanonicalEvidenceV2 {
     id: assertBoundedString(owned.id, `evidence[${index}].id`, EXTERNAL_ID_MAX, { externalId: true }),
     title: assertBoundedString(owned.title, `evidence[${index}].title`, 500),
     source: assertBoundedString(owned.source, `evidence[${index}].source`, 500),
-    sourceType: assertBoundedString(owned.sourceType, `evidence[${index}].sourceType`, 100),
+    sourceType: assertBoundedString(owned.sourceType, `evidence[${index}].sourceType`, 100) as CanonicalEvidenceV2['sourceType'],
     location: assertBoundedString(owned.location, `evidence[${index}].location`, 500),
     text: assertBoundedString(owned.text, `evidence[${index}].text`, 32_000),
     contentHash: assertBoundedString(owned.contentHash, `evidence[${index}].contentHash`, 64, { externalId: true }),
     tags: assertDenseUniqueStringArray(owned.tags, `evidence[${index}].tags`, 64, 256),
-    knowledgeKind: assertBoundedString(owned.knowledgeKind, `evidence[${index}].knowledgeKind`, 100),
+    knowledgeKind: assertBoundedString(owned.knowledgeKind, `evidence[${index}].knowledgeKind`, 100) as CanonicalEvidenceV2['knowledgeKind'],
     topics: assertDenseUniqueStringArray(owned.topics, `evidence[${index}].topics`, 64, 256),
     supportsRuleIds: assertDenseUniqueStringArray(
       owned.supportsRuleIds, `evidence[${index}].supportsRuleIds`, 256,
@@ -944,6 +958,8 @@ function assertEvidence(value: unknown, index: number): CanonicalEvidenceV2 {
       ? { pageImage: assertBoundedString(owned.pageImage, `evidence[${index}].pageImage`, 2000) }
       : {}),
   };
+  if (!['original', 'summary'].includes(result.sourceType)) fail(`evidence[${index}].sourceType 无效`);
+  if (!['rule', 'case', 'doctrine'].includes(result.knowledgeKind)) fail(`evidence[${index}].knowledgeKind 无效`);
   if (!CASE_HASH_RE.test(result.contentHash)) fail(`evidence[${index}].contentHash 无效`);
   return result;
 }
@@ -1975,6 +1991,41 @@ export function validateFollowUpV2(
 
 export const validateRawFollowUpV2 = validateFollowUpV2;
 
+function normalizeValidatedFollowUpForDisplay(value: unknown): ValidatedFollowUpV2 {
+  const owned = strictClone(value, 'ValidatedFollowUpV2');
+  if (!isPlainRecord(owned)) fail('ValidatedFollowUpV2 必须是普通对象');
+  assertExactKeys(owned, VALIDATED_REPORT_KEYS, 'ValidatedFollowUpV2');
+  const normalized = normalizeRaw({
+    schemaVersion: owned.schemaVersion,
+    caseHash: owned.caseHash,
+    claims: owned.claims,
+    uncertainties: owned.uncertainties,
+  }, { followUp: true });
+  if (!isPlainRecord(owned.validation)) fail('ValidatedFollowUpV2.validation 必须是普通对象');
+  assertExactKeys(owned.validation, VALIDATION_KEYS, 'ValidatedFollowUpV2.validation');
+  if (
+    owned.validation.status !== 'validated'
+    || owned.validation.factCheckPassed !== true
+    || owned.validation.citationCheckPassed !== true
+  ) fail('ValidatedFollowUpV2.validation 必须由 validator 标记为 validated');
+  return {
+    ...normalized,
+    validation: {
+      status: 'validated',
+      factCheckPassed: true,
+      citationCheckPassed: true,
+      validatedAt: assertExactUtcIso(owned.validation.validatedAt),
+    },
+  };
+}
+
+export function deriveFollowUpContentV2(validated: ValidatedFollowUpV2): string {
+  const owned = normalizeValidatedFollowUpForDisplay(validated);
+  return owned.claims.map((claim, index) => (
+    `### ${index + 1}. ${SECTION_DISPLAY_LABELS[claim.section]}\n${claim.text}`
+  )).join('\n\n');
+}
+
 function localClaim(
   id: string,
   section: AnalysisSectionV2,
@@ -2042,6 +2093,25 @@ function localUseGodClaim(contract: FactContractBundleV2): AnalysisClaimV2 {
     [selectionId, ...focusIds],
     useGod.primary.entity.type === 'hidden-spirit' ? 'low' : 'high',
   );
+}
+
+export function createLocalRawFollowUpV2(
+  contract: FactContractBundleV2,
+): RawFollowUpV2 {
+  const owned = strictClone(contract, 'FactContractBundleV2');
+  const raw: RawFollowUpV2 = {
+    schemaVersion: '2.0.0',
+    caseHash: owned.modelContract.caseHash,
+    claims: [localClaim(
+      'local:follow-up:system-notice',
+      'guidance',
+      '当前未配置云端解卦服务，暂不能生成针对当前记录的进一步判断；请配置服务后重试。',
+      [],
+      'low',
+    )],
+    uncertainties: [],
+  };
+  return deepFreeze(strictClone(raw, 'LocalRawFollowUpV2')) as RawFollowUpV2;
 }
 
 export function createLocalRawReportV2(

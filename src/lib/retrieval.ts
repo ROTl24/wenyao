@@ -24,8 +24,27 @@ export interface RankedEvidence extends EvidenceEntry {
   matchedTerms: string[];
 }
 
-export interface RetrievalDiagnostics {
+export interface RetrievalDiagnosticsV2 {
   mode: 'hybrid-reranked' | 'hybrid-fused' | 'lexical-fallback';
+  lexicalCandidates: number;
+  vectorCandidates: number;
+  fusedCandidates: number;
+  vectorUsed: boolean;
+  rerankUsed: boolean;
+  requestedRuleIds: readonly string[];
+  matchedRuleIds: readonly string[];
+  ruleCandidateIds: readonly string[];
+  ruleBoost: number;
+  warnings: readonly string[];
+}
+
+/**
+ * Transitional renderer-only diagnostics. New validated bundles must use the
+ * exact RetrievalDiagnosticsV2 shape; this legacy branch exists only until the
+ * browser preview migration in Task 10C is complete.
+ */
+export interface LegacyRetrievalDiagnostics {
+  mode: RetrievalDiagnosticsV2['mode'];
   lexicalCandidates: number;
   vectorCandidates: number;
   fusedCandidates: number;
@@ -33,6 +52,8 @@ export interface RetrievalDiagnostics {
   rerankUsed: boolean;
   warnings: string[];
 }
+
+export type RetrievalDiagnostics = RetrievalDiagnosticsV2 | LegacyRetrievalDiagnostics;
 
 const SUBJECT_TERMS = new Set([
   '事业', '功名', '官禄', '仕宦', '求名', '财运', '求财', '买卖',

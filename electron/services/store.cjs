@@ -2,6 +2,10 @@ const crypto = require('node:crypto');
 const fs = require('node:fs');
 const path = require('node:path');
 const { isDeepStrictEqual } = require('node:util');
+const {
+  assertAuthoritativeFollowUpPairV2,
+  assertValidatedAnalysisBundleV2,
+} = require('./bundle-v2.cjs');
 
 const DEFAULT_STATE = Object.freeze({ migrationVersion: 2, sessions: [], settings: {} });
 const RUNTIME_TRUST = new Set(['authoritative', 'browser-preview']);
@@ -138,12 +142,28 @@ function validCurrentToss(toss, confirmedCount) {
   return toss === undefined || validTossFields(toss, confirmedCount + 1, { confirmed: false });
 }
 
-function validAuthoritativeMessage(message, role) {
-  return isRecord(message)
-    && nonEmptyString(message.id)
-    && message.role === role
-    && nonEmptyString(message.content)
-    && nonEmptyString(message.createdAt);
+function authoritativeBundleOptions(options) {
+  if (
+    !isRecord(options)
+    || ![Object.prototype, null].includes(Object.getPrototypeOf(options))
+  ) throw new TypeError('权威 bundle 写入选项无效');
+  const keys = Reflect.ownKeys(options);
+  if (
+    keys.length !== 2
+    || keys.some((key) => (
+      typeof key !== 'string'
+      || !['expectedFactSetHash', 'expectedCorpusRef'].includes(key)
+    ))
+    || !Object.hasOwn(options, 'expectedFactSetHash')
+    || !Object.hasOwn(options, 'expectedCorpusRef')
+  ) throw new TypeError('权威 bundle 写入选项必须精确包含 expectedFactSetHash 与 expectedCorpusRef');
+  for (const key of keys) {
+    const descriptor = Object.getOwnPropertyDescriptor(options, key);
+    if (!descriptor || !descriptor.enumerable || !Object.hasOwn(descriptor, 'value')) {
+      throw new TypeError('权威 bundle 写入选项不得使用访问器或非枚举字段');
+    }
+  }
+  return options;
 }
 
 function compareRendererProgress(existing, input) {
@@ -183,10 +203,18 @@ function compareRendererProgress(existing, input) {
 }
 
 class JsonStore {
-  constructor(filePath, { fileSystem = fs, now = () => new Date() } = {}) {
+  constructor(filePath, {
+    fileSystem = fs,
+    now = () => new Date(),
+    deriveFollowUpContentV2,
+  } = {}) {
+    if (deriveFollowUpContentV2 !== undefined && typeof deriveFollowUpContentV2 !== 'function') {
+      throw new TypeError('deriveFollowUpContentV2 必须是函数');
+    }
     this.filePath = filePath;
     this.fileSystem = fileSystem;
     this.now = now;
+    this.deriveFollowUpContentV2 = deriveFollowUpContentV2;
     this.deletedSessionIds = new Set();
     this.fileSystem.mkdirSync(path.dirname(filePath), { recursive: true });
     this.state = this.#load();
@@ -348,12 +376,70 @@ class JsonStore {
       updatedAt: this.#nextTimestamp(session),
     };
     if (changedCase) {
+      delete next.analysisBundle;
       delete next.analysis;
       next.messages = [];
     }
     return this.#replaceSession(index, next);
   }
 
+  saveAuthoritativeAnalysisBundle(sessionId, bundle, options = {}) {
+    const { expectedFactSetHash, expectedCorpusRef } = authoritativeBundleOptions(options);
+    const { index, session } = this.#requireSession(sessionId);
+    this.#assertCaseHash(session, expectedFactSetHash);
+    const validatedBundle = assertValidatedAnalysisBundleV2(bundle, {
+      expectedCaseHash: expectedFactSetHash,
+      expectedCorpusRef,
+    });
+    const next = {
+      ...session,
+      analysisBundle: ownedClone(validatedBundle),
+      authoritativeRevision: Number(session.authoritativeRevision || 0) + 1,
+      updatedAt: this.#nextTimestamp(session),
+    };
+    delete next.analysis;
+    return this.#replaceSession(index, next);
+  }
+
+  appendAuthoritativeFollowUpPair(sessionId, messagePair, options = {}) {
+    const { expectedFactSetHash, expectedCorpusRef } = authoritativeBundleOptions(options);
+    const { index, session } = this.#requireSession(sessionId);
+    this.#assertCaseHash(session, expectedFactSetHash);
+    if (!isRecord(session.analysisBundle)) throw new Error('当前会话缺少 coherent analysisBundle');
+    assertValidatedAnalysisBundleV2(session.analysisBundle, {
+      expectedCaseHash: expectedFactSetHash,
+      expectedCorpusRef,
+    });
+    if (typeof this.deriveFollowUpContentV2 !== 'function') {
+      throw new Error('Store 未注入共享 deriveFollowUpContentV2 派生器');
+    }
+    const validatedPair = assertAuthoritativeFollowUpPairV2(messagePair, {
+      expectedCaseHash: expectedFactSetHash,
+      expectedCorpusRef,
+      deriveFollowUpContentV2: this.deriveFollowUpContentV2,
+    });
+
+    const existingMessages = Array.isArray(session.messages) ? session.messages : [];
+    const incomingIds = validatedPair.map((message) => message.id);
+    if (
+      new Set(incomingIds).size !== incomingIds.length
+      || incomingIds.some((id) => existingMessages.some((message) => message.id === id))
+    ) throw new Error('权威消息 ID 冲突');
+
+    const next = {
+      ...session,
+      messages: [...existingMessages, ...ownedClone(validatedPair)],
+      authoritativeRevision: Number(session.authoritativeRevision || 0) + 1,
+      updatedAt: this.#nextTimestamp(session),
+    };
+    return this.#replaceSession(index, next);
+  }
+
+  /**
+   * @deprecated Task 10C-2 transitional bridge for the not-yet-migrated
+   * ReadingService. It is main-process-only and must be deleted together with
+   * the legacy coordinator path in the next integration commit.
+   */
   saveAuthoritativeAnalysis(sessionId, analysis, { expectedFactSetHash } = {}) {
     const { index, session } = this.#requireSession(sessionId);
     this.#assertCaseHash(session, expectedFactSetHash);
@@ -367,6 +453,7 @@ class JsonStore {
     return this.#replaceSession(index, next);
   }
 
+  /** @deprecated Task 10C-2 transitional ReadingService bridge. */
   appendAuthoritativeMessage(sessionId, message, { expectedFactSetHash } = {}) {
     const { index, session } = this.#requireSession(sessionId);
     this.#assertCaseHash(session, expectedFactSetHash);
@@ -388,23 +475,27 @@ class JsonStore {
     return this.#replaceSession(index, next);
   }
 
+  /** @deprecated Task 10C-2 transitional ReadingService bridge. */
   appendAuthoritativeMessages(sessionId, messagePair, { expectedFactSetHash } = {}) {
     const { index, session } = this.#requireSession(sessionId);
     this.#assertCaseHash(session, expectedFactSetHash);
     if (
       !Array.isArray(messagePair)
       || messagePair.length !== 2
-      || !validAuthoritativeMessage(messagePair[0], 'user')
-      || !validAuthoritativeMessage(messagePair[1], 'assistant')
+      || !messagePair.every((message, index) => (
+        isRecord(message)
+        && nonEmptyString(message.id)
+        && message.role === (index === 0 ? 'user' : 'assistant')
+        && nonEmptyString(message.content)
+        && nonEmptyString(message.createdAt)
+      ))
     ) throw new TypeError('权威消息无效');
-
     const existingMessages = Array.isArray(session.messages) ? session.messages : [];
     const incomingIds = messagePair.map((message) => message.id);
     if (
       new Set(incomingIds).size !== incomingIds.length
       || incomingIds.some((id) => existingMessages.some((message) => message.id === id))
     ) throw new Error('权威消息 ID 冲突');
-
     const next = {
       ...session,
       messages: [...existingMessages, ...ownedClone(messagePair)],

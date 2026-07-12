@@ -3,7 +3,9 @@ import { describe, expect, it } from 'vitest';
 import {
   createAnalysisRetrievalContextV2,
   createFactContractV2,
+  createLocalRawFollowUpV2,
   createLocalRawReportV2,
+  deriveFollowUpContentV2,
   FOLLOW_UP_V2_SCHEMA,
   REPORT_V2_SCHEMA,
   validateAnalysisReportV2,
@@ -72,7 +74,7 @@ function canonicalEvidence(
     id,
     title: '规则证据',
     source: '测试语料',
-    sourceType: 'test',
+    sourceType: 'original',
     location: '第一节',
     text,
     contentHash: createHash('sha256').update(`${id}:${text}`, 'utf8').digest('hex'),
@@ -1285,6 +1287,54 @@ describe('analysis report v2 contract', () => {
 
     const poisonedEvidence = canonicalEvidence('evidence:poison', [], '绝不能复制到本地报告的正文标记');
     expect(JSON.stringify(createLocalRawReportV2(contract, [poisonedEvidence]))).not.toContain('绝不能复制');
+  });
+
+  it('builds one fact-free low-confidence local follow-up through the shared validator', () => {
+    const contract = createFactContractV2(buildCase());
+    const raw = createLocalRawFollowUpV2(contract);
+
+    expect(raw).toEqual({
+      schemaVersion: '2.0.0',
+      caseHash: contract.modelContract.caseHash,
+      claims: [{
+        id: 'local:follow-up:system-notice',
+        section: 'guidance',
+        text: '当前未配置云端解卦服务，暂不能生成针对当前记录的进一步判断；请配置服务后重试。',
+        factIds: [],
+        ruleIds: [],
+        evidenceIds: [],
+        confidence: 'low',
+      }],
+      uncertainties: [],
+    });
+    expect(isDeeplyFrozen(raw)).toBe(true);
+    expect(() => validateFollowUpV2(raw, contract, [], VALIDATED_AT)).not.toThrow();
+  });
+
+  it('derives the only display content from validated follow-up claim boundaries', () => {
+    const contract = createFactContractV2(buildCase());
+    const raw = createLocalRawFollowUpV2(contract);
+    const validated = validateFollowUpV2(raw, contract, [], VALIDATED_AT);
+
+    expect(deriveFollowUpContentV2(validated)).toBe(
+      '### 1. 行动建议\n当前未配置云端解卦服务，暂不能生成针对当前记录的进一步判断；请配置服务后重试。',
+    );
+    expect(() => deriveFollowUpContentV2({
+      ...validated,
+      content: '模型自由文本不得成为回答',
+    } as unknown as typeof validated)).toThrow(/额外字段|ValidatedFollowUpV2/);
+
+    const twoClaims = validateFollowUpV2({
+      ...raw,
+      claims: [
+        raw.claims[0],
+        { ...raw.claims[0], id: 'local:follow-up:second', text: '第二条经过校验的行动建议。' },
+      ],
+    }, contract, [], VALIDATED_AT);
+    expect(deriveFollowUpContentV2(twoClaims)).toBe(
+      '### 1. 行动建议\n当前未配置云端解卦服务，暂不能生成针对当前记录的进一步判断；请配置服务后重试。\n\n'
+      + '### 2. 行动建议\n第二条经过校验的行动建议。',
+    );
   });
 
   it('builds deterministic retrieval terms without a category lookup table', () => {

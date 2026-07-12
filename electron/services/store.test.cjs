@@ -1,4 +1,5 @@
 const assert = require('node:assert/strict');
+const crypto = require('node:crypto');
 const fs = require('node:fs');
 const os = require('node:os');
 const path = require('node:path');
@@ -7,6 +8,9 @@ const { JsonStore } = require('./store.cjs');
 
 const VALID_CATEGORY = 'career';
 const VALID_CAST_AT = '2026-07-12T00:00:00.000Z';
+const CASE_HASH = 'a'.repeat(64);
+const CHANGED_CASE_HASH = 'd'.repeat(64);
+const CORPUS_REF = Object.freeze({ version: 2, hash: 'b'.repeat(64) });
 
 function rendererSession(input = {}) {
   return {
@@ -71,21 +75,149 @@ function authoritativeCase(sessionId = 'session-1') {
     plate: { id: `plate:${sessionId}:v2`, sessionId, castAt: '2026-07-12T00:00:00.000Z' },
     useGod: { status: 'resolved' },
     facts: [{ id: 'fact-real' }],
-    factSetHash: 'fact-set-real',
+    factSetHash: CASE_HASH,
     builtAt: '2026-07-12T00:00:01.000Z',
   };
 }
 
-test('renderer session save cannot create or overwrite authoritative fields or messages', () => {
+function canonicalEvidence(overrides = {}) {
+  const text = overrides.text || '经过核验的规则说明。';
+  return {
+    id: 'evidence:rule-one',
+    title: '规则证据',
+    source: '测试语料',
+    sourceType: 'original',
+    location: '第一节',
+    text,
+    contentHash: crypto.createHash('sha256').update(text, 'utf8').digest('hex'),
+    tags: ['规则'],
+    knowledgeKind: 'rule',
+    topics: ['六爻'],
+    supportsRuleIds: ['rule:one'],
+    ...overrides,
+  };
+}
+
+function analysisClaim(section, index, overrides = {}) {
+  return {
+    id: `claim:${index}`,
+    section,
+    text: `第 ${index} 条经过校验的结论。`,
+    factIds: [`fact:${index}`],
+    ruleIds: [],
+    evidenceIds: [],
+    confidence: 'high',
+    ...overrides,
+  };
+}
+
+function validatedAnalysis(overrides = {}) {
+  return {
+    schemaVersion: '2.0.0',
+    caseHash: CASE_HASH,
+    claims: [
+      analysisClaim('summary', 1, { ruleIds: ['rule:one'], evidenceIds: ['evidence:rule-one'] }),
+      analysisClaim('use-god', 2),
+      analysisClaim('calendar', 3),
+      analysisClaim('moving', 4),
+      analysisClaim('synthesis', 5),
+      analysisClaim('guidance', 6, { factIds: [], confidence: 'low' }),
+    ],
+    uncertainties: [],
+    validation: {
+      status: 'validated',
+      factCheckPassed: true,
+      citationCheckPassed: true,
+      validatedAt: '2026-07-12T08:00:00.000Z',
+    },
+    ...overrides,
+  };
+}
+
+function retrievalDiagnostics(overrides = {}) {
+  return {
+    mode: 'lexical-fallback',
+    lexicalCandidates: 1,
+    vectorCandidates: 0,
+    fusedCandidates: 1,
+    vectorUsed: false,
+    rerankUsed: false,
+    requestedRuleIds: ['rule:one'],
+    matchedRuleIds: ['rule:one'],
+    ruleCandidateIds: ['evidence:rule-one'],
+    ruleBoost: 12,
+    warnings: ['本地向量索引尚未构建。'],
+    ...overrides,
+  };
+}
+
+function validAnalysisBundle(overrides = {}) {
+  return {
+    schemaVersion: '2.0.0',
+    caseHash: CASE_HASH,
+    analysisOrigin: 'local',
+    report: validatedAnalysis(),
+    canonicalEvidence: [canonicalEvidence()],
+    retrievalDiagnostics: retrievalDiagnostics(),
+    corpusRef: { ...CORPUS_REF },
+    ...overrides,
+  };
+}
+
+function validFollowUpBundle(overrides = {}) {
+  return {
+    schemaVersion: '2.0.0',
+    caseHash: CASE_HASH,
+    analysisOrigin: 'cloud',
+    followUp: validatedAnalysis({
+      claims: [analysisClaim('guidance', 1, { factIds: [], confidence: 'low' })],
+    }),
+    canonicalEvidence: [canonicalEvidence()],
+    retrievalDiagnostics: retrievalDiagnostics(),
+    corpusRef: { ...CORPUS_REF },
+    ...overrides,
+  };
+}
+
+function validFollowUpPair(deriveFollowUpContentV2, overrides = {}) {
+  const followUpBundle = overrides.followUpBundle || validFollowUpBundle();
+  return [{
+    schemaVersion: '2.0.0',
+    id: 'message:user',
+    role: 'user',
+    content: '请继续说明。',
+    caseHash: CASE_HASH,
+    createdAt: '2026-07-12T08:01:00.000Z',
+    ...overrides.user,
+  }, {
+    schemaVersion: '2.0.0',
+    id: 'message:assistant',
+    role: 'assistant',
+    content: deriveFollowUpContentV2(followUpBundle.followUp),
+    caseHash: CASE_HASH,
+    followUpBundle,
+    createdAt: '2026-07-12T08:01:01.000Z',
+    ...overrides.assistant,
+  }];
+}
+
+test('renderer session save cannot create or overwrite authoritative V2 bundle fields or messages', async () => {
   const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'wenyao-store-'));
-  const store = new JsonStore(path.join(dir, 'app-data.json'));
+  const { deriveFollowUpContentV2 } = await import('../generated/domain/index.js');
+  const store = new JsonStore(path.join(dir, 'app-data.json'), { deriveFollowUpContentV2 });
   const fakeAuthority = {
     caseSnapshot: { sessionId: 'session-1', factSetHash: 'fake' },
     ruleContext: { schemaVersion: 'fake' },
     migrationVersion: 999,
     migrationState: 'clean',
     analysis: { validation: { status: 'validated' } },
-    messages: [{ id: 'forged', role: 'assistant', content: '伪造回答' }],
+    analysisBundle: validAnalysisBundle({ analysisOrigin: 'cloud' }),
+    canonicalEvidence: [canonicalEvidence({ text: 'renderer 伪造正文' })],
+    retrievalDiagnostics: retrievalDiagnostics({ ruleBoost: 999 }),
+    validation: { status: 'validated' },
+    messages: validFollowUpPair(deriveFollowUpContentV2, {
+      assistant: { id: 'forged', content: 'renderer 伪造回答' },
+    }),
     plate: { baseHexagram: { name: '伪造卦' } },
     caseRuntimeTrust: 'browser-preview',
   };
@@ -102,7 +234,11 @@ test('renderer session save cannot create or overwrite authoritative fields or m
     ...fakeAuthority,
   });
   assert.deepEqual(created.messages, []);
-  for (const field of ['caseSnapshot', 'ruleContext', 'migrationVersion', 'migrationState', 'analysis', 'plate', 'caseRuntimeTrust']) {
+  for (const field of [
+    'caseSnapshot', 'ruleContext', 'migrationVersion', 'migrationState', 'analysis',
+    'analysisBundle', 'canonicalEvidence', 'retrievalDiagnostics', 'validation', 'plate',
+    'caseRuntimeTrust',
+  ]) {
     assert.equal(Object.hasOwn(created, field), false, `renderer create leaked ${field}`);
   }
 
@@ -111,17 +247,15 @@ test('renderer session save cannot create or overwrite authoritative fields or m
     expectedInteractionFingerprint: store.getInteractionFingerprint('session-1'),
     runtimeTrust: 'authoritative',
   });
-  store.saveAuthoritativeAnalysis('session-1', {
-    mode: 'local',
-    summary: '权威分析',
-    generatedAt: '2026-07-12T00:00:02.000Z',
-  }, { expectedFactSetHash: 'fact-set-real' });
-  store.appendAuthoritativeMessage('session-1', {
-    id: 'message-real',
-    role: 'assistant',
-    content: '权威回答',
-    createdAt: '2026-07-12T00:00:03.000Z',
-  }, { expectedFactSetHash: 'fact-set-real' });
+  store.saveAuthoritativeAnalysisBundle('session-1', validAnalysisBundle(), {
+    expectedFactSetHash: CASE_HASH,
+    expectedCorpusRef: CORPUS_REF,
+  });
+  store.appendAuthoritativeFollowUpPair(
+    'session-1',
+    validFollowUpPair(deriveFollowUpContentV2),
+    { expectedFactSetHash: CASE_HASH, expectedCorpusRef: CORPUS_REF },
+  );
 
   const delayed = store.saveRendererSession({
     id: 'session-1',
@@ -134,12 +268,14 @@ test('renderer session save cannot create or overwrite authoritative fields or m
     ...fakeAuthority,
   });
   assert.equal(delayed.question, '权威问题');
-  assert.equal(delayed.caseSnapshot.factSetHash, 'fact-set-real');
+  assert.equal(delayed.caseSnapshot.factSetHash, CASE_HASH);
   assert.deepEqual(delayed.ruleContext, realCase.ruleContext);
   assert.equal(delayed.migrationVersion, 2);
   assert.equal(delayed.migrationState, 'clean');
-  assert.equal(delayed.analysis.summary, '权威分析');
-  assert.deepEqual(delayed.messages.map((message) => message.id), ['message-real']);
+  assert.equal(delayed.analysis, undefined);
+  assert.equal(delayed.analysisBundle.report.claims[0].text, '第 1 条经过校验的结论。');
+  assert.deepEqual(delayed.messages.map((message) => message.id), ['message:user', 'message:assistant']);
+  assert.equal(delayed.messages[1].followUpBundle.corpusRef.hash, CORPUS_REF.hash);
   assert.equal(Object.hasOwn(delayed, 'plate'), false);
   assert.equal(delayed.caseRuntimeTrust, 'authoritative');
 });
@@ -175,9 +311,11 @@ test('authoritative case is identity-bound and advances the stored revision', ()
   assert.equal(saved.updatedAt >= '2026-07-12T00:00:05.000Z', true);
 });
 
-test('authoritative Case rebuild preserves conversation only for the same factSetHash', () => {
+test('authoritative Case rebuild preserves all analysis fields only for the same factSetHash', async () => {
   const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'wenyao-store-'));
-  const store = new JsonStore(path.join(dir, 'app-data.json'));
+  const filePath = path.join(dir, 'app-data.json');
+  const { deriveFollowUpContentV2 } = await import('../generated/domain/index.js');
+  let store = new JsonStore(filePath, { deriveFollowUpContentV2 });
   store.saveRendererSession(rendererSession({
     id: 'session-1', question: '权威问题', status: 'casting', tosses: [],
   }));
@@ -186,12 +324,23 @@ test('authoritative Case rebuild preserves conversation only for the same factSe
     expectedInteractionFingerprint: store.getInteractionFingerprint('session-1'),
     runtimeTrust: 'authoritative',
   });
-  store.saveAuthoritativeAnalysis('session-1', {
-    mode: 'local', summary: '旧分析', generatedAt: '2026-07-12T00:00:02.000Z',
-  }, { expectedFactSetHash: initialCase.factSetHash });
-  store.appendAuthoritativeMessage('session-1', {
-    id: 'old-user', role: 'user', content: '旧追问', createdAt: '2026-07-12T00:00:03.000Z',
-  }, { expectedFactSetHash: initialCase.factSetHash });
+  store.saveAuthoritativeAnalysisBundle('session-1', validAnalysisBundle(), {
+    expectedFactSetHash: initialCase.factSetHash,
+    expectedCorpusRef: CORPUS_REF,
+  });
+  store.appendAuthoritativeFollowUpPair(
+    'session-1', validFollowUpPair(deriveFollowUpContentV2), {
+      expectedFactSetHash: initialCase.factSetHash,
+      expectedCorpusRef: CORPUS_REF,
+    },
+  );
+
+  const persistedWithLegacy = JSON.parse(fs.readFileSync(filePath, 'utf8'));
+  persistedWithLegacy.sessions[0].analysis = {
+    mode: 'local', summary: '旧版隔离分析', generatedAt: '2026-07-12T00:00:02.000Z',
+  };
+  fs.writeFileSync(filePath, JSON.stringify(persistedWithLegacy), 'utf8');
+  store = new JsonStore(filePath, { deriveFollowUpContentV2 });
 
   const sameFacts = { ...structuredClone(initialCase), builtAt: '2026-07-12T00:00:04.000Z' };
   const sameSaved = store.saveAuthoritativeCase('session-1', sameFacts, {
@@ -199,22 +348,28 @@ test('authoritative Case rebuild preserves conversation only for the same factSe
     expectedFactSetHash: initialCase.factSetHash,
     runtimeTrust: 'authoritative',
   });
-  assert.equal(sameSaved.analysis.summary, '旧分析');
-  assert.deepEqual(sameSaved.messages.map((message) => message.id), ['old-user']);
+  assert.equal(sameSaved.analysis.summary, '旧版隔离分析');
+  assert.equal(sameSaved.analysisBundle.caseHash, initialCase.factSetHash);
+  assert.deepEqual(
+    sameSaved.messages.map((message) => message.id),
+    ['message:user', 'message:assistant'],
+  );
 
-  const changedFacts = { ...structuredClone(sameFacts), factSetHash: 'fact-set-reselected' };
+  const changedFacts = { ...structuredClone(sameFacts), factSetHash: CHANGED_CASE_HASH };
   const changedSaved = store.saveAuthoritativeCase('session-1', changedFacts, {
     expectedInteractionFingerprint: store.getInteractionFingerprint('session-1'),
     expectedFactSetHash: initialCase.factSetHash,
     runtimeTrust: 'authoritative',
   });
   assert.equal(changedSaved.analysis, undefined);
+  assert.equal(changedSaved.analysisBundle, undefined);
   assert.deepEqual(changedSaved.messages, []);
 });
 
-test('authoritative follow-up messages validate and commit as one atomic pair', () => {
+test('authoritative analysis bundle validates, deep-clones and commits in one revision', () => {
   const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'wenyao-store-'));
-  const store = new JsonStore(path.join(dir, 'app-data.json'));
+  const filePath = path.join(dir, 'app-data.json');
+  const store = new JsonStore(filePath);
   store.saveRendererSession(rendererSession({
     id: 'session-1', question: '权威问题', status: 'casting', tosses: [],
   }));
@@ -223,38 +378,169 @@ test('authoritative follow-up messages validate and commit as one atomic pair', 
     expectedInteractionFingerprint: store.getInteractionFingerprint('session-1'),
     runtimeTrust: 'authoritative',
   });
-  const user = {
-    id: 'pair-user', role: 'user', content: '原子追问', createdAt: '2026-07-12T00:00:03.000Z',
-  };
-  const invalidAssistant = {
-    id: 'pair-assistant', role: 'assistant', content: '', createdAt: '2026-07-12T00:00:04.000Z',
-  };
-  assert.throws(() => store.appendAuthoritativeMessages('session-1', [user, invalidAssistant], {
+  const withLegacy = store.saveAuthoritativeAnalysis('session-1', {
+    mode: 'local', summary: '即将被 V2 替代的旧报告', generatedAt: '2026-07-12T07:59:00.000Z',
+  }, { expectedFactSetHash: CASE_HASH });
+  const input = validAnalysisBundle();
+  const saved = store.saveAuthoritativeAnalysisBundle('session-1', input, {
     expectedFactSetHash: caseSnapshot.factSetHash,
-  }), /权威消息无效/);
+    expectedCorpusRef: CORPUS_REF,
+  });
+  assert.equal(withLegacy.authoritativeRevision, withCase.authoritativeRevision + 1);
+  assert.equal(saved.authoritativeRevision, withLegacy.authoritativeRevision + 1);
+  assert.equal(saved.analysis, undefined);
+  input.report.claims[0].text = '后续篡改';
+  input.canonicalEvidence[0].text = '后续伪造正文';
+  assert.equal(store.getSession('session-1').analysisBundle.report.claims[0].text, '第 1 条经过校验的结论。');
+  assert.equal(store.getSession('session-1').analysisBundle.canonicalEvidence[0].text, '经过核验的规则说明。');
+
+  const reloaded = new JsonStore(filePath).getSession('session-1');
+  assert.equal(reloaded.analysisBundle.report.claims[0].evidenceIds[0], 'evidence:rule-one');
+  assert.equal(reloaded.analysisBundle.canonicalEvidence[0].supportsRuleIds[0], 'rule:one');
+  assert.equal(reloaded.analysisBundle.retrievalDiagnostics.matchedRuleIds[0], 'rule:one');
+  assert.equal(reloaded.analysisBundle.corpusRef.hash, CORPUS_REF.hash);
+});
+
+test('invalid authoritative analysis bundles are zero-write across the failure matrix', () => {
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'wenyao-store-'));
+  const store = new JsonStore(path.join(dir, 'app-data.json'));
+  store.saveRendererSession(rendererSession({ id: 'session-1', question: '权威问题', tosses: [] }));
+  store.saveAuthoritativeCase('session-1', authoritativeCase(), {
+    expectedInteractionFingerprint: store.getInteractionFingerprint('session-1'),
+    runtimeTrust: 'authoritative',
+  });
+  store.saveAuthoritativeAnalysisBundle('session-1', validAnalysisBundle(), {
+    expectedFactSetHash: CASE_HASH,
+    expectedCorpusRef: CORPUS_REF,
+  });
+  store.saveAuthoritativeAnalysis('session-1', {
+    mode: 'local', summary: '失败时必须保留的旧报告', generatedAt: '2026-07-12T08:00:01.000Z',
+  }, { expectedFactSetHash: CASE_HASH });
+  const before = store.getSession('session-1');
+  assert.equal(before.analysis.summary, '失败时必须保留的旧报告');
+  assert.equal(before.analysisBundle.report.validation.status, 'validated');
+  const attempts = [
+    [{ ...validAnalysisBundle(), schemaVersion: '1.0.0' }, CASE_HASH, CORPUS_REF],
+    [{ ...validAnalysisBundle(), caseHash: CHANGED_CASE_HASH }, CASE_HASH, CORPUS_REF],
+    [validAnalysisBundle({
+      report: validatedAnalysis({ validation: { status: 'legacy-unverified' } }),
+    }), CASE_HASH, CORPUS_REF],
+    [validAnalysisBundle({ canonicalEvidence: [] }), CASE_HASH, CORPUS_REF],
+    [validAnalysisBundle(), CHANGED_CASE_HASH, CORPUS_REF],
+    [validAnalysisBundle(), CASE_HASH, { version: 2, hash: 'e'.repeat(64) }],
+    [validAnalysisBundle({
+      retrievalDiagnostics: retrievalDiagnostics({ injected: true }),
+    }), CASE_HASH, CORPUS_REF],
+  ];
+  for (const [bundle, expectedFactSetHash, expectedCorpusRef] of attempts) {
+    assert.throws(() => store.saveAuthoritativeAnalysisBundle('session-1', bundle, {
+      expectedFactSetHash,
+      expectedCorpusRef,
+    }), /Case|bundle|validation|证据|语料|corpus|额外|schemaVersion/);
+    assert.deepEqual(store.getSession('session-1'), before);
+  }
+});
+
+test('authoritative V2 follow-up requires a coherent analysis and appends exactly one atomic pair', async () => {
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'wenyao-store-'));
+  const filePath = path.join(dir, 'app-data.json');
+  const { deriveFollowUpContentV2 } = await import('../generated/domain/index.js');
+  const store = new JsonStore(filePath, { deriveFollowUpContentV2 });
+  store.saveRendererSession(rendererSession({ id: 'session-1', question: '权威问题', tosses: [] }));
+  const withCase = store.saveAuthoritativeCase('session-1', authoritativeCase(), {
+    expectedInteractionFingerprint: store.getInteractionFingerprint('session-1'),
+    runtimeTrust: 'authoritative',
+  });
+  const pair = validFollowUpPair(deriveFollowUpContentV2);
+
+  assert.throws(() => store.appendAuthoritativeFollowUpPair('session-1', pair, {
+    expectedFactSetHash: CASE_HASH,
+    expectedCorpusRef: CORPUS_REF,
+  }), /analysisBundle|分析/);
   assert.deepEqual(store.getSession('session-1').messages, []);
   assert.equal(store.getSession('session-1').authoritativeRevision, withCase.authoritativeRevision);
 
-  assert.throws(() => store.appendAuthoritativeMessages('session-1', [
-    user,
-    { ...invalidAssistant, id: user.id, content: '批内重复 ID' },
-  ], { expectedFactSetHash: caseSnapshot.factSetHash }), /权威消息 ID 冲突/);
-  assert.deepEqual(store.getSession('session-1').messages, []);
-
-  const assistant = { ...invalidAssistant, content: '原子回答' };
-  const saved = store.appendAuthoritativeMessages('session-1', [user, assistant], {
-    expectedFactSetHash: caseSnapshot.factSetHash,
+  const withAnalysis = store.saveAuthoritativeAnalysisBundle('session-1', validAnalysisBundle(), {
+    expectedFactSetHash: CASE_HASH,
+    expectedCorpusRef: CORPUS_REF,
   });
-  assert.deepEqual(saved.messages.map((message) => message.id), ['pair-user', 'pair-assistant']);
-  assert.equal(saved.authoritativeRevision, withCase.authoritativeRevision + 1);
+  const saved = store.appendAuthoritativeFollowUpPair('session-1', pair, {
+    expectedFactSetHash: CASE_HASH,
+    expectedCorpusRef: CORPUS_REF,
+  });
+  assert.deepEqual(saved.messages.map((message) => message.id), ['message:user', 'message:assistant']);
+  assert.equal(saved.authoritativeRevision, withAnalysis.authoritativeRevision + 1);
+  pair[0].content = '后续篡改';
+  pair[1].followUpBundle.followUp.claims[0].text = '后续篡改';
+  assert.equal(store.getSession('session-1').messages[0].content, '请继续说明。');
+  assert.equal(store.getSession('session-1').messages[1].followUpBundle.followUp.claims[0].text, '第 1 条经过校验的结论。');
 
-  assert.throws(() => store.appendAuthoritativeMessages('session-1', [
-    { ...user, id: 'new-user' },
-    { ...assistant, id: 'pair-assistant' },
-  ], { expectedFactSetHash: caseSnapshot.factSetHash }), /权威消息 ID 冲突/);
-  const afterConflict = store.getSession('session-1');
-  assert.deepEqual(afterConflict.messages.map((message) => message.id), ['pair-user', 'pair-assistant']);
-  assert.equal(afterConflict.authoritativeRevision, saved.authoritativeRevision);
+  const reloaded = new JsonStore(filePath, { deriveFollowUpContentV2 }).getSession('session-1');
+  assert.equal(reloaded.messages[1].followUpBundle.canonicalEvidence[0].supportsRuleIds[0], 'rule:one');
+  assert.equal(reloaded.messages[1].followUpBundle.retrievalDiagnostics.ruleCandidateIds[0], 'evidence:rule-one');
+  assert.equal(reloaded.messages[1].followUpBundle.corpusRef.hash, CORPUS_REF.hash);
+});
+
+test('authoritative V2 follow-up failure matrix leaves messages and revision unchanged', async () => {
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'wenyao-store-'));
+  const { deriveFollowUpContentV2 } = await import('../generated/domain/index.js');
+  const store = new JsonStore(path.join(dir, 'app-data.json'), { deriveFollowUpContentV2 });
+  store.saveRendererSession(rendererSession({ id: 'session-1', question: '权威问题', tosses: [] }));
+  store.saveAuthoritativeCase('session-1', authoritativeCase(), {
+    expectedInteractionFingerprint: store.getInteractionFingerprint('session-1'),
+    runtimeTrust: 'authoritative',
+  });
+  store.saveAuthoritativeAnalysisBundle('session-1', validAnalysisBundle(), {
+    expectedFactSetHash: CASE_HASH,
+    expectedCorpusRef: CORPUS_REF,
+  });
+  const before = store.getSession('session-1');
+  const malformed = validFollowUpPair(deriveFollowUpContentV2);
+  malformed[1].content = '模型自由文本';
+  const duplicateBatch = validFollowUpPair(deriveFollowUpContentV2, {
+    assistant: { id: 'message:user' },
+  });
+  const wrongBundleCorpus = validFollowUpPair(deriveFollowUpContentV2, {
+    followUpBundle: validFollowUpBundle({ corpusRef: { version: 2, hash: 'e'.repeat(64) } }),
+  });
+  const attempts = [
+    [malformed, CASE_HASH, CORPUS_REF],
+    [duplicateBatch, CASE_HASH, CORPUS_REF],
+    [validFollowUpPair(deriveFollowUpContentV2), CHANGED_CASE_HASH, CORPUS_REF],
+    [validFollowUpPair(deriveFollowUpContentV2), CASE_HASH, { version: 2, hash: 'e'.repeat(64) }],
+    [wrongBundleCorpus, CASE_HASH, CORPUS_REF],
+  ];
+  for (const [pair, expectedFactSetHash, expectedCorpusRef] of attempts) {
+    assert.throws(() => store.appendAuthoritativeFollowUpPair('session-1', pair, {
+      expectedFactSetHash,
+      expectedCorpusRef,
+    }), /Case|corpus|语料|ID|派生|content/);
+    assert.deepEqual(store.getSession('session-1'), before);
+  }
+
+  const first = validFollowUpPair(deriveFollowUpContentV2);
+  store.appendAuthoritativeFollowUpPair('session-1', first, {
+    expectedFactSetHash: CASE_HASH,
+    expectedCorpusRef: CORPUS_REF,
+  });
+  const afterFirst = store.getSession('session-1');
+  assert.throws(() => store.appendAuthoritativeFollowUpPair(
+    'session-1', validFollowUpPair(deriveFollowUpContentV2), {
+      expectedFactSetHash: CASE_HASH,
+      expectedCorpusRef: CORPUS_REF,
+    },
+  ), /ID 冲突/);
+  assert.deepEqual(store.getSession('session-1'), afterFirst);
+
+  store.deleteSession('session-1');
+  assert.throws(() => store.appendAuthoritativeFollowUpPair(
+    'session-1', validFollowUpPair(deriveFollowUpContentV2, {
+      user: { id: 'after-delete-user' }, assistant: { id: 'after-delete-assistant' },
+    }), {
+      expectedFactSetHash: CASE_HASH,
+      expectedCorpusRef: CORPUS_REF,
+    },
+  ), /会话已删除/);
 });
 
 function confirmedToss(id, lineIndex, value = 7) {
@@ -440,13 +726,18 @@ test('authoritative writes enforce interaction and Case compare-and-swap guards'
     runtimeTrust: 'authoritative',
   });
   assert.equal(saved.caseRuntimeTrust, 'authoritative');
-  assert.throws(() => store.saveAuthoritativeAnalysis('session-1', {
-    summary: '迟到分析',
-    generatedAt: '2026-07-12T00:00:03.000Z',
-  }, { expectedFactSetHash: 'stale-hash' }), /权威 Case 已变化/);
-  assert.throws(() => store.appendAuthoritativeMessage('session-1', {
-    id: 'stale-message', role: 'assistant', content: '迟到回答', createdAt: '2026-07-12T00:00:04.000Z',
-  }, { expectedFactSetHash: 'stale-hash' }), /权威 Case 已变化/);
+  assert.throws(() => store.saveAuthoritativeAnalysisBundle(
+    'session-1', validAnalysisBundle(), {
+      expectedFactSetHash: CHANGED_CASE_HASH,
+      expectedCorpusRef: CORPUS_REF,
+    },
+  ), /权威 Case 已变化/);
+  assert.throws(() => store.appendAuthoritativeFollowUpPair(
+    'session-1', [], {
+      expectedFactSetHash: CHANGED_CASE_HASH,
+      expectedCorpusRef: CORPUS_REF,
+    },
+  ), /权威 Case 已变化/);
 });
 
 test('corrupt JSON is a startup error instead of an empty-store fallback', () => {

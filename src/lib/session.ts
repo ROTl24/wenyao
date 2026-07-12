@@ -1,7 +1,11 @@
 import { buildPlate, type DivinationPlate, type Toss } from './divination';
 import type { DivinationCaseV2 } from '../domain/liuyao/model';
 import type { RuleContext } from '../domain/liuyao/rules/model';
-import type { AnalysisReport } from './types';
+import type {
+  AnalysisReport,
+  ValidatedAnalysisBundleV2,
+  ValidatedFollowUpBundleV2,
+} from './types';
 
 export type SessionCategory = 'career' | 'wealth' | 'relationship' | 'health' | 'study' | 'lost_item' | 'travel' | 'other';
 export type SessionStatus = 'casting' | 'complete';
@@ -40,13 +44,37 @@ export interface AdvanceCurrentTossTransaction {
   };
 }
 
-export interface ChatMessage {
+export interface LegacyChatMessage {
   id: string;
   role: 'user' | 'assistant';
   content: string;
   evidenceIds?: string[];
   createdAt: string;
+  schemaVersion?: never;
+  caseHash?: never;
+  followUpBundle?: never;
 }
+
+export interface UserChatMessageV2 {
+  readonly schemaVersion: '2.0.0';
+  readonly id: string;
+  readonly role: 'user';
+  readonly content: string;
+  readonly caseHash: string;
+  readonly createdAt: string;
+}
+
+export interface AssistantChatMessageV2 {
+  readonly schemaVersion: '2.0.0';
+  readonly id: string;
+  readonly role: 'assistant';
+  readonly content: string;
+  readonly caseHash: string;
+  readonly followUpBundle: ValidatedFollowUpBundleV2;
+  readonly createdAt: string;
+}
+
+export type ChatMessage = LegacyChatMessage | UserChatMessageV2 | AssistantChatMessageV2;
 
 export interface DivinationSession {
   id: string;
@@ -65,7 +93,9 @@ export interface DivinationSession {
   caseRuntimeTrust?: 'authoritative' | 'browser-preview';
   interactionRevision?: number;
   authoritativeRevision?: number;
+  /** Legacy quarantine only; never treat this field as a validated cache. */
   analysis?: AnalysisReport;
+  analysisBundle?: ValidatedAnalysisBundleV2;
   messages: ChatMessage[];
 }
 
