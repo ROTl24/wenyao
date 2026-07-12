@@ -512,7 +512,11 @@ it('covers the exact directional 5x5 element matrix', () => {
 });
 
 it('keeps overlapping branch matches and their authority metadata', () => {
-  expect(branchRelationMatches('寅', '亥', DEFAULT_RULE_CONTEXT.relationProfile))
+  const defaultYinHai = branchRelationMatches('寅', '亥', DEFAULT_RULE_CONTEXT.relationProfile);
+  expect(defaultYinHai).toEqual([
+    expect.objectContaining({ relation: 'combines', authority: 'structural', certainty: 'computed' }),
+  ]);
+  expect(branchRelationMatches('寅', '亥', LIUREN_SIX_BREAKS_AUDIT_PROFILE))
     .toEqual(expect.arrayContaining([
       expect.objectContaining({ relation: 'combines', authority: 'structural', certainty: 'computed' }),
       expect.objectContaining({ relation: 'breaks', authority: 'profile-dependent', certainty: 'disputed' }),
@@ -577,7 +581,7 @@ export function stableFacts(facts: readonly DerivedFact[]): readonly DerivedFact
 
 - [ ] **Step 6: 加入完整矩阵、门禁与稳定性测试**
 
-测试 12×12 矩阵：六合/六冲对称且 structural；六害对称但 profile-dependent；默认四破只命中四对并标 disputed；三刑按有向表输出，子卯双向、四自刑，不强行补全循环。专测寅亥、巳申、寅巳、辰辰多关系。测试 `m=0..6` 比较对公式、柱支而非柱干、transition 方向、深克隆/输入遍历顺序后的 fact ID 与顺序稳定、重复 ID 抛错、bundle hash/source 门禁失败。
+测试 12×12 矩阵：六合/六冲对称且 structural；六害对称但 profile-dependent；默认四破只命中四对并标 disputed；三刑按有向表输出，子卯双向、四自刑，不强行补全循环。专测默认寅亥仅合、六壬六破审计 profile 下寅亥合+破，以及巳申、寅巳、辰辰多关系。测试 `m=0..6` 比较对公式、柱支而非柱干、transition 方向、深克隆/输入遍历顺序后的 fact ID 与顺序稳定、重复 ID 抛错、bundle hash/source 门禁失败。
 
 关系 bundle 启用后，更新 `DEFAULT_RULE_CONTEXT.sources` 为两包来源并集；Plate gate 对自己的来源做子集核验，`buildPlateV2(DEFAULT_RULE_CONTEXT)` 继续通过，缺失或伪造 Task 3 必需来源仍拒绝。
 
