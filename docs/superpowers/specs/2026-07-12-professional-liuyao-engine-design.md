@@ -154,14 +154,38 @@ export interface RuleContext {
   };
   growthProfile: {
     id: 'five-element-forward_v1';
+    bundle: {
+      id: 'growth_shensha_core_v1';
+      version: '1.0.0';
+      artifactHash: string;
+    };
     earthFollows: 'water';
     display: 'all-twelve';
     interpretationWeight: 'sheng-wang-mu-jue-only';
   };
+  sixSpiritProfile: {
+    id: 'yehe-day-stem-six-spirit-v1';
+    bundle: {
+      id: 'growth_shensha_core_v1';
+      version: '1.0.0';
+      artifactHash: string;
+    };
+    source: 'day-stem';
+    target: 'base-lines-only';
+  };
   shenShaProfile: {
     id: 'yehe_limited_four_v1';
+    bundle: {
+      id: 'growth_shensha_core_v1';
+      version: '1.0.0';
+      artifactHash: string;
+    };
     enabled: readonly ['tianyi', 'lushen', 'yima', 'tianxi'];
     authority: 'secondary';
+    tianyiPolicy: 'zengshan-taiyi-day-stem-v1';
+    lushenPolicy: 'zengshan-day-stem-lushen-v1';
+    yimaPolicy: 'zengshan-day-branch-three-harmony-v1';
+    tianxiPolicy: 'zengshan-seasonal-month-branch-v1';
   };
   useGodProfile: {
     id: 'explicit_intent_first_v1';
@@ -356,6 +380,10 @@ export interface DerivedFact {
 基础地支关系分层：六合、六冲在默认关系包中是 `structural + computed`；六害是来源特定的 `profile-dependent + computed`；六破与三刑存在明确表法分歧，只能以命名 profile 输出 `profile-dependent + disputed`。默认六破仅取两份来源交集的子酉、丑辰、卯午、未戌四对；默认三刑采用来源明确的有向核心，不把 `申→寅`、`未→丑` 静默补成循环。一个支对同时命中合、破、刑、害时必须保留全部 facts。
 
 日月动变事实使用独立 `liuyao_effects_v1` bundle，不回写结构盘或关系 bundle。月令状态按“同支当令 → 同五行 → 月令生爻 → 未月火余气/丑月水余气 → 休囚”唯一分类；同时保留 `effectiveSupport`，月破与余气不能直接充当默认暗动生扶。旬空只据日柱作用于本卦六爻和真实化爻，其他三柱的旬空只展示。回头事实固定 `changed → base`，进退与化墓绝固定 `base → changed`。默认进退采用《增删卜易》七对表；《卜筮正宗》增加戌丑的一套必须另立审计 profile。默认反吟按本变化爻对应地支全冲、伏吟按对应地支全同且该内/外卦确有变化；方位卦反吟等其他表法不得混入默认 profile。
+
+十二长生、六神和受限神煞使用独立叶子 bundle `growth_shensha_core_v1`。十二长生只维护一张五行×十二支真值表；Task 5 的化墓、化绝必须调用同一个 `twelveStage`，effects bundle 依赖该 artifactHash，禁止再写第二套墓绝表。默认五行顺排，土从水；土起长生存在多种古法，因此土相关 facts 即使在已选 profile 下仍保留 `certainty='disputed'`。固定展示本变六爻对四柱的 48 条阶段事实，并为每个真实动爻补一条 transition 阶段事实；伏神不进入这 48 条。
+
+六神按日干从初爻到上爻排布，只输出本卦 6 条 `is-six-beast` facts，变卦同一行复用展示，不重复造事实。四项神煞只匹配本卦明爻：天乙（原文题名太乙）与禄神按日干，驿马按日支三合局，天喜按节令月支的春戌、夏丑、秋辰、冬未。逐月递进天喜、按年支起天喜及常见“甲戊庚牛羊”贵人表都作为禁用分歧 profile 保存，不能混入 `yehe_limited_four_v1`。神煞统一为 `secondary + conditional`，不能进入旺衰分数或单独定吉凶。
 
 ### 4.5 UseGodSelection
 

@@ -23,7 +23,7 @@
 
 - `回头生/回头克` 的方向以“化爻作用于原动爻”为准：原爻木、化爻水是回头生；原爻木、化爻金是回头克。不得把“原爻生化爻”误标为回头生。
 - `wenwang-najia-v2-review.md` 中的“双重复核”指两个相互独立的审阅代理针对最终同一规则表 artifact 分别核表并留下真实身份类型、独立运行 ID、日期、输入来源、artifact hash 与结论；不得伪写成人工专家复核。两次自动审阅一致时只标 `independent-automated + project-enabled`；只有真实人工底本复核后才标 `human-reviewed`。两次不能一致则保持 `fixture-only`，不能进入默认上下文。
-- `PlateV2` 只承载可复算结构：不预填十二长生、六神、六合/六冲或 `ruleContextHash`。十二长生与六神在 Task 6 生成 facts；Task 4 生成爻支之间的六合/六冲，Task 5 再生成卦级六合/六冲等 formations；`ruleContextHash` 在 Task 8 组装完整 Case 时计算。
+- `PlateV2` 只承载可复算结构：不预填十二长生、六神、六合/六冲或 `ruleContextHash`。十二长生与六神在 Task 6 生成 facts；Task 4 生成爻支之间的六合/六冲，Task 5 再生成卦级六合/六冲等 formations；`ruleContextHash` 在 Task 8 组装完整 Case 时计算。为让 Task 5 的化墓绝复用唯一长生真值，实际实施依赖顺序为 Task 4 → Task 6 → Task 5。
 - `yehe_core_v1` 对日冲采用保守分类：先始终输出结构性 `clashes`；只有月令同支、同五行或月令生爻且不存在月破时，才输出条件性 `is-dark-moving`；只有月破或月令克爻且没有任何已记录生扶时，才输出条件性 `is-day-break`；其余只保留日冲原始事实，不强判暗动或日破。这个阈值是产品 profile 对“旺相/休囚”的现代操作化，不得伪称古籍给出了同一算法。
 - 受限神煞的取法必须登记为：天乙贵人、禄神以日干起；驿马以日支三合局起；`yehe-seasonal-tianxi` 依月令季节取春戌、夏丑、秋辰、冬未。按年支起红鸾天喜属于另一星命 profile，不得混入。四项都只能输出 `secondary + conditional`，不得进入旺衰评分或单独定吉凶。
 - 事项类别不能替代问意。婚恋对象性别/角色、失物类型、代占行人身份等信息不足时必须 `needs-user-input`；Task 7 可扩充 `QuestionIntentId`，不得为满足旧联合类型而静默猜用神。
@@ -81,7 +81,7 @@ src/components/result/
   AnalysisReportV2.tsx
 ```
 
-迁移严格按任务 1→12 顺序执行。Task 3 的 PlateV2 依赖 Task 2 的 CalendarSnapshot，因此不并行合并。旧 `buildPlate` 在任务 8 的数据迁移通过前不能删除；旧 `CATEGORY_FOCUS` 在任务 10 的本地和云端报告都切到 V2 后一次删除。
+迁移依赖顺序固定为 Task 1→2→3→4→6→5→7→8→9→10→11→12；Task 6 是 Task 5 化墓绝的唯一长生真值前置，不是可交换的 UI 附件。旧 `buildPlate` 在任务 8 的数据迁移通过前不能删除；旧 `CATEGORY_FOCUS` 在任务 10 的本地和云端报告都切到 V2 后一次删除。
 
 ---
 
@@ -626,7 +626,7 @@ git commit -m "feat(domain): 建立可追溯六爻关系事实图"
 
 **执行前决议：**
 
-- 本任务新增独立 `liuyao_effects_v1` bundle，并绑定 Task 3 结构 artifactHash 与 Task 4 关系 artifactHash；不得修改两者 canonical payload。
+- 本任务新增独立 `liuyao_effects_v1` bundle，并绑定 Task 3 结构 artifactHash、Task 4 关系 artifactHash 与先行完成的 Task 6 `growth_shensha_core_v1` artifactHash；不得修改三者 canonical payload。化墓绝必须调用 Task 6 的 `twelveStage`，禁止在 effects 包复制墓绝表。
 - `RuleContext.relationProfile` 不再承载日冲强弱策略；新增 `effectsProfile` 固定默认月令、暗动日破、七对进退、土从水墓绝、受限三合成员与对应地支反伏口径。Plate gate 只核验自己消费的结构字段，不应因 effects/growth/shensha/useGod profile 增字段而失效。
 - 原始日支冲爻、transition 生克冲合均消费 Task 4 factId，不生成第二份。`values.basisFactIds` 以 code-unit 顺序固定。
 - 不生成单一旺衰分数，不让静态变卦 facet 冒充真实化爻，不把空破自动解释成吉凶。
@@ -674,7 +674,7 @@ Expected: FAIL，三个模块不存在。
 
 - [ ] **Step 4: 冻结 effects artifact 并完成双审**
 
-`effects-core-v1.ts` 的 canonical artifact 至少覆盖：依赖 hashes、月令唯一分类及余气表、默认暗动/日破门槛、七对与八对进退两套表、五行墓绝与土从水、四组三合和允许的三种成员模式、六合 8 卦/六冲 10 卦黄金表、对应地支反伏与方位卦反吟两套 profile、authority/certainty/sourceRefs/version。
+`effects-core-v1.ts` 的 canonical artifact 至少覆盖：三个依赖 hashes、月令唯一分类及余气表、默认暗动/日破门槛、七对与八对进退两套表、对 `twelveStage` 的墓绝派生策略、四组三合和允许的三种成员模式、六合 8 卦/六冲 10 卦黄金表、对应地支反伏与方位卦反吟两套 profile、authority/certainty/sourceRefs/version。
 
 来源绑定本地 `resources/corpus.json` 已定位的《增删卜易》《卜筮正宗》条目及固定 Wikisource 修订：四时旺相 `oldid=2100321`、日辰 `2100338`、六合三合 `2100447`、六冲 `2100449`、反伏 `2100458`、旬空 `2100460`、生旺墓绝 `2100461`。先保持 `unverified + fixture-only` 并复算 SHA-256，再由两个互不读对方结果的独立自动审阅核同一 hash；不得把电子转录或自动审阅冒充人工定本。
 
@@ -686,7 +686,7 @@ Expected: FAIL，三个模块不存在。
 
 - [ ] **Step 6: 实现方向明确的动变化事实**
 
-`moving-effects.ts` 只处理 `transition !== null`。回头生克冲合固定 `changed → base` 并引用 Task 4 basis fact；进退与化墓绝固定 `base → changed`。默认七进为亥→子、寅→卯、巳→午、申→酉、丑→辰、辰→未、未→戌，七退为反向；《卜筮正宗》增加戌→丑/丑→戌的八对表只在命名审计 profile 中出现。墓绝为木墓未绝申、火墓戌绝亥、金墓丑绝寅、水墓辰绝巳、土从水；土→巳必须同时保留化绝和可能的回头生。
+`moving-effects.ts` 只处理 `transition !== null`。回头生克冲合固定 `changed → base` 并引用 Task 4 basis fact；进退与化墓绝固定 `base → changed`。默认七进为亥→子、寅→卯、巳→午、申→酉、丑→辰、辰→未、未→戌，七退为反向；《卜筮正宗》增加戌→丑/丑→戌的八对表只在命名审计 profile 中出现。化墓绝逐项调用 Task 6 `twelveStage(baseElement, changedBranch)`；黄金期望为木墓未绝申、火墓戌绝亥、金墓丑绝寅、水墓辰绝巳、土从水，但 effects 源码不得再维护该表。土→巳必须同时保留化绝和可能的回头生。
 
 - [ ] **Step 7: 实现受限卦局而不做任意跨侧组合**
 
@@ -717,13 +717,30 @@ git commit -m "feat(domain): 派生日月动变与卦局条件事实"
 **Files:**
 - Create: `src/domain/liuyao/facts/growth-shensha.ts`
 - Create: `src/domain/liuyao/facts/growth-shensha.test.ts`
+- Create: `src/domain/liuyao/facts/growth-shensha-core-v1.ts`
+- Create: `src/domain/liuyao/facts/growth-shensha-registry.ts`
+- Create: `docs/domain/growth-shensha-core-v1-review.md`
+- Create: `docs/domain/reviews/growth-shensha-core-v1-review-a.md`
+- Create: `docs/domain/reviews/growth-shensha-core-v1-review-b.md`
+- Create: `scripts/review-growth-shensha-candidate.mjs`
+- Modify: `src/domain/liuyao/model.ts`
 - Modify: `src/domain/liuyao/facts/derive.ts`
-- Modify: `src/domain/liuyao/rules/tables.ts`
+- Modify: `src/domain/liuyao/rules/model.ts`
+- Modify: `src/domain/liuyao/rules/default-context.ts`
 - Modify: `src/domain/liuyao/rules/registry.ts`
+- Modify: `src/domain/liuyao/plate.test.ts`
+- Modify: `src/domain/liuyao/index.ts`
 
 **Interfaces:**
 - Consumes: 爻五行、四柱地支、动爻化支、`growthProfile/shenShaProfile`。
-- Produces: 全部 `is-growth-stage`、动爻化支长生、`is-six-beast` 与 `is-shen-sha` facts；不修改结构 Plate。
+- Produces: 独立受审 `growth_shensha_core_v1` artifact、唯一 `twelveStage`、全部 `is-growth-stage`、动爻化支长生、`is-six-beast` 与 `is-shen-sha` facts；不修改结构 Plate。
+
+**执行前决议：**
+
+- 本任务在实施顺序上先于 Task 5。Task 5 effects manifest 必须依赖本 artifactHash，化墓绝调用同一个 `twelveStage`；不得另建 `TOMB_BRANCH_BY_ELEMENT/ABSOLUTE_BRANCH_BY_ELEMENT`。
+- `growthProfile`、新增 `sixSpiritProfile`、`shenShaProfile` 指向同一个受审 bundle。六神不能塞入神煞 profile，也不能新建与 `SixSpirit` 重复的 `SixBeast` 类型。
+- Plate gate 只核验结构包与历法字段，不再比较它不消费的 relation/growth/sixSpirit/shenSha/useGod profile；各 bundle gate 分别核自己 profile 和来源子集。
+- 十二长生土从水是默认选择，不是跨流派共识；土相关 facts 保持 `profile-dependent + disputed`。天乙、天喜的替代表完整保存在 artifact variants 中，但默认 profile 只启用《增删卜易》本身口径。
 
 - [ ] **Step 1: 写五行×十二支轮转红灯测试**
 
@@ -745,9 +762,16 @@ it('covers exactly twelve distinct stages for every element', () => {
     expect(new Set(BRANCHES.map((branch) => twelveStage(element, branch, GROWTH_PROFILE))).size).toBe(12);
   }
 });
+
+it('keeps earth identical to water while marking the choice disputed', () => {
+  for (const branch of BRANCHES) {
+    expect(twelveStage('土', branch, GROWTH_PROFILE)).toBe(twelveStage('水', branch, GROWTH_PROFILE));
+  }
+  expect(deriveGrowthFacts(EARTH_FIXTURE).every(({ certainty }) => certainty === 'disputed')).toBe(true);
+});
 ```
 
-- [ ] **Step 2: 写神煞权限红灯测试**
+- [ ] **Step 2: 写六神和四项神煞精确红灯测试**
 
 ```ts
 it('emits only the configured four shen-sha as secondary facts', () => {
@@ -763,6 +787,12 @@ it('emits one six-beast fact per base line from the day stem', () => {
   expect(facts.every((fact) => fact.relation === 'is-six-beast')).toBe(true);
   expect(facts.every((fact) => fact.authority === 'secondary')).toBe(true);
 });
+
+it('uses the book-specific taiyi and seasonal tianxi profiles', () => {
+  expect(shenShaBranches({ id: 'tianyi', dayStem: '庚' }, PROFILE)).toEqual(['午', '寅']);
+  expect(shenShaBranches({ id: 'tianxi', monthBranch: '辰' }, PROFILE)).toEqual(['戌']);
+  expect(shenShaBranches({ id: 'tianxi', monthBranch: '巳' }, PROFILE)).toEqual(['丑']);
+});
 ```
 
 - [ ] **Step 3: 运行红灯**
@@ -770,21 +800,43 @@ it('emits one six-beast fact per base line from the day stem', () => {
 Run: `cmd /c npx vitest run src/domain/liuyao/facts/growth-shensha.test.ts`
 Expected: FAIL。
 
-- [ ] **Step 4: 实现完整展示、有限解释**
+- [ ] **Step 4: 冻结独立 artifact 并完成双审**
+
+`growth-shensha-core-v1.ts` canonical artifact 固定：
+
+1. 五行 5×12 长生矩阵：木起亥、火起寅、金起巳、水起申、土从水，统一顺排；并保留土生寅/申、阴阳顺逆等 dispute notes/variants。
+2. 六神按日干从初至上：甲乙青龙起、丙丁朱雀起、戊勾陈起、己螣蛇起、庚辛白虎起、壬癸玄武起；保留青龙/靑龍、螣蛇/滕蛇、玄武/元武异体映射。
+3. 天乙（原文题名太乙）：甲戊丑未、乙己子申、丙丁亥酉、庚辛午寅、壬癸卯巳；另存常见“甲戊庚牛羊”禁用 variant。
+4. 禄神：甲寅、乙卯、丙戊巳、丁己午、庚申、辛酉、壬亥、癸子；驿马：申子辰寅、巳酉丑亥、寅午戌申、亥卯未巳。
+5. 天喜默认按节令月支季节：寅卯辰→戌、巳午未→丑、申酉戌→辰、亥子丑→未；逐月递进和按年支起两套只留在禁用 variant。
+
+来源固定为《增删卜易》十二长生 `oldid=2100461`、六神 `oldid=2101727`、星煞章整书 `oldid=2572918`，并绑定本地 corpus 的对应条目/全书 SHA-256；《卜筮正宗》《易冒》《易隐》只作交叉与分歧来源。先生成 `unverified + fixture-only` 候选和 SHA-256，再让两个互不读取结果的独立自动审阅者核同一 hash；只允许 `independent-automated + project-enabled`，不得冒充人工。
+
+- [ ] **Step 5: 实现完整长生展示与唯一真值**
 
 `twelveStage` 完整返回 12 阶段；`is-growth-stage` facts 全部可供 UI 展示。默认 profile 只给长生、帝旺、墓、绝写入 `values.interpretationWeight = 'primary'`，其余写 `'display-only'`。这体现来源差异，不删除用户要求的十二长生。
 
-固定输出本卦六爻和变卦六爻分别对年/月/日/时四柱的 48 条长生 facts；每个动爻另输出一条 `scope='transition'` 的化支长生 fact。六神按日干起例输出 6 条 `is-six-beast` facts，和神煞同属辅助层，但使用不同 relation，不能混成神煞或写入 Plate。
+固定输出本卦六爻和变卦六爻分别对年/月/日/时四柱的 48 条长生 facts；计算是“爻五行在柱支所处阶段”，天干不参与。每个动爻另输出一条 `scope='transition'` 的化支长生 fact，以本爻五行为主体、化支为落点；伏神不进入固定 48 条。木火金水为 `profile-dependent + computed`，土为 `profile-dependent + disputed`。
 
-神煞规则按 profile 的 `enabled` 逐项计算，未启用项不运行。神煞 fact 的 `scope='auxiliary'`、`authority='secondary'`、`certainty='conditional'` 固定不可覆盖。
+- [ ] **Step 6: 实现六神与四项受限神煞**
 
-- [ ] **Step 5: 验证与提交**
+六神按日干起例输出本卦 6 条 `is-six-beast` facts，领域数组保持初爻→上爻；变卦 UI 复用同行，不重复造 6 条。source 是日柱，target 是本卦行，`scope='auxiliary' + authority='secondary' + certainty='computed'`。
 
-Run: `cmd /c npx vitest run src/domain/liuyao/facts/growth-shensha.test.ts src/domain/liuyao/plate.test.ts && npm run typecheck`
-Expected: PASS；固定盘有 48 条本变四柱长生 facts、每个动爻 1 条 transition 长生 fact、6 条六神 facts，Plate 无这些派生字段。
+神煞规则按 profile 的 `enabled` 逐项计算，未启用项不运行，只匹配本卦明爻；静态变卦、真实化爻与伏神都不生成神煞。天喜直接使用节令计算后的月柱支，不用公历月份。每个命中爻各生成一条 fact；`scope='auxiliary' + authority='secondary' + certainty='conditional'` 固定不可覆盖。
+
+- [ ] **Step 7: 加入矩阵、纯度、门禁和去重测试**
+
+测试至少覆盖：硬编码 5×12 长生 oracle 且每行 12 阶段全覆盖、土水逐格相同；固定盘恰好 48 条柱支长生和 `m` 条 transition；10 日干×6 爻六神矩阵且只输出 6 条；天乙 10 干各 2 支、禄神各 1 支、驿马 12 日支、天喜 12 月支完整表；庚辛贵人午寅而非牛羊、辰月天喜仍戌、巳月切丑；只命中 base 明爻；神煞不进入旺衰。测试 deep clone/输入顺序后的 ID 与顺序稳定、重复 ID、bundle hash/source/profile/manifest 门禁及 Plate gate 不消费其他 profile。
+
+加入 Task 5 前置契约测试：`twelveStage(element, branch)` 的墓/绝集合恰好 5+5；任何后续 effects 派生只能引用本函数和 bundle hash。
+
+- [ ] **Step 8: 验证与提交**
+
+Run: `cmd /c npx vitest run src/domain/liuyao/facts/growth-shensha.test.ts src/domain/liuyao/plate.test.ts && npm run build:domain && npm run typecheck`
+Expected: PASS；artifact/review/hash 可独立复算，固定盘有 48 条本变四柱长生 facts、每个动爻 1 条 transition 长生 fact、6 条六神 facts，Plate 无派生字段；Task 3/4 hashes 不变。
 
 ```bash
-git add src/domain/liuyao
+git add src/domain/liuyao docs/domain/growth-shensha-core-v1-review.md docs/domain/reviews/growth-shensha-core-v1-review-a.md docs/domain/reviews/growth-shensha-core-v1-review-b.md scripts/review-growth-shensha-candidate.mjs
 git commit -m "feat(domain): 展示十二长生并约束辅助神煞"
 ```
 
