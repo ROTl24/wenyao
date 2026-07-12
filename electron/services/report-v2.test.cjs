@@ -37,6 +37,8 @@ test('report-v2 is an async facade over the generated domain implementation', as
     followUpRaw, contract, [], '2026-07-12T08:00:00.000Z',
   );
   const followUpContent = await reportV2.deriveFollowUpContentV2(followUp);
+  const normalizedReport = await reportV2.normalizeValidatedAnalysisReportV2(validated);
+  const normalizedFollowUp = await reportV2.normalizeValidatedFollowUpV2(followUp);
   const followUpSchema = await reportV2.getFollowUpV2Schema();
 
   assert.equal(validated.validation.status, 'validated');
@@ -46,5 +48,7 @@ test('report-v2 is an async facade over the generated domain implementation', as
   assert.match(followUpContent, /^### 1\. 行动建议\n/);
   assert.equal(followUpSchema.schema.properties.claims.maxItems, 8);
   assert.equal(Object.hasOwn(followUpSchema.schema.properties, 'content'), false);
+  assert.equal(Object.isFrozen(normalizedReport.claims[0]), true);
+  assert.equal(Object.isFrozen(normalizedFollowUp.claims[0]), true);
   assert.equal(Object.isFrozen(validated), true);
 });

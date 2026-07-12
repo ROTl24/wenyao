@@ -1991,24 +1991,28 @@ export function validateFollowUpV2(
 
 export const validateRawFollowUpV2 = validateFollowUpV2;
 
-function normalizeValidatedFollowUpForDisplay(value: unknown): ValidatedFollowUpV2 {
-  const owned = strictClone(value, 'ValidatedFollowUpV2');
-  if (!isPlainRecord(owned)) fail('ValidatedFollowUpV2 必须是普通对象');
-  assertExactKeys(owned, VALIDATED_REPORT_KEYS, 'ValidatedFollowUpV2');
+function normalizeValidatedReportInternal(
+  value: unknown,
+  followUp: boolean,
+): AnalysisReportV2 {
+  const label = followUp ? 'ValidatedFollowUpV2' : 'AnalysisReportV2';
+  const owned = strictClone(value, label);
+  if (!isPlainRecord(owned)) fail(`${label} 必须是普通对象`);
+  assertExactKeys(owned, VALIDATED_REPORT_KEYS, label);
   const normalized = normalizeRaw({
     schemaVersion: owned.schemaVersion,
     caseHash: owned.caseHash,
     claims: owned.claims,
     uncertainties: owned.uncertainties,
-  }, { followUp: true });
-  if (!isPlainRecord(owned.validation)) fail('ValidatedFollowUpV2.validation 必须是普通对象');
-  assertExactKeys(owned.validation, VALIDATION_KEYS, 'ValidatedFollowUpV2.validation');
+  }, { followUp });
+  if (!isPlainRecord(owned.validation)) fail(`${label}.validation 必须是普通对象`);
+  assertExactKeys(owned.validation, VALIDATION_KEYS, `${label}.validation`);
   if (
     owned.validation.status !== 'validated'
     || owned.validation.factCheckPassed !== true
     || owned.validation.citationCheckPassed !== true
-  ) fail('ValidatedFollowUpV2.validation 必须由 validator 标记为 validated');
-  return {
+  ) fail(`${label}.validation 必须由 validator 标记为 validated`);
+  const report: AnalysisReportV2 = {
     ...normalized,
     validation: {
       status: 'validated',
@@ -2017,10 +2021,25 @@ function normalizeValidatedFollowUpForDisplay(value: unknown): ValidatedFollowUp
       validatedAt: assertExactUtcIso(owned.validation.validatedAt),
     },
   };
+  return deepFreeze(strictClone(report, label)) as AnalysisReportV2;
+}
+
+/**
+ * Rehydrates the exact validator-owned report shape. This is structural only:
+ * callers publishing or trusting a report must still obtain it from
+ * validateAnalysisReportV2 with the current Case contract and evidence.
+ */
+export function normalizeValidatedAnalysisReportV2(value: unknown): AnalysisReportV2 {
+  return normalizeValidatedReportInternal(value, false);
+}
+
+/** Structural rehydration counterpart for an already validated follow-up. */
+export function normalizeValidatedFollowUpV2(value: unknown): ValidatedFollowUpV2 {
+  return normalizeValidatedReportInternal(value, true);
 }
 
 export function deriveFollowUpContentV2(validated: ValidatedFollowUpV2): string {
-  const owned = normalizeValidatedFollowUpForDisplay(validated);
+  const owned = normalizeValidatedFollowUpV2(validated);
   return owned.claims.map((claim, index) => (
     `### ${index + 1}. ${SECTION_DISPLAY_LABELS[claim.section]}\n${claim.text}`
   )).join('\n\n');

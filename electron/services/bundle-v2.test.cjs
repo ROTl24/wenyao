@@ -5,6 +5,45 @@ const test = require('node:test');
 const CASE_HASH = 'a'.repeat(64);
 const CORPUS_REF = Object.freeze({ version: 2, hash: 'b'.repeat(64) });
 const VALIDATED_AT = '2026-07-12T08:00:00.000Z';
+let sharedDomain;
+
+test.before(async () => {
+  sharedDomain = await import('../generated/domain/index.js');
+});
+
+function analysisOptions(overrides = {}) {
+  return {
+    expectedCaseHash: CASE_HASH,
+    expectedCorpusRef: CORPUS_REF,
+    normalizeValidatedAnalysisReportV2: sharedDomain.normalizeValidatedAnalysisReportV2,
+    ...overrides,
+  };
+}
+
+function followUpOptions(overrides = {}) {
+  return {
+    expectedCaseHash: CASE_HASH,
+    expectedCorpusRef: CORPUS_REF,
+    normalizeValidatedFollowUpV2: sharedDomain.normalizeValidatedFollowUpV2,
+    ...overrides,
+  };
+}
+
+function pairOptions(overrides = {}) {
+  return {
+    ...followUpOptions(),
+    deriveFollowUpContentV2: sharedDomain.deriveFollowUpContentV2,
+    ...overrides,
+  };
+}
+
+function isDeeplyFrozen(value, seen = new Set()) {
+  if (value === null || typeof value !== 'object') return true;
+  if (seen.has(value)) return true;
+  seen.add(value);
+  return Object.isFrozen(value)
+    && Reflect.ownKeys(value).every((key) => isDeeplyFrozen(value[key], seen));
+}
 
 function evidence(overrides = {}) {
   const entry = {
@@ -114,24 +153,21 @@ function followUpBundle(overrides = {}) {
 test('analysis bundle validator accepts only one coherent exact V2 snapshot', () => {
   const { assertValidatedAnalysisBundleV2 } = require('./bundle-v2.cjs');
   const input = analysisBundle();
-  const validated = assertValidatedAnalysisBundleV2(input, {
-    expectedCaseHash: CASE_HASH,
-    expectedCorpusRef: CORPUS_REF,
-  });
+  const validated = assertValidatedAnalysisBundleV2(input, analysisOptions());
   input.report.claims[0].text = '后续篡改';
   input.canonicalEvidence[0].text = '后续伪造正文';
 
   assert.equal(validated.report.claims[0].text, '第 1 条经过校验的结论。');
   assert.equal(validated.canonicalEvidence[0].text, '经过核验的规则说明。');
   assert.notEqual(validated, input);
+  assert.equal(isDeeplyFrozen(validated), true);
+  assert.equal(Reflect.set(validated.report.claims[0], 'text', '校验后篡改'), false);
+  assert.equal(Reflect.set(validated.canonicalEvidence[0], 'text', '校验后伪造正文'), false);
 });
 
 test('analysis bundle validator fails closed for partial, extra, wrong hash/schema or unvalidated reports', () => {
   const { assertValidatedAnalysisBundleV2 } = require('./bundle-v2.cjs');
-  const validate = (value) => assertValidatedAnalysisBundleV2(value, {
-    expectedCaseHash: CASE_HASH,
-    expectedCorpusRef: CORPUS_REF,
-  });
+  const validate = (value) => assertValidatedAnalysisBundleV2(value, analysisOptions());
   const partial = analysisBundle();
   delete partial.report;
   assert.throws(() => validate(partial), /缺少|report/);
@@ -145,10 +181,7 @@ test('analysis bundle validator fails closed for partial, extra, wrong hash/sche
 
 test('analysis bundle validator rejects missing citations, unsupported rules and malformed evidence', () => {
   const { assertValidatedAnalysisBundleV2 } = require('./bundle-v2.cjs');
-  const validate = (value) => assertValidatedAnalysisBundleV2(value, {
-    expectedCaseHash: CASE_HASH,
-    expectedCorpusRef: CORPUS_REF,
-  });
+  const validate = (value) => assertValidatedAnalysisBundleV2(value, analysisOptions());
   assert.throws(() => validate(analysisBundle({ canonicalEvidence: [] })), /证据|evidence/);
   assert.throws(() => validate(analysisBundle({
     canonicalEvidence: [evidence({ supportsRuleIds: ['rule:other'] })],
@@ -166,10 +199,10 @@ test('analysis bundle validator rejects missing citations, unsupported rules and
 
 test('analysis bundle validator rejects bad corpus refs and non-exact diagnostics', () => {
   const { assertValidatedAnalysisBundleV2 } = require('./bundle-v2.cjs');
-  const validate = (value, expectedCorpusRef = CORPUS_REF) => assertValidatedAnalysisBundleV2(value, {
-    expectedCaseHash: CASE_HASH,
-    expectedCorpusRef,
-  });
+  const validate = (value, expectedCorpusRef = CORPUS_REF) => assertValidatedAnalysisBundleV2(
+    value,
+    analysisOptions({ expectedCorpusRef }),
+  );
   assert.throws(() => validate(analysisBundle({
     corpusRef: { version: 2, hash: 'd'.repeat(64) },
   })), /corpus|语料/);
@@ -192,6 +225,117 @@ test('analysis bundle validator rejects bad corpus refs and non-exact diagnostic
   assert.throws(() => validate(analysisBundle({
     retrievalDiagnostics: diagnostics({ vectorCandidates: 1 }),
   })), /vectorCandidates|vectorUsed/);
+  assert.throws(() => validate(analysisBundle({
+    retrievalDiagnostics: diagnostics({
+      mode: 'hybrid-reranked', lexicalCandidates: 0, fusedCandidates: 0, rerankUsed: true,
+      requestedRuleIds: [], matchedRuleIds: [], ruleCandidateIds: [],
+    }),
+    canonicalEvidence: [],
+    report: validatedReport({
+      claims: [
+        claim('summary', 1), claim('use-god', 2), claim('calendar', 3),
+        claim('moving', 4), claim('synthesis', 5),
+        claim('guidance', 6, { factIds: [], confidence: 'low' }),
+      ],
+    }),
+  })), /rerankUsed|fusedCandidates|候选/);
+  for (const [lexicalCandidates, vectorCandidates, fusedCandidates] of [
+    [3, 2, 2],
+    [3, 2, 6],
+  ]) {
+    assert.throws(() => validate(analysisBundle({
+      retrievalDiagnostics: diagnostics({
+        mode: 'hybrid-fused', lexicalCandidates, vectorCandidates, fusedCandidates,
+        vectorUsed: true,
+      }),
+    })), /fusedCandidates|lexicalCandidates|vectorCandidates/);
+  }
+  assert.throws(() => validate(analysisBundle({
+    canonicalEvidence: [evidence(), evidence({ id: 'evidence:extra', text: '额外证据。' })],
+    retrievalDiagnostics: diagnostics({ lexicalCandidates: 1, fusedCandidates: 1 }),
+  })), /canonicalEvidence|fusedCandidates|证据/);
+});
+
+test('analysis bundle validator accepts real retrieval count relationships including empty fallback', () => {
+  const { assertValidatedAnalysisBundleV2 } = require('./bundle-v2.cjs');
+  const hybrid = analysisBundle({
+    retrievalDiagnostics: diagnostics({
+      mode: 'hybrid-fused', lexicalCandidates: 3, vectorCandidates: 2,
+      fusedCandidates: 4, vectorUsed: true,
+    }),
+  });
+  assert.doesNotThrow(() => assertValidatedAnalysisBundleV2(hybrid, analysisOptions()));
+
+  const empty = analysisBundle({
+    canonicalEvidence: [],
+    retrievalDiagnostics: diagnostics({
+      lexicalCandidates: 0, vectorCandidates: 0, fusedCandidates: 0,
+      requestedRuleIds: [], matchedRuleIds: [], ruleCandidateIds: [], warnings: [],
+    }),
+    report: validatedReport({
+      claims: [
+        claim('summary', 1), claim('use-god', 2), claim('calendar', 3),
+        claim('moving', 4), claim('synthesis', 5),
+        claim('guidance', 6, { factIds: [], confidence: 'low' }),
+      ],
+    }),
+  });
+  assert.doesNotThrow(() => assertValidatedAnalysisBundleV2(empty, analysisOptions()));
+});
+
+test('analysis bundle validator accepts diagnostics emitted by the real hybrid retrieval port', async () => {
+  const { assertValidatedAnalysisBundleV2 } = require('./bundle-v2.cjs');
+  const { hybridSearch } = require('./retrieval.cjs');
+  const canonical = evidence();
+  const found = await hybridSearch({
+    corpus: [{
+      id: canonical.id,
+      title: canonical.title,
+      source: canonical.source,
+      location: canonical.location,
+      text: canonical.text,
+      tags: canonical.tags,
+      sourceType: canonical.sourceType,
+      knowledgeKind: canonical.knowledgeKind,
+      supportsRuleIds: canonical.supportsRuleIds,
+    }],
+    query: '经过核验的规则',
+    domainTerms: ['规则'],
+    ruleIds: ['rule:one'],
+    limit: 1,
+  });
+  assert.deepEqual(found.candidateRefs, [{ id: canonical.id, rank: 1 }]);
+  assert.doesNotThrow(() => assertValidatedAnalysisBundleV2(analysisBundle({
+    retrievalDiagnostics: found.diagnostics,
+  }), analysisOptions()));
+});
+
+test('analysis bundle validator rejects accessor and symbol dependency options without invoking them', () => {
+  const { assertValidatedAnalysisBundleV2 } = require('./bundle-v2.cjs');
+  let getterRead = false;
+  const accessorOptions = {
+    expectedCaseHash: CASE_HASH,
+    expectedCorpusRef: CORPUS_REF,
+  };
+  Object.defineProperty(accessorOptions, 'normalizeValidatedAnalysisReportV2', {
+    enumerable: true,
+    get() {
+      getterRead = true;
+      return sharedDomain.normalizeValidatedAnalysisReportV2;
+    },
+  });
+  assert.throws(
+    () => assertValidatedAnalysisBundleV2(analysisBundle(), accessorOptions),
+    /访问器|data|选项/,
+  );
+  assert.equal(getterRead, false);
+
+  const symbolOptions = analysisOptions();
+  symbolOptions[Symbol('forged')] = true;
+  assert.throws(
+    () => assertValidatedAnalysisBundleV2(analysisBundle(), symbolOptions),
+    /symbol|额外|选项/,
+  );
 });
 
 test('follow-up pair validator owns exact V2 messages and delegates display derivation', () => {
@@ -216,11 +360,10 @@ test('follow-up pair validator owns exact V2 messages and delegates display deri
     createdAt: '2026-07-12T08:01:01.000Z',
   }];
   const validated = assertAuthoritativeFollowUpPairV2(pair, {
-    expectedCaseHash: CASE_HASH,
-    expectedCorpusRef: CORPUS_REF,
+    ...followUpOptions(),
     deriveFollowUpContentV2(value) {
       deriveCalls += 1;
-      assert.deepEqual(value, followUp.followUp);
+      assert.equal(JSON.stringify(value), JSON.stringify(followUp.followUp));
       return derived;
     },
   });
@@ -230,6 +373,8 @@ test('follow-up pair validator owns exact V2 messages and delegates display deri
   assert.equal(deriveCalls, 1);
   assert.equal(validated[0].content, '请继续说明。');
   assert.equal(validated[1].followUpBundle.followUp.claims[0].text, '第 1 条经过校验的结论。');
+  assert.equal(isDeeplyFrozen(validated), true);
+  assert.equal(Reflect.set(validated[1], 'content', '校验后自由文本'), false);
 });
 
 test('follow-up pair validator rejects free text, wrong roles, times, hashes and malformed bundles', () => {
@@ -242,11 +387,10 @@ test('follow-up pair validator rejects free text, wrong roles, times, hashes and
     schemaVersion: '2.0.0', id: 'assistant-id', role: 'assistant', content: derived,
     caseHash: CASE_HASH, followUpBundle: followUpBundle(), createdAt: '2026-07-12T08:01:01.000Z',
   }];
-  const validate = (value, derive = () => derived) => assertAuthoritativeFollowUpPairV2(value, {
-    expectedCaseHash: CASE_HASH,
-    expectedCorpusRef: CORPUS_REF,
-    deriveFollowUpContentV2: derive,
-  });
+  const validate = (value, derive = () => derived) => assertAuthoritativeFollowUpPairV2(
+    value,
+    pairOptions({ deriveFollowUpContentV2: derive }),
+  );
   const freeText = pair();
   freeText[1].content = '模型自由文本';
   assert.throws(() => validate(freeText), /派生|content/);
@@ -266,4 +410,14 @@ test('follow-up pair validator rejects free text, wrong roles, times, hashes and
   malformed[1].followUpBundle.followUp.validation.factCheckPassed = false;
   assert.throws(() => validate(malformed), /validation|validated/);
   assert.throws(() => validate(pair(), null), /deriveFollowUpContentV2|派生/);
+
+  const accessorOptions = pairOptions();
+  Object.defineProperty(accessorOptions, 'deriveFollowUpContentV2', {
+    enumerable: true,
+    get: () => sharedDomain.deriveFollowUpContentV2,
+  });
+  assert.throws(() => assertAuthoritativeFollowUpPairV2(pair(), accessorOptions), /访问器|data|选项/);
+  const symbolOptions = pairOptions();
+  symbolOptions[Symbol('forged')] = true;
+  assert.throws(() => assertAuthoritativeFollowUpPairV2(pair(), symbolOptions), /symbol|额外|选项/);
 });

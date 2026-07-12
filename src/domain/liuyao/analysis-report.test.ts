@@ -7,6 +7,8 @@ import {
   createLocalRawReportV2,
   deriveFollowUpContentV2,
   FOLLOW_UP_V2_SCHEMA,
+  normalizeValidatedAnalysisReportV2,
+  normalizeValidatedFollowUpV2,
   REPORT_V2_SCHEMA,
   validateAnalysisReportV2,
   validateFollowUpV2,
@@ -1335,6 +1337,36 @@ describe('analysis report v2 contract', () => {
       '### 1. 行动建议\n当前未配置云端解卦服务，暂不能生成针对当前记录的进一步判断；请配置服务后重试。\n\n'
       + '### 2. 行动建议\n第二条经过校验的行动建议。',
     );
+  });
+
+  it('owns, strictly normalizes and deeply freezes validated analysis/follow-up shapes', () => {
+    const contract = createFactContractV2(buildCase());
+    const reportInput = structuredClone(validateAnalysisReportV2(
+      createLocalRawReportV2(contract), contract, [], VALIDATED_AT,
+    )) as unknown as { claims: Array<{ text: string }> };
+    const report = normalizeValidatedAnalysisReportV2(reportInput);
+    reportInput.claims[0].text = '归一化后篡改';
+
+    expect(report.claims[0].text).not.toBe('归一化后篡改');
+    expect(isDeeplyFrozen(report)).toBe(true);
+    expect(() => normalizeValidatedAnalysisReportV2({
+      ...report,
+      extra: true,
+    })).toThrow(/额外字段/);
+
+    const followUpInput = structuredClone(validateFollowUpV2(
+      createLocalRawFollowUpV2(contract), contract, [], VALIDATED_AT,
+    )) as unknown as { claims: Array<{ text: string }> };
+    const followUp = normalizeValidatedFollowUpV2(followUpInput);
+    followUpInput.claims[0].text = '归一化后篡改';
+
+    expect(followUp.claims[0].text).not.toBe('归一化后篡改');
+    expect(isDeeplyFrozen(followUp)).toBe(true);
+    expect(() => normalizeValidatedFollowUpV2({
+      ...followUp,
+      validation: { ...followUp.validation, factCheckPassed: false },
+    })).toThrow(/validation|validated/);
+    expect(() => normalizeValidatedAnalysisReportV2(followUp)).toThrow(/claims 数量|缺少.*section/);
   });
 
   it('builds deterministic retrieval terms without a category lookup table', () => {

@@ -2,8 +2,6 @@ const crypto = require('node:crypto');
 
 const HASH_RE = /^[0-9a-f]{64}$/;
 const CONTROL_RE = /[\u0000-\u001f\u007f]/u;
-const SECTIONS = new Set(['summary', 'use-god', 'calendar', 'moving', 'synthesis', 'guidance']);
-const CONFIDENCE = new Set(['high', 'medium', 'low']);
 const MODES = new Set(['hybrid-reranked', 'hybrid-fused', 'lexical-fallback']);
 const ORIGINS = new Set(['local', 'cloud']);
 const ANALYSIS_BUNDLE_KEYS = [
@@ -14,9 +12,6 @@ const FOLLOW_UP_BUNDLE_KEYS = [
   'schemaVersion', 'caseHash', 'analysisOrigin', 'followUp', 'canonicalEvidence',
   'retrievalDiagnostics', 'corpusRef',
 ];
-const REPORT_KEYS = ['schemaVersion', 'caseHash', 'claims', 'uncertainties', 'validation'];
-const CLAIM_KEYS = ['id', 'section', 'text', 'factIds', 'ruleIds', 'evidenceIds', 'confidence'];
-const VALIDATION_KEYS = ['status', 'factCheckPassed', 'citationCheckPassed', 'validatedAt'];
 const EVIDENCE_REQUIRED_KEYS = [
   'id', 'title', 'source', 'sourceType', 'location', 'text', 'contentHash',
   'tags', 'knowledgeKind', 'topics', 'supportsRuleIds',
@@ -39,6 +34,13 @@ function isPlainRecord(value) {
   if (value === null || typeof value !== 'object' || Array.isArray(value)) return false;
   const prototype = Object.getPrototypeOf(value);
   return prototype === Object.prototype || prototype === null;
+}
+
+function deepFreeze(value, seen = new Set()) {
+  if (!value || (typeof value !== 'object' && typeof value !== 'function') || seen.has(value)) return value;
+  seen.add(value);
+  for (const key of Reflect.ownKeys(value)) deepFreeze(value[key], seen);
+  return Object.freeze(value);
 }
 
 function strictClone(value, label = '输入', ancestors = new Set()) {
@@ -100,6 +102,19 @@ function assertExactKeys(value, required, optional = [], label = '对象') {
   }
 }
 
+function assertDataOptions(options, required, label) {
+  if (!isPlainRecord(options)) fail(`${label}必须是普通对象`);
+  assertExactKeys(options, required, [], label);
+  for (const key of Reflect.ownKeys(options)) {
+    if (typeof key !== 'string') fail(`${label}不得含 symbol 字段`);
+    const descriptor = Object.getOwnPropertyDescriptor(options, key);
+    if (!descriptor || !descriptor.enumerable || !Object.hasOwn(descriptor, 'value')) {
+      fail(`${label}.${key} 不得使用访问器或非枚举字段，必须是 data 字段`);
+    }
+    if (descriptor.value === undefined) fail(`${label}.${key} 不得为 undefined`);
+  }
+}
+
 function assertString(value, label, maximum, { id = false } = {}) {
   if (typeof value !== 'string') fail(`${label} 必须是字符串`);
   if (!value || value !== value.trim()) fail(`${label} 必须是无首尾空白的非空字符串`);
@@ -138,68 +153,23 @@ function assertCorpusRefV2(value, label = 'corpusRef') {
   assertExactKeys(owned, ['version', 'hash'], [], label);
   if (!Number.isSafeInteger(owned.version) || owned.version < 1) fail(`${label}.version 必须是正安全整数`);
   assertHash(owned.hash, `${label}.hash`);
-  return owned;
+  return deepFreeze(owned);
 }
 
 function corpusRefsEqual(left, right) {
   return left.version === right.version && left.hash === right.hash;
 }
 
-function assertExpectedBoundary(options) {
-  if (!isPlainRecord(options)) fail('校验选项必须是普通对象');
-  assertExactKeys(options, ['expectedCaseHash', 'expectedCorpusRef'], [], '校验选项');
+function assertExpectedBoundary(options, normalizerKey) {
+  assertDataOptions(
+    options,
+    ['expectedCaseHash', 'expectedCorpusRef', normalizerKey],
+    '校验选项',
+  );
+  if (typeof options[normalizerKey] !== 'function') fail(`${normalizerKey} 共享归一化器无效`);
   const expectedCaseHash = assertHash(options.expectedCaseHash, 'expectedCaseHash');
   const expectedCorpusRef = assertCorpusRefV2(options.expectedCorpusRef, 'expectedCorpusRef');
-  return { expectedCaseHash, expectedCorpusRef };
-}
-
-function assertClaim(value, index) {
-  assertExactKeys(value, CLAIM_KEYS, [], `claims[${index}]`);
-  const id = assertString(value.id, `claims[${index}].id`, 64, { id: true });
-  if (!SECTIONS.has(value.section)) fail(`claims[${index}].section 无效`);
-  const text = assertString(value.text, `claims[${index}].text`, 1200);
-  if (!CONFIDENCE.has(value.confidence)) fail(`claims[${index}].confidence 无效`);
-  return {
-    id,
-    section: value.section,
-    text,
-    factIds: assertStringArray(value.factIds, `claims[${index}].factIds`, 16),
-    ruleIds: assertStringArray(value.ruleIds, `claims[${index}].ruleIds`, 16),
-    evidenceIds: assertStringArray(value.evidenceIds, `claims[${index}].evidenceIds`, 8),
-    confidence: value.confidence,
-  };
-}
-
-function assertValidatedReport(value, { expectedCaseHash, followUp }) {
-  assertExactKeys(value, REPORT_KEYS, [], followUp ? 'followUp' : 'report');
-  if (value.schemaVersion !== '2.0.0') fail(`${followUp ? 'followUp' : 'report'}.schemaVersion 无效`);
-  assertHash(value.caseHash, `${followUp ? 'followUp' : 'report'}.caseHash`);
-  if (value.caseHash !== expectedCaseHash) fail(`${followUp ? 'followUp' : 'report'}.caseHash 与 bundle 不一致`);
-  if (!Array.isArray(value.claims)) fail('claims 必须是数组');
-  const minimum = followUp ? 1 : 6;
-  const maximum = followUp ? 8 : 24;
-  if (value.claims.length < minimum || value.claims.length > maximum) fail(`claims 数量必须为 ${minimum}–${maximum}`);
-  const claims = value.claims.map(assertClaim);
-  if (new Set(claims.map(({ id }) => id)).size !== claims.length) fail('claim ID 不得重复');
-  if (!followUp) {
-    for (const section of SECTIONS) {
-      if (!claims.some((claim) => claim.section === section)) fail(`report 缺少 ${section} section`);
-    }
-  }
-  const uncertainties = assertStringArray(value.uncertainties, 'uncertainties', 12, 500);
-  assertExactKeys(value.validation, VALIDATION_KEYS, [], 'validation');
-  if (
-    value.validation.status !== 'validated'
-    || value.validation.factCheckPassed !== true
-    || value.validation.citationCheckPassed !== true
-  ) fail('validation 必须由 validator 标记为 validated');
-  const validation = {
-    status: 'validated',
-    factCheckPassed: true,
-    citationCheckPassed: true,
-    validatedAt: assertExactIso(value.validation.validatedAt, 'validation.validatedAt'),
-  };
-  return { schemaVersion: '2.0.0', caseHash: value.caseHash, claims, uncertainties, validation };
+  return { expectedCaseHash, expectedCorpusRef, normalizeValidatedReport: options[normalizerKey] };
 }
 
 function assertEvidence(value, index) {
@@ -270,6 +240,15 @@ function assertDiagnostics(value, evidenceById) {
   if (value.vectorUsed !== (vectorCandidates > 0)) {
     fail('retrievalDiagnostics.vectorUsed 与 vectorCandidates 不一致');
   }
+  if (value.rerankUsed && fusedCandidates === 0) {
+    fail('retrievalDiagnostics.rerankUsed 需要至少一个 fusedCandidates 候选');
+  }
+  if (
+    fusedCandidates < Math.max(lexicalCandidates, vectorCandidates)
+    || fusedCandidates > lexicalCandidates + vectorCandidates
+  ) {
+    fail('retrievalDiagnostics.fusedCandidates 与 lexicalCandidates/vectorCandidates 集合关系不一致');
+  }
   return {
     mode: value.mode,
     lexicalCandidates,
@@ -304,7 +283,10 @@ function assertCitationCoherence(report, canonicalEvidence) {
 }
 
 function assertBundle(value, options, { followUp }) {
-  const boundary = assertExpectedBoundary(options);
+  const normalizerKey = followUp
+    ? 'normalizeValidatedFollowUpV2'
+    : 'normalizeValidatedAnalysisReportV2';
+  const boundary = assertExpectedBoundary(options, normalizerKey);
   const owned = strictClone(value, followUp ? 'ValidatedFollowUpBundleV2' : 'ValidatedAnalysisBundleV2');
   assertExactKeys(
     owned,
@@ -316,19 +298,22 @@ function assertBundle(value, options, { followUp }) {
   assertHash(owned.caseHash, 'bundle.caseHash');
   if (owned.caseHash !== boundary.expectedCaseHash) fail('bundle.caseHash 与当前 Case 不一致');
   if (!ORIGINS.has(owned.analysisOrigin)) fail('bundle.analysisOrigin 无效');
-  const report = assertValidatedReport(owned[followUp ? 'followUp' : 'report'], {
-    expectedCaseHash: owned.caseHash,
-    followUp,
-  });
+  const report = boundary.normalizeValidatedReport(owned[followUp ? 'followUp' : 'report']);
+  if (!isPlainRecord(report)) fail(`${normalizerKey} 未返回普通对象`);
+  assertHash(report.caseHash, `${followUp ? 'followUp' : 'report'}.caseHash`);
+  if (report.caseHash !== owned.caseHash) fail(`${followUp ? 'followUp' : 'report'}.caseHash 与 bundle 不一致`);
   if (!Array.isArray(owned.canonicalEvidence)) fail('canonicalEvidence 必须是数组');
   if (owned.canonicalEvidence.length > 100) fail('canonicalEvidence 超过数量上限');
   const canonicalEvidence = owned.canonicalEvidence.map(assertEvidence);
   assertCitationCoherence(report, canonicalEvidence);
   const evidenceById = new Map(canonicalEvidence.map((entry) => [entry.id, entry]));
   const retrievalDiagnostics = assertDiagnostics(owned.retrievalDiagnostics, evidenceById);
+  if (canonicalEvidence.length > retrievalDiagnostics.fusedCandidates) {
+    fail('canonicalEvidence 选择数不得超过 retrievalDiagnostics.fusedCandidates');
+  }
   const corpusRef = assertCorpusRefV2(owned.corpusRef);
   if (!corpusRefsEqual(corpusRef, boundary.expectedCorpusRef)) fail('bundle.corpusRef 与当前权威语料不一致');
-  return {
+  return deepFreeze({
     schemaVersion: '2.0.0',
     caseHash: owned.caseHash,
     analysisOrigin: owned.analysisOrigin,
@@ -336,7 +321,7 @@ function assertBundle(value, options, { followUp }) {
     canonicalEvidence,
     retrievalDiagnostics,
     corpusRef,
-  };
+  });
 }
 
 function assertValidatedAnalysisBundleV2(value, options) {
@@ -362,13 +347,17 @@ function assertMessageBase(value, role, label, requiredKeys) {
 }
 
 function assertAuthoritativeFollowUpPairV2(value, options) {
-  if (!isPlainRecord(options)) fail('追问校验选项必须是普通对象');
-  assertExactKeys(
+  assertDataOptions(
     options,
-    ['expectedCaseHash', 'expectedCorpusRef', 'deriveFollowUpContentV2'],
-    [],
+    [
+      'expectedCaseHash', 'expectedCorpusRef',
+      'normalizeValidatedFollowUpV2', 'deriveFollowUpContentV2',
+    ],
     '追问校验选项',
   );
+  if (typeof options.normalizeValidatedFollowUpV2 !== 'function') {
+    fail('normalizeValidatedFollowUpV2 共享归一化器无效');
+  }
   if (typeof options.deriveFollowUpContentV2 !== 'function') fail('deriveFollowUpContentV2 派生器无效');
   const expectedCaseHash = assertHash(options.expectedCaseHash, 'expectedCaseHash');
   const expectedCorpusRef = assertCorpusRefV2(options.expectedCorpusRef, 'expectedCorpusRef');
@@ -386,15 +375,16 @@ function assertAuthoritativeFollowUpPairV2(value, options) {
   const followUpBundle = assertValidatedFollowUpBundleV2(owned[1].followUpBundle, {
     expectedCaseHash,
     expectedCorpusRef,
+    normalizeValidatedFollowUpV2: options.normalizeValidatedFollowUpV2,
   });
   const derived = options.deriveFollowUpContentV2(followUpBundle.followUp);
   if (typeof derived !== 'string' || !derived || derived !== assistantBase.content) {
     fail('assistant message.content 必须完全等于共享 helper 派生正文');
   }
-  return [
+  return deepFreeze([
     user,
     { ...assistantBase, followUpBundle },
-  ];
+  ]);
 }
 
 module.exports = {

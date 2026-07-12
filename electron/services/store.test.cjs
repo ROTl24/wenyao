@@ -11,6 +11,20 @@ const VALID_CAST_AT = '2026-07-12T00:00:00.000Z';
 const CASE_HASH = 'a'.repeat(64);
 const CHANGED_CASE_HASH = 'd'.repeat(64);
 const CORPUS_REF = Object.freeze({ version: 2, hash: 'b'.repeat(64) });
+let sharedDomain;
+
+test.before(async () => {
+  sharedDomain = await import('../generated/domain/index.js');
+});
+
+function bundleStoreOptions(overrides = {}) {
+  return {
+    normalizeValidatedAnalysisReportV2: sharedDomain.normalizeValidatedAnalysisReportV2,
+    normalizeValidatedFollowUpV2: sharedDomain.normalizeValidatedFollowUpV2,
+    deriveFollowUpContentV2: sharedDomain.deriveFollowUpContentV2,
+    ...overrides,
+  };
+}
 
 function rendererSession(input = {}) {
   return {
@@ -201,10 +215,10 @@ function validFollowUpPair(deriveFollowUpContentV2, overrides = {}) {
   }];
 }
 
-test('renderer session save cannot create or overwrite authoritative V2 bundle fields or messages', async () => {
+test('renderer session save cannot create or overwrite authoritative V2 bundle fields or messages', () => {
   const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'wenyao-store-'));
-  const { deriveFollowUpContentV2 } = await import('../generated/domain/index.js');
-  const store = new JsonStore(path.join(dir, 'app-data.json'), { deriveFollowUpContentV2 });
+  const { deriveFollowUpContentV2 } = sharedDomain;
+  const store = new JsonStore(path.join(dir, 'app-data.json'), bundleStoreOptions());
   const fakeAuthority = {
     caseSnapshot: { sessionId: 'session-1', factSetHash: 'fake' },
     ruleContext: { schemaVersion: 'fake' },
@@ -311,11 +325,11 @@ test('authoritative case is identity-bound and advances the stored revision', ()
   assert.equal(saved.updatedAt >= '2026-07-12T00:00:05.000Z', true);
 });
 
-test('authoritative Case rebuild preserves all analysis fields only for the same factSetHash', async () => {
+test('authoritative Case rebuild preserves all analysis fields only for the same factSetHash', () => {
   const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'wenyao-store-'));
   const filePath = path.join(dir, 'app-data.json');
-  const { deriveFollowUpContentV2 } = await import('../generated/domain/index.js');
-  let store = new JsonStore(filePath, { deriveFollowUpContentV2 });
+  const { deriveFollowUpContentV2 } = sharedDomain;
+  let store = new JsonStore(filePath, bundleStoreOptions());
   store.saveRendererSession(rendererSession({
     id: 'session-1', question: '权威问题', status: 'casting', tosses: [],
   }));
@@ -340,7 +354,7 @@ test('authoritative Case rebuild preserves all analysis fields only for the same
     mode: 'local', summary: '旧版隔离分析', generatedAt: '2026-07-12T00:00:02.000Z',
   };
   fs.writeFileSync(filePath, JSON.stringify(persistedWithLegacy), 'utf8');
-  store = new JsonStore(filePath, { deriveFollowUpContentV2 });
+  store = new JsonStore(filePath, bundleStoreOptions());
 
   const sameFacts = { ...structuredClone(initialCase), builtAt: '2026-07-12T00:00:04.000Z' };
   const sameSaved = store.saveAuthoritativeCase('session-1', sameFacts, {
@@ -369,7 +383,7 @@ test('authoritative Case rebuild preserves all analysis fields only for the same
 test('authoritative analysis bundle validates, deep-clones and commits in one revision', () => {
   const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'wenyao-store-'));
   const filePath = path.join(dir, 'app-data.json');
-  const store = new JsonStore(filePath);
+  const store = new JsonStore(filePath, bundleStoreOptions());
   store.saveRendererSession(rendererSession({
     id: 'session-1', question: '权威问题', status: 'casting', tosses: [],
   }));
@@ -403,7 +417,7 @@ test('authoritative analysis bundle validates, deep-clones and commits in one re
 
 test('invalid authoritative analysis bundles are zero-write across the failure matrix', () => {
   const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'wenyao-store-'));
-  const store = new JsonStore(path.join(dir, 'app-data.json'));
+  const store = new JsonStore(path.join(dir, 'app-data.json'), bundleStoreOptions());
   store.saveRendererSession(rendererSession({ id: 'session-1', question: '权威问题', tosses: [] }));
   store.saveAuthoritativeCase('session-1', authoritativeCase(), {
     expectedInteractionFingerprint: store.getInteractionFingerprint('session-1'),
@@ -441,11 +455,11 @@ test('invalid authoritative analysis bundles are zero-write across the failure m
   }
 });
 
-test('authoritative V2 follow-up requires a coherent analysis and appends exactly one atomic pair', async () => {
+test('authoritative V2 follow-up requires a coherent analysis and appends exactly one atomic pair', () => {
   const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'wenyao-store-'));
   const filePath = path.join(dir, 'app-data.json');
-  const { deriveFollowUpContentV2 } = await import('../generated/domain/index.js');
-  const store = new JsonStore(filePath, { deriveFollowUpContentV2 });
+  const { deriveFollowUpContentV2 } = sharedDomain;
+  const store = new JsonStore(filePath, bundleStoreOptions());
   store.saveRendererSession(rendererSession({ id: 'session-1', question: '权威问题', tosses: [] }));
   const withCase = store.saveAuthoritativeCase('session-1', authoritativeCase(), {
     expectedInteractionFingerprint: store.getInteractionFingerprint('session-1'),
@@ -475,16 +489,16 @@ test('authoritative V2 follow-up requires a coherent analysis and appends exactl
   assert.equal(store.getSession('session-1').messages[0].content, '请继续说明。');
   assert.equal(store.getSession('session-1').messages[1].followUpBundle.followUp.claims[0].text, '第 1 条经过校验的结论。');
 
-  const reloaded = new JsonStore(filePath, { deriveFollowUpContentV2 }).getSession('session-1');
+  const reloaded = new JsonStore(filePath, bundleStoreOptions()).getSession('session-1');
   assert.equal(reloaded.messages[1].followUpBundle.canonicalEvidence[0].supportsRuleIds[0], 'rule:one');
   assert.equal(reloaded.messages[1].followUpBundle.retrievalDiagnostics.ruleCandidateIds[0], 'evidence:rule-one');
   assert.equal(reloaded.messages[1].followUpBundle.corpusRef.hash, CORPUS_REF.hash);
 });
 
-test('authoritative V2 follow-up failure matrix leaves messages and revision unchanged', async () => {
+test('authoritative V2 follow-up failure matrix leaves messages and revision unchanged', () => {
   const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'wenyao-store-'));
-  const { deriveFollowUpContentV2 } = await import('../generated/domain/index.js');
-  const store = new JsonStore(path.join(dir, 'app-data.json'), { deriveFollowUpContentV2 });
+  const { deriveFollowUpContentV2 } = sharedDomain;
+  const store = new JsonStore(path.join(dir, 'app-data.json'), bundleStoreOptions());
   store.saveRendererSession(rendererSession({ id: 'session-1', question: '权威问题', tosses: [] }));
   store.saveAuthoritativeCase('session-1', authoritativeCase(), {
     expectedInteractionFingerprint: store.getInteractionFingerprint('session-1'),
@@ -541,6 +555,107 @@ test('authoritative V2 follow-up failure matrix leaves messages and revision unc
       expectedCorpusRef: CORPUS_REF,
     },
   ), /会话已删除/);
+});
+
+test('new V2 Store writes fail closed when shared domain normalizers are not injected', () => {
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'wenyao-store-'));
+  const store = new JsonStore(path.join(dir, 'app-data.json'));
+  store.saveRendererSession(rendererSession({ id: 'session-1', question: '权威问题', tosses: [] }));
+  store.saveAuthoritativeCase('session-1', authoritativeCase(), {
+    expectedInteractionFingerprint: store.getInteractionFingerprint('session-1'),
+    runtimeTrust: 'authoritative',
+  });
+  const before = store.getSession('session-1');
+
+  assert.throws(() => store.saveAuthoritativeAnalysisBundle('session-1', validAnalysisBundle(), {
+    expectedFactSetHash: CASE_HASH,
+    expectedCorpusRef: CORPUS_REF,
+  }), /normalizeValidatedAnalysisReportV2|归一化器|依赖/);
+  assert.deepEqual(store.getSession('session-1'), before);
+});
+
+test('Store dependency options reject accessors and symbols before reading injected functions', () => {
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'wenyao-store-'));
+  let getterRead = false;
+  const accessorOptions = {};
+  Object.defineProperty(accessorOptions, 'deriveFollowUpContentV2', {
+    enumerable: true,
+    get() {
+      getterRead = true;
+      return sharedDomain.deriveFollowUpContentV2;
+    },
+  });
+  assert.throws(
+    () => new JsonStore(path.join(dir, 'accessor.json'), accessorOptions),
+    /访问器|data|options/,
+  );
+  assert.equal(getterRead, false);
+
+  const symbolOptions = bundleStoreOptions();
+  symbolOptions[Symbol('forged')] = true;
+  assert.throws(
+    () => new JsonStore(path.join(dir, 'symbol.json'), symbolOptions),
+    /symbol|额外|options/,
+  );
+});
+
+test('missing historical messages migrates to an empty list during an atomic V2 append', () => {
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'wenyao-store-'));
+  const filePath = path.join(dir, 'app-data.json');
+  let store = new JsonStore(filePath, bundleStoreOptions());
+  store.saveRendererSession(rendererSession({ id: 'session-1', question: '权威问题', tosses: [] }));
+  store.saveAuthoritativeCase('session-1', authoritativeCase(), {
+    expectedInteractionFingerprint: store.getInteractionFingerprint('session-1'),
+    runtimeTrust: 'authoritative',
+  });
+  store.saveAuthoritativeAnalysisBundle('session-1', validAnalysisBundle(), {
+    expectedFactSetHash: CASE_HASH,
+    expectedCorpusRef: CORPUS_REF,
+  });
+  const persisted = JSON.parse(fs.readFileSync(filePath, 'utf8'));
+  delete persisted.sessions[0].messages;
+  fs.writeFileSync(filePath, JSON.stringify(persisted), 'utf8');
+
+  store = new JsonStore(filePath, bundleStoreOptions());
+  const saved = store.appendAuthoritativeFollowUpPair(
+    'session-1', validFollowUpPair(sharedDomain.deriveFollowUpContentV2), {
+      expectedFactSetHash: CASE_HASH,
+      expectedCorpusRef: CORPUS_REF,
+    },
+  );
+  assert.deepEqual(saved.messages.map(({ id }) => id), ['message:user', 'message:assistant']);
+});
+
+test('malformed persisted messages fails closed without changing bytes or revision', () => {
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'wenyao-store-'));
+  const filePath = path.join(dir, 'app-data.json');
+  let store = new JsonStore(filePath, bundleStoreOptions());
+  store.saveRendererSession(rendererSession({ id: 'session-1', question: '权威问题', tosses: [] }));
+  store.saveAuthoritativeCase('session-1', authoritativeCase(), {
+    expectedInteractionFingerprint: store.getInteractionFingerprint('session-1'),
+    runtimeTrust: 'authoritative',
+  });
+  store.saveAuthoritativeAnalysisBundle('session-1', validAnalysisBundle(), {
+    expectedFactSetHash: CASE_HASH,
+    expectedCorpusRef: CORPUS_REF,
+  });
+  const persisted = JSON.parse(fs.readFileSync(filePath, 'utf8'));
+  persisted.sessions[0].messages = { damaged: true };
+  fs.writeFileSync(filePath, JSON.stringify(persisted, null, 2), 'utf8');
+  const bytesBefore = fs.readFileSync(filePath);
+
+  store = new JsonStore(filePath, bundleStoreOptions());
+  const revisionBefore = store.getSession('session-1').authoritativeRevision;
+  assert.throws(() => store.appendAuthoritativeFollowUpPair(
+    'session-1', validFollowUpPair(sharedDomain.deriveFollowUpContentV2), {
+      expectedFactSetHash: CASE_HASH,
+      expectedCorpusRef: CORPUS_REF,
+    },
+  ), /messages|消息.*损坏|数组/);
+
+  assert.deepEqual(fs.readFileSync(filePath), bytesBefore);
+  assert.deepEqual(store.getSession('session-1').messages, { damaged: true });
+  assert.equal(store.getSession('session-1').authoritativeRevision, revisionBefore);
 });
 
 function confirmedToss(id, lineIndex, value = 7) {

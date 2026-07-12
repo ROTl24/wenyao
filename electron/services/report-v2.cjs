@@ -20,6 +20,16 @@ async function deriveFollowUpContentV2(validated) {
   return domain.deriveFollowUpContentV2(validated);
 }
 
+async function normalizeValidatedAnalysisReportV2(validated) {
+  const domain = await domainPromise;
+  return domain.normalizeValidatedAnalysisReportV2(validated);
+}
+
+async function normalizeValidatedFollowUpV2(validated) {
+  const domain = await domainPromise;
+  return domain.normalizeValidatedFollowUpV2(validated);
+}
+
 async function validateAnalysisReportV2(raw, contract, canonicalEvidence, validatedAt) {
   const domain = await domainPromise;
   return domain.validateAnalysisReportV2(raw, contract, canonicalEvidence, validatedAt);
@@ -53,6 +63,8 @@ module.exports = {
   deriveFollowUpContentV2,
   getFollowUpV2Schema,
   getReportV2Schema,
+  normalizeValidatedAnalysisReportV2,
+  normalizeValidatedFollowUpV2,
   validateAnalysisReportV2,
   validateFollowUpV2,
   validateRawFollowUpV2: validateFollowUpV2,

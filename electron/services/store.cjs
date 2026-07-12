@@ -166,6 +166,57 @@ function authoritativeBundleOptions(options) {
   return options;
 }
 
+function normalizedStoreOptions(options = {}) {
+  if (
+    !isRecord(options)
+    || ![Object.prototype, null].includes(Object.getPrototypeOf(options))
+  ) throw new TypeError('Store options 无效');
+  const allowed = new Set([
+    'fileSystem', 'now',
+    'normalizeValidatedAnalysisReportV2',
+    'normalizeValidatedFollowUpV2',
+    'deriveFollowUpContentV2',
+  ]);
+  for (const key of Reflect.ownKeys(options)) {
+    if (typeof key !== 'string' || !allowed.has(key)) throw new TypeError('Store options 含额外或 symbol 字段');
+    const descriptor = Object.getOwnPropertyDescriptor(options, key);
+    if (!descriptor || !descriptor.enumerable || !Object.hasOwn(descriptor, 'value')) {
+      throw new TypeError(`Store options.${key} 不得使用访问器或非枚举字段`);
+    }
+    if (descriptor.value === undefined) throw new TypeError(`Store options.${key} 不得为 undefined`);
+  }
+  const normalized = {
+    fileSystem: Object.hasOwn(options, 'fileSystem') ? options.fileSystem : fs,
+    now: Object.hasOwn(options, 'now') ? options.now : () => new Date(),
+    normalizeValidatedAnalysisReportV2: Object.hasOwn(options, 'normalizeValidatedAnalysisReportV2')
+      ? options.normalizeValidatedAnalysisReportV2
+      : undefined,
+    normalizeValidatedFollowUpV2: Object.hasOwn(options, 'normalizeValidatedFollowUpV2')
+      ? options.normalizeValidatedFollowUpV2
+      : undefined,
+    deriveFollowUpContentV2: Object.hasOwn(options, 'deriveFollowUpContentV2')
+      ? options.deriveFollowUpContentV2
+      : undefined,
+  };
+  if (typeof normalized.now !== 'function') throw new TypeError('Store options.now 必须是函数');
+  for (const key of [
+    'normalizeValidatedAnalysisReportV2',
+    'normalizeValidatedFollowUpV2',
+    'deriveFollowUpContentV2',
+  ]) {
+    if (normalized[key] !== undefined && typeof normalized[key] !== 'function') {
+      throw new TypeError(`Store options.${key} 必须是函数`);
+    }
+  }
+  return normalized;
+}
+
+function storedMessagesForAppend(session) {
+  if (!Object.hasOwn(session, 'messages')) return [];
+  if (!Array.isArray(session.messages)) throw new Error('会话 messages 消息存储损坏，必须是数组');
+  return session.messages;
+}
+
 function compareRendererProgress(existing, input) {
   const currentTosses = Array.isArray(existing.tosses) ? existing.tosses : [];
   const incomingTosses = Array.isArray(input.tosses) ? ownedClone(input.tosses) : currentTosses;
@@ -203,17 +254,19 @@ function compareRendererProgress(existing, input) {
 }
 
 class JsonStore {
-  constructor(filePath, {
-    fileSystem = fs,
-    now = () => new Date(),
-    deriveFollowUpContentV2,
-  } = {}) {
-    if (deriveFollowUpContentV2 !== undefined && typeof deriveFollowUpContentV2 !== 'function') {
-      throw new TypeError('deriveFollowUpContentV2 必须是函数');
-    }
+  constructor(filePath, options = {}) {
+    const {
+      fileSystem,
+      now,
+      normalizeValidatedAnalysisReportV2,
+      normalizeValidatedFollowUpV2,
+      deriveFollowUpContentV2,
+    } = normalizedStoreOptions(options);
     this.filePath = filePath;
     this.fileSystem = fileSystem;
     this.now = now;
+    this.normalizeValidatedAnalysisReportV2 = normalizeValidatedAnalysisReportV2;
+    this.normalizeValidatedFollowUpV2 = normalizeValidatedFollowUpV2;
     this.deriveFollowUpContentV2 = deriveFollowUpContentV2;
     this.deletedSessionIds = new Set();
     this.fileSystem.mkdirSync(path.dirname(filePath), { recursive: true });
@@ -387,9 +440,13 @@ class JsonStore {
     const { expectedFactSetHash, expectedCorpusRef } = authoritativeBundleOptions(options);
     const { index, session } = this.#requireSession(sessionId);
     this.#assertCaseHash(session, expectedFactSetHash);
+    if (typeof this.normalizeValidatedAnalysisReportV2 !== 'function') {
+      throw new Error('Store 未注入共享 normalizeValidatedAnalysisReportV2 归一化器依赖');
+    }
     const validatedBundle = assertValidatedAnalysisBundleV2(bundle, {
       expectedCaseHash: expectedFactSetHash,
       expectedCorpusRef,
+      normalizeValidatedAnalysisReportV2: this.normalizeValidatedAnalysisReportV2,
     });
     const next = {
       ...session,
@@ -405,21 +462,25 @@ class JsonStore {
     const { expectedFactSetHash, expectedCorpusRef } = authoritativeBundleOptions(options);
     const { index, session } = this.#requireSession(sessionId);
     this.#assertCaseHash(session, expectedFactSetHash);
+    if (
+      typeof this.normalizeValidatedAnalysisReportV2 !== 'function'
+      || typeof this.normalizeValidatedFollowUpV2 !== 'function'
+      || typeof this.deriveFollowUpContentV2 !== 'function'
+    ) throw new Error('Store 未注入共享 V2 report normalizers/derive helper 依赖');
+    const existingMessages = storedMessagesForAppend(session);
     if (!isRecord(session.analysisBundle)) throw new Error('当前会话缺少 coherent analysisBundle');
     assertValidatedAnalysisBundleV2(session.analysisBundle, {
       expectedCaseHash: expectedFactSetHash,
       expectedCorpusRef,
+      normalizeValidatedAnalysisReportV2: this.normalizeValidatedAnalysisReportV2,
     });
-    if (typeof this.deriveFollowUpContentV2 !== 'function') {
-      throw new Error('Store 未注入共享 deriveFollowUpContentV2 派生器');
-    }
     const validatedPair = assertAuthoritativeFollowUpPairV2(messagePair, {
       expectedCaseHash: expectedFactSetHash,
       expectedCorpusRef,
+      normalizeValidatedFollowUpV2: this.normalizeValidatedFollowUpV2,
       deriveFollowUpContentV2: this.deriveFollowUpContentV2,
     });
 
-    const existingMessages = Array.isArray(session.messages) ? session.messages : [];
     const incomingIds = validatedPair.map((message) => message.id);
     if (
       new Set(incomingIds).size !== incomingIds.length
@@ -464,7 +525,7 @@ class JsonStore {
       || !nonEmptyString(message.content)
       || !nonEmptyString(message.createdAt)
     ) throw new TypeError('权威消息无效');
-    const messages = Array.isArray(session.messages) ? session.messages : [];
+    const messages = storedMessagesForAppend(session);
     if (messages.some((entry) => entry.id === message.id)) return ownedClone(session);
     const next = {
       ...session,
@@ -490,7 +551,7 @@ class JsonStore {
         && nonEmptyString(message.createdAt)
       ))
     ) throw new TypeError('权威消息无效');
-    const existingMessages = Array.isArray(session.messages) ? session.messages : [];
+    const existingMessages = storedMessagesForAppend(session);
     const incomingIds = messagePair.map((message) => message.id);
     if (
       new Set(incomingIds).size !== incomingIds.length
