@@ -14,6 +14,7 @@ import type {
 import { WENWANG_NAJIA_V2_ARTIFACT_HASH } from '../rules/wenwang-najia-v2.js';
 import { BRANCHES, branchRelationMatches } from './branch-relations.js';
 import { ELEMENTS, elementRelation } from './element-relations.js';
+import { deriveGrowthShenShaFacts } from './growth-shensha.js';
 import {
   RELATION_CORE_V1_ARTIFACT,
   RELATION_CORE_V1_ARTIFACT_HASH,
@@ -545,6 +546,33 @@ describe('production relation fact derivation', () => {
     expect(facts.every(({ ruleId, sourceRefs }) => ruleId && sourceRefs.length > 0)).toBe(true);
   });
 
+  it('一次返回 Task4 关系与完整 Task6 长生、六神、神煞事实', () => {
+    const plate = buildFixturePlate([9, 7, 8, 6, 7, 8]);
+    const facts = productionFacts(plate);
+    const growthShenSha = deriveGrowthShenShaFacts({
+      plate,
+      ruleContext: DEFAULT_RULE_CONTEXT,
+    });
+    const task6Facts = facts.filter(({ relation }) => (
+      relation === 'is-growth-stage'
+      || relation === 'is-six-beast'
+      || relation === 'is-shen-sha'
+    ));
+
+    expect(task6Facts).toEqual(growthShenSha);
+    expect(task6Facts.filter(({ relation, scope }) => (
+      relation === 'is-growth-stage' && scope === 'calendar'
+    ))).toHaveLength(48);
+    expect(task6Facts.filter(({ relation, scope }) => (
+      relation === 'is-growth-stage' && scope === 'transition'
+    ))).toHaveLength(plate.movingLines.length);
+    expect(task6Facts.filter(({ relation }) => relation === 'is-six-beast')).toHaveLength(6);
+    expect(facts.some(({ relation }) => (
+      relation === 'generates' || relation === 'controls' || relation === 'same-element'
+    ))).toBe(true);
+    expect(new Set(facts.map(({ id }) => id)).size).toBe(facts.length);
+  });
+
   it('rejects malformed PlateV2 shapes before the production manifest gate runs', () => {
     const valid = buildFixturePlate([9, 7, 7, 7, 7, 7]);
     const malformed = (mutate: (plate: any) => void): unknown => {
@@ -670,11 +698,22 @@ describe('production relation fact derivation', () => {
       values: { sourceElement: '土', targetElement: '水' },
     });
 
-    const transitionFacts = facts.filter(({ scope }) => scope === 'transition');
+    const transitionFacts = facts.filter(({ scope, relation }) => (
+      scope === 'transition' && relation !== 'is-growth-stage'
+    ));
     expect(transitionFacts.length).toBeGreaterThan(0);
     expect(transitionFacts.every(({ source, target }) => (
       source.type === 'line' && source.side === 'changed'
       && target?.type === 'line' && target.side === 'base'
+      && source.id === target.id
+    ))).toBe(true);
+    const transitionGrowth = facts.filter(({ scope, relation }) => (
+      scope === 'transition' && relation === 'is-growth-stage'
+    ));
+    expect(transitionGrowth).toHaveLength(plate.movingLines.length);
+    expect(transitionGrowth.every(({ source, target }) => (
+      source.type === 'line' && source.side === 'base'
+      && target?.type === 'line' && target.side === 'changed'
       && source.id === target.id
     ))).toBe(true);
   });

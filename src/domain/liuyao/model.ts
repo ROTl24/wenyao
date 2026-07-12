@@ -28,6 +28,7 @@ export interface CalendarSnapshot {
 }
 
 export type SixRelation = '父母' | '兄弟' | '子孙' | '妻财' | '官鬼';
+export type SixSpirit = '青龙' | '朱雀' | '勾陈' | '螣蛇' | '白虎' | '玄武';
 export type TwelveStage =
   | '长生' | '沐浴' | '冠带' | '临官' | '帝旺' | '衰'
   | '病' | '死' | '墓' | '绝' | '胎' | '养';
@@ -118,7 +119,7 @@ export type FactRelation =
   | 'returns-generate' | 'returns-control' | 'returns-clash' | 'returns-combine'
   | 'advances' | 'retreats' | 'forms-three-harmony'
   | 'is-six-harmony' | 'is-six-clash' | 'is-fan-yin' | 'is-fu-yin'
-  | 'is-growth-stage' | 'is-shen-sha'
+  | 'is-growth-stage' | 'is-six-beast' | 'is-shen-sha'
   | 'is-source-spirit' | 'is-avoid-spirit' | 'is-enemy-spirit'
   | 'flying-generates-hidden' | 'flying-controls-hidden'
   | 'holds-shi' | 'holds-ying';

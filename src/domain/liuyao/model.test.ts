@@ -2,6 +2,8 @@ import { describe, expect, it } from 'vitest';
 import {
   BASE_RULE_CONTEXT,
   DEFAULT_RULE_CONTEXT,
+  GROWTH_SHENSHA_CORE_V1_ARTIFACT_HASH,
+  GROWTH_SHENSHA_SOURCE_EVIDENCE_CAPSULES,
   REGISTERED_RULE_SOURCES,
   RELATION_CORE_V1_ARTIFACT_HASH,
   RELATION_SOURCE_EVIDENCE_CAPSULES,
@@ -30,10 +32,30 @@ describe('V2 domain contract', () => {
         punishmentPolicy: 'liuren-directional-core-v1',
       },
       growthProfile: {
+        bundle: {
+          id: 'growth_shensha_core_v1',
+          version: '1.0.0',
+          artifactHash: GROWTH_SHENSHA_CORE_V1_ARTIFACT_HASH,
+        },
         display: 'all-twelve',
         interpretationWeight: 'sheng-wang-mu-jue-only',
       },
+      sixSpiritProfile: {
+        id: 'yehe-day-stem-six-spirit-v1',
+        bundle: {
+          id: 'growth_shensha_core_v1',
+          version: '1.0.0',
+          artifactHash: GROWTH_SHENSHA_CORE_V1_ARTIFACT_HASH,
+        },
+        source: 'day-stem',
+        target: 'base-lines-only',
+      },
       shenShaProfile: {
+        bundle: {
+          id: 'growth_shensha_core_v1',
+          version: '1.0.0',
+          artifactHash: GROWTH_SHENSHA_CORE_V1_ARTIFACT_HASH,
+        },
         enabled: ['tianyi', 'lushen', 'yima', 'tianxi'],
         authority: 'secondary',
       },
@@ -43,6 +65,9 @@ describe('V2 domain contract', () => {
 
   it('deep-freezes nested profiles and source arrays', () => {
     expect(Object.isFrozen(BASE_RULE_CONTEXT.calendarProfile)).toBe(true);
+    expect(Object.isFrozen(BASE_RULE_CONTEXT.growthProfile.bundle)).toBe(true);
+    expect(Object.isFrozen(BASE_RULE_CONTEXT.sixSpiritProfile)).toBe(true);
+    expect(Object.isFrozen(BASE_RULE_CONTEXT.sixSpiritProfile.bundle)).toBe(true);
     expect(Object.isFrozen(BASE_RULE_CONTEXT.shenShaProfile)).toBe(true);
     expect(Object.isFrozen(BASE_RULE_CONTEXT.shenShaProfile.enabled)).toBe(true);
     expect(Object.isFrozen(BASE_RULE_CONTEXT.sources)).toBe(true);
@@ -58,8 +83,9 @@ describe('V2 domain contract', () => {
     expect(DEFAULT_RULE_CONTEXT.sources).toEqual([
       ...RULE_SOURCE_EVIDENCE_CAPSULES.map(({ ref }) => ref),
       ...RELATION_SOURCE_EVIDENCE_CAPSULES.map(({ ref }) => ref),
+      ...GROWTH_SHENSHA_SOURCE_EVIDENCE_CAPSULES.map(({ ref }) => ref),
     ]);
-    expect(DEFAULT_RULE_CONTEXT.sources).toHaveLength(13);
+    expect(DEFAULT_RULE_CONTEXT.sources).toHaveLength(18);
     expect(Object.isFrozen(DEFAULT_RULE_CONTEXT)).toBe(true);
     expect(Object.isFrozen(DEFAULT_RULE_CONTEXT.sources)).toBe(true);
     expect(DEFAULT_RULE_CONTEXT.sources.every(Object.isFrozen)).toBe(true);

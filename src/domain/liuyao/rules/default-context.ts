@@ -2,6 +2,10 @@ import {
   RELATION_CORE_V1_ARTIFACT_HASH,
   RELATION_SOURCE_EVIDENCE_CAPSULES,
 } from '../facts/relation-core-v1.js';
+import {
+  GROWTH_SHENSHA_CORE_V1_ARTIFACT_HASH,
+  GROWTH_SHENSHA_SOURCE_EVIDENCE_CAPSULES,
+} from '../facts/growth-shensha-core-v1.js';
 import type { RuleContext } from './model.js';
 import { deepFreeze } from './tables.js';
 import { RULE_SOURCE_EVIDENCE_CAPSULES } from './wenwang-najia-v2.js';
@@ -9,6 +13,7 @@ import { RULE_SOURCE_EVIDENCE_CAPSULES } from './wenwang-najia-v2.js';
 export const REGISTERED_RULE_SOURCES = deepFreeze([
   ...RULE_SOURCE_EVIDENCE_CAPSULES.map(({ ref }) => ref),
   ...RELATION_SOURCE_EVIDENCE_CAPSULES.map(({ ref }) => ref),
+  ...GROWTH_SHENSHA_SOURCE_EVIDENCE_CAPSULES.map(({ ref }) => ref),
 ] as const);
 
 export const BASE_RULE_CONTEXT = deepFreeze({
@@ -38,14 +43,38 @@ export const BASE_RULE_CONTEXT = deepFreeze({
   },
   growthProfile: {
     id: 'five-element-forward_v1',
+    bundle: {
+      id: 'growth_shensha_core_v1',
+      version: '1.0.0',
+      artifactHash: GROWTH_SHENSHA_CORE_V1_ARTIFACT_HASH,
+    },
     earthFollows: 'water',
     display: 'all-twelve',
     interpretationWeight: 'sheng-wang-mu-jue-only',
   },
+  sixSpiritProfile: {
+    id: 'yehe-day-stem-six-spirit-v1',
+    bundle: {
+      id: 'growth_shensha_core_v1',
+      version: '1.0.0',
+      artifactHash: GROWTH_SHENSHA_CORE_V1_ARTIFACT_HASH,
+    },
+    source: 'day-stem',
+    target: 'base-lines-only',
+  },
   shenShaProfile: {
     id: 'yehe_limited_four_v1',
+    bundle: {
+      id: 'growth_shensha_core_v1',
+      version: '1.0.0',
+      artifactHash: GROWTH_SHENSHA_CORE_V1_ARTIFACT_HASH,
+    },
     enabled: ['tianyi', 'lushen', 'yima', 'tianxi'],
     authority: 'secondary',
+    tianyiPolicy: 'zengshan-taiyi-day-stem-v1',
+    lushenPolicy: 'zengshan-day-stem-lushen-v1',
+    yimaPolicy: 'zengshan-day-branch-three-harmony-v1',
+    tianxiPolicy: 'zengshan-seasonal-month-branch-v1',
   },
   useGodProfile: {
     id: 'explicit_intent_first_v1',

@@ -69,10 +69,6 @@ function runtimeProfilePayload(context: RuleContext) {
   return {
     schemaVersion: context.schemaVersion,
     calendarProfile: context.calendarProfile,
-    relationProfile: context.relationProfile,
-    growthProfile: context.growthProfile,
-    shenShaProfile: context.shenShaProfile,
-    useGodProfile: context.useGodProfile,
   };
 }
 

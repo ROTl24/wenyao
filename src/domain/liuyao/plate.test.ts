@@ -3,6 +3,7 @@ import { existsSync, readFileSync } from 'node:fs';
 import { describe, expect, it } from 'vitest';
 import { GOLDEN_HEXAGRAMS, GOLDEN_TRIGRAM_BITS, type GoldenHexagram } from './__fixtures__/golden-hexagrams.js';
 import { GOLDEN_CHANGED_RELATION_CASES, GOLDEN_NAJIA } from './__fixtures__/golden-najia.js';
+import { GROWTH_SHENSHA_SOURCE_EVIDENCE_CAPSULES } from './facts/growth-shensha-core-v1.js';
 import { RELATION_SOURCE_EVIDENCE_CAPSULES } from './facts/relation-core-v1.js';
 import type { PlateV2, SixRelation } from './model.js';
 import { buildPlateV2 } from './plate.js';
@@ -339,6 +340,7 @@ describe('buildPlateV2', () => {
     expect(DEFAULT_RULE_CONTEXT.sources).toEqual(expect.arrayContaining([
       ...RULE_SOURCE_EVIDENCE_CAPSULES.map(({ ref }) => ref),
       ...RELATION_SOURCE_EVIDENCE_CAPSULES.map(({ ref }) => ref),
+      ...GROWTH_SHENSHA_SOURCE_EVIDENCE_CAPSULES.map(({ ref }) => ref),
     ]));
 
     const structuralOnlyContext = {
@@ -414,28 +416,41 @@ describe('buildPlateV2', () => {
       ...context,
       calendarProfile: { ...context.calendarProfile, dayBoundary: 'midnight' },
     })],
-    ['forged relation profile', (context: RuleContext) => ({
-      ...context,
-      relationProfile: { ...context.relationProfile, changedRelationReference: 'changed-palace' },
-    })],
-    ['forged growth profile', (context: RuleContext) => ({
-      ...context,
-      growthProfile: { ...context.growthProfile, earthFollows: 'fire' },
-    })],
-    ['forged shen-sha profile', (context: RuleContext) => ({
-      ...context,
-      shenShaProfile: { ...context.shenShaProfile, enabled: ['tianyi'] },
-    })],
-    ['forged use-god profile', (context: RuleContext) => ({
-      ...context,
-      useGodProfile: { ...context.useGodProfile, ambiguousIntent: 'guess' },
-    })],
   ])('rejects %s at runtime', (_label, forgeContext) => {
     expect(() => buildPlateV2({
       ...FIXED_BUILD_INPUT,
       tossValues: [9, 7, 7, 7, 7, 7],
       ruleContext: forgeContext(DEFAULT_RULE_CONTEXT) as unknown as RuleContext,
     })).toThrow('结构规则上下文未通过项目运行门');
+  });
+
+  it.each([
+    ['relation', (context: RuleContext) => ({
+      ...context,
+      relationProfile: { ...context.relationProfile, changedRelationReference: 'changed-palace' },
+    })],
+    ['growth', (context: RuleContext) => ({
+      ...context,
+      growthProfile: { ...context.growthProfile, earthFollows: 'fire' },
+    })],
+    ['six-spirit', (context: RuleContext) => ({
+      ...context,
+      sixSpiritProfile: { ...context.sixSpiritProfile, source: 'forged' },
+    })],
+    ['shen-sha', (context: RuleContext) => ({
+      ...context,
+      shenShaProfile: { ...context.shenShaProfile, enabled: ['tianyi'] },
+    })],
+    ['use-god', (context: RuleContext) => ({
+      ...context,
+      useGodProfile: { ...context.useGodProfile, ambiguousIntent: 'guess' },
+    })],
+  ])('does not consume the %s profile', (_label, forgeContext) => {
+    expect(() => buildPlateV2({
+      ...FIXED_BUILD_INPUT,
+      tossValues: [9, 7, 7, 7, 7, 7],
+      ruleContext: forgeContext(DEFAULT_RULE_CONTEXT) as unknown as RuleContext,
+    })).not.toThrow();
   });
 
   it('builds complete base and changed sides and re-installs static changed lines', () => {

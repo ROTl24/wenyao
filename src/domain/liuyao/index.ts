@@ -2,6 +2,23 @@ export * from './calendar.js';
 export * from './facts/branch-relations.js';
 export * from './facts/derive.js';
 export * from './facts/element-relations.js';
+export {
+  deriveGrowthShenShaFacts,
+  shenShaBranches,
+  sixSpiritsForDayStem,
+  twelveStage,
+} from './facts/growth-shensha.js';
+export type {
+  DeriveGrowthShenShaFactsInput,
+  ShenShaBranchInput,
+} from './facts/growth-shensha.js';
+export * from './facts/growth-shensha-core-v1.js';
+export {
+  GROWTH_SHENSHA_REVIEW_CHECKED_CLAIMS,
+  GROWTH_SHENSHA_REVIEW_REPORT_PATHS,
+  assertProjectEnabledGrowthShenShaBundle,
+  assertProjectEnabledGrowthShenShaContext,
+} from './facts/growth-shensha-registry.js';
 export * from './facts/model.js';
 export * from './facts/relation-manifest-expectations.js';
 export * from './facts/relation-core-v1.js';

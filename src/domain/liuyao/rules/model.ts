@@ -43,6 +43,22 @@ export interface RelationRuleBundleManifest {
   sourceRefs: readonly string[];
 }
 
+export interface GrowthShenShaRuleBundleManifest {
+  bundleId: 'growth_shensha_core_v1';
+  version: '1.0.0';
+  artifactHash: string;
+  verificationLevel: VerificationLevel;
+  runtimeStatus: RulePackRuntimeStatus;
+  reviews: readonly RuleReviewRecord[];
+  sourceRefs: readonly string[];
+}
+
+export interface GrowthShenShaBundleRef {
+  id: 'growth_shensha_core_v1';
+  version: '1.0.0';
+  artifactHash: string;
+}
+
 export type RelationHarmPolicy = 'liuren-six-harms-v1';
 export type RelationBreakPolicy =
   | 'cross-source-common-four-breaks-v1'
@@ -89,14 +105,26 @@ export interface RuleContext {
   };
   growthProfile: {
     id: 'five-element-forward_v1';
+    bundle: GrowthShenShaBundleRef;
     earthFollows: 'water';
     display: 'all-twelve';
     interpretationWeight: 'sheng-wang-mu-jue-only';
   };
+  sixSpiritProfile: {
+    id: 'yehe-day-stem-six-spirit-v1';
+    bundle: GrowthShenShaBundleRef;
+    source: 'day-stem';
+    target: 'base-lines-only';
+  };
   shenShaProfile: {
     id: 'yehe_limited_four_v1';
+    bundle: GrowthShenShaBundleRef;
     enabled: readonly ['tianyi', 'lushen', 'yima', 'tianxi'];
     authority: 'secondary';
+    tianyiPolicy: 'zengshan-taiyi-day-stem-v1';
+    lushenPolicy: 'zengshan-day-stem-lushen-v1';
+    yimaPolicy: 'zengshan-day-branch-three-harmony-v1';
+    tianxiPolicy: 'zengshan-seasonal-month-branch-v1';
   };
   useGodProfile: {
     id: 'explicit_intent_first_v1';

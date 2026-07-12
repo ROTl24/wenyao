@@ -11,6 +11,7 @@ import type { RuleContext } from '../rules/model.js';
 import { deepFreeze, type LinePosition } from '../rules/tables.js';
 import { branchRelationMatches } from './branch-relations.js';
 import { elementRelation, type ElementRelation } from './element-relations.js';
+import { deriveGrowthShenShaFacts } from './growth-shensha.js';
 import { createFactId, stableFacts } from './model.js';
 import {
   assertProjectEnabledRelationContext,
@@ -215,7 +216,7 @@ function deriveBranchFacts(
   });
 }
 
-function deriveValidatedFacts(input: DeriveFactsInput): readonly DerivedFact[] {
+function deriveRelationFactsValidated(input: DeriveFactsInput): readonly DerivedFact[] {
   void input.useGod;
   if (
     input.plate.schemaVersion !== '2.0.0'
@@ -240,5 +241,12 @@ export function deriveFacts(input: unknown): readonly DerivedFact[] {
     : {};
   assertPlateV2RuntimeShape(candidate.plate);
   assertProjectEnabledRelationContext(candidate.ruleContext);
-  return deriveValidatedFacts(candidate as DeriveFactsInput);
+  const validated = candidate as DeriveFactsInput;
+  return stableFacts([
+    ...deriveRelationFactsValidated(validated),
+    ...deriveGrowthShenShaFacts({
+      plate: validated.plate,
+      ruleContext: validated.ruleContext,
+    }),
+  ]);
 }
