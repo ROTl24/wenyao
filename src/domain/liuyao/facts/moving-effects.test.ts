@@ -1,15 +1,17 @@
 import { describe, expect, it } from 'vitest';
-import type { Branch, Element, PlateV2 } from '../model.js';
+import type { Branch, DerivedFact, Element, EntityRef, PlateV2 } from '../model.js';
 import { buildPlateV2 } from '../plate.js';
 import { DEFAULT_RULE_CONTEXT } from '../rules/default-context.js';
 import { BRANCHES, branchRelationMatches } from './branch-relations.js';
-import { deriveEffectsFacts, deriveRelationFactsForInternalPipeline } from './derive.js';
+import { GROWTH_SHENSHA_CORE_V1_ARTIFACT } from './growth-shensha-core-v1.js';
 import { ELEMENTS, elementRelation } from './element-relations.js';
 import { LIUYAO_EFFECTS_V1_ARTIFACT } from './effects-core-v1.js';
 import { twelveStage } from './growth-shensha.js';
 import {
   advanceRetreatRelation,
+  deriveMovingEffectsFromTrustedFacts,
 } from './moving-effects.js';
+import { RELATION_CORE_V1_ARTIFACT } from './relation-core-v1.js';
 
 const BUILD_INPUT = {
   plateId: 'plate-effects-moving',
@@ -47,9 +49,114 @@ function movingFixture(base: Branch, changed: Branch): PlateV2 {
   return plate;
 }
 
+type RelationRef = Extract<EntityRef, { type: 'line' }>;
+
+interface RelationEntity {
+  readonly ref: RelationRef;
+  readonly element: Element;
+  readonly branch: Branch;
+}
+
+function relationEntityKey(ref: RelationRef): string {
+  return `line:${ref.id}:${ref.side}`;
+}
+
+function transitionRelationFacts(plate: PlateV2): readonly DerivedFact[] {
+  return plate.lines.flatMap((line): readonly DerivedFact[] => {
+    if (!line.moving) return [];
+    const changed: RelationEntity = {
+      ref: { type: 'line', id: line.id, side: 'changed' },
+      element: line.changed.branchElement,
+      branch: line.changed.branch,
+    };
+    const base: RelationEntity = {
+      ref: { type: 'line', id: line.id, side: 'base' },
+      element: line.base.branchElement,
+      branch: line.base.branch,
+    };
+    const comparisonId = `transition|${relationEntityKey(changed.ref)}|${relationEntityKey(base.ref)}`;
+    const facts: DerivedFact[] = [];
+    const forward = elementRelation(changed.element, base.element);
+    const reverse = forward === null ? elementRelation(base.element, changed.element) : null;
+    const relation = forward ?? reverse;
+    if (relation === null) throw new Error('测试五行关系矩阵不完整');
+    const source = forward === null ? base : changed;
+    const target = forward === null ? changed : base;
+    const elementRule = RELATION_CORE_V1_ARTIFACT.elementRules.find(
+      (candidate) => candidate.relation === relation,
+    );
+    if (!elementRule) throw new Error(`测试五行规则缺失：${relation}`);
+    facts.push({
+      id: `fixture:${comparisonId}:${relation}:${elementRule.ruleId}`,
+      relation,
+      source: source.ref,
+      target: target.ref,
+      scope: 'transition',
+      authority: elementRule.authority,
+      ruleId: elementRule.ruleId,
+      profileId: elementRule.profileId,
+      certainty: elementRule.certainty,
+      conditions: [],
+      values: { comparisonId, sourceElement: source.element, targetElement: target.element },
+      sourceRefs: elementRule.sourceRefs,
+    });
+    for (const match of branchRelationMatches(
+      changed.branch,
+      base.branch,
+      DEFAULT_RULE_CONTEXT.relationProfile,
+    )) {
+      const branchSource = match.direction === 'reverse' ? base : changed;
+      const branchTarget = match.direction === 'reverse' ? changed : base;
+      facts.push({
+        id: `fixture:${comparisonId}:${match.relation}:${match.ruleId}`,
+        relation: match.relation,
+        source: branchSource.ref,
+        target: branchTarget.ref,
+        scope: 'transition',
+        authority: match.authority,
+        ruleId: match.ruleId,
+        profileId: match.profileId,
+        certainty: match.certainty,
+        conditions: [],
+        values: { comparisonId },
+        sourceRefs: match.sourceRefs,
+      });
+    }
+    return facts;
+  });
+}
+
+function transitionGrowthFacts(plate: PlateV2): readonly DerivedFact[] {
+  const rule = GROWTH_SHENSHA_CORE_V1_ARTIFACT.growth.rule;
+  return plate.lines.flatMap((line): readonly DerivedFact[] => {
+    if (!line.moving) return [];
+    const element = line.base.branchElement;
+    return [{
+      id: `fixture:transition:line:${line.id}:base:is-growth-stage:line:${line.id}:changed`,
+      relation: 'is-growth-stage',
+      source: { type: 'line', id: line.id, side: 'base' },
+      target: { type: 'line', id: line.id, side: 'changed' },
+      scope: 'transition',
+      authority: rule.authority,
+      ruleId: rule.ruleId,
+      profileId: rule.profileId,
+      certainty: rule.certaintyByElement[element],
+      conditions: element === '土' ? ['default-earth-follows-water-disputed'] : [],
+      values: {
+        stage: twelveStage(element, line.changed.branch, DEFAULT_RULE_CONTEXT.growthProfile),
+      },
+      sourceRefs: rule.sourceRefs,
+    }];
+  });
+}
+
 function deriveMovingEffects(plate: PlateV2) {
-  return deriveEffectsFacts({ plate, ruleContext: DEFAULT_RULE_CONTEXT })
-    .filter(({ scope }) => scope === 'transition');
+  return deriveMovingEffectsFromTrustedFacts(
+    plate,
+    DEFAULT_RULE_CONTEXT,
+    transitionRelationFacts(plate),
+    transitionGrowthFacts(plate),
+  );
 }
 
 describe('liuyao_effects_v1 production moving facts', () => {
@@ -139,7 +246,7 @@ describe('liuyao_effects_v1 production moving facts', () => {
 
   it('references only exact current Task4 transition facts and never emits a second raw primitive', () => {
     const plate = movingFixture('子', '丑');
-    const relationFacts = deriveRelationFactsForInternalPipeline(plate, DEFAULT_RULE_CONTEXT);
+    const relationFacts = transitionRelationFacts(plate);
     const relationIds = new Set(relationFacts.map(({ id }) => id));
     const effects = deriveMovingEffects(plate);
     const returnFacts = effects.filter(({ relation }) => relation.startsWith('returns-'));

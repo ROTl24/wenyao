@@ -10,6 +10,10 @@ import {
   EFFECTS_SOURCE_EVIDENCE_CAPSULES,
   LIUYAO_EFFECTS_V1_ARTIFACT_HASH,
 } from '../facts/effects-core-v1.js';
+import {
+  USE_GOD_CORE_V1_ARTIFACT_HASH,
+  USE_GOD_SOURCE_EVIDENCE_CAPSULES,
+} from './use-god-core-v1.js';
 import type { RuleContext, RuleSourceRef } from './model.js';
 import { deepFreeze } from './tables.js';
 import { RULE_SOURCE_EVIDENCE_CAPSULES } from './wenwang-najia-v2.js';
@@ -39,6 +43,7 @@ export const REGISTERED_RULE_SOURCES = deepFreeze(mergeRuleSourceRefs(
   RELATION_SOURCE_EVIDENCE_CAPSULES.map(({ ref }) => ref),
   GROWTH_SHENSHA_SOURCE_EVIDENCE_CAPSULES.map(({ ref }) => ref),
   EFFECTS_SOURCE_EVIDENCE_CAPSULES.map(({ ref }) => ref),
+  USE_GOD_SOURCE_EVIDENCE_CAPSULES.map(({ ref }) => ref),
 ));
 
 export const BASE_RULE_CONTEXT = deepFreeze({
@@ -116,8 +121,15 @@ export const BASE_RULE_CONTEXT = deepFreeze({
   },
   useGodProfile: {
     id: 'explicit_intent_first_v1',
+    bundle: {
+      id: 'use_god_core_v1',
+      version: '1.0.0',
+      artifactHash: USE_GOD_CORE_V1_ARTIFACT_HASH,
+    },
     ambiguousIntent: 'ask-user',
-    multipleCandidates: 'retain-ranked-candidates',
+    candidateTiers: ['base-visible', 'true-changed', 'palace-head-hidden'],
+    multipleCandidates: 'retain-all-without-auto-choice',
+    hiddenSpiritPolicy: 'yehe-last-resort-disputed-v1',
   },
   sources: [],
 } as const satisfies RuleContext);

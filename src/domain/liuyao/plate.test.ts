@@ -7,6 +7,7 @@ import { GROWTH_SHENSHA_SOURCE_EVIDENCE_CAPSULES } from './facts/growth-shensha-
 import { EFFECTS_SOURCE_EVIDENCE_CAPSULES } from './facts/effects-core-v1.js';
 import { RELATION_SOURCE_EVIDENCE_CAPSULES } from './facts/relation-core-v1.js';
 import type { PlateV2, SixRelation } from './model.js';
+import { assertPlateV2RuntimeShape } from './plate-runtime.js';
 import { buildPlateV2 } from './plate.js';
 import {
   BASE_RULE_CONTEXT,
@@ -299,6 +300,128 @@ describe('assertProjectEnabledRulePack', () => {
 });
 
 describe('buildPlateV2', () => {
+  it.each([
+    ['toss yin-yang changed without rebuilding the hexagram', (plate: any) => {
+      plate.rawTosses[0] = 8;
+      plate.lines[0].tossValue = 8;
+    }],
+    ['registered but wrong Najia stem', (plate: any) => {
+      const facet = plate.lines[0].base;
+      facet.stem = facet.stem === '甲' ? '乙' : '甲';
+      facet.stemElement = facet.stem === '甲' ? '木' : '木';
+      facet.ganZhi = `${facet.stem}${facet.branch}`;
+    }],
+    ['rule-pack version', (plate: any) => { plate.rulePackRef.version = 'bogus'; }],
+    ['rule-pack artifact hash', (plate: any) => {
+      plate.rulePackRef.artifactHash = '0'.repeat(64);
+    }],
+    ['calendar pillar copied from another cast instant', (plate: any) => {
+      const otherDate = buildPlateV2({
+        ...FIXED_BUILD_INPUT,
+        castAt: '2026-07-12T04:00:00.000Z',
+        tossValues: plate.rawTosses,
+      });
+      plate.calendar.pillars.day = structuredClone(otherDate.calendar.pillars.day);
+    }],
+    ['line tuple order', (plate: any) => {
+      [plate.lines[0], plate.lines[1]] = [plate.lines[1], plate.lines[0]];
+    }],
+  ])('runtime gate rejects forged %s binding', (_label, forge) => {
+    const plate = structuredClone(buildFixturePlate([7, 7, 7, 7, 7, 7])) as any;
+    forge(plate);
+    expect(() => assertPlateV2RuntimeShape(plate)).toThrow('PlateV2 运行时结构无效');
+  });
+
+  it.each([
+    ['base relation to base palace', (plate: any) => { plate.lines[0].base.relationToBasePalace = '父母'; }],
+    ['base relation to own palace', (plate: any) => { plate.lines[0].base.relationToOwnPalace = '父母'; }],
+    ['changed relation to base palace', (plate: any) => { plate.lines[0].changed.relationToBasePalace = '兄弟'; }],
+    ['changed relation to own palace', (plate: any) => { plate.lines[0].changed.relationToOwnPalace = '父母'; }],
+  ])('runtime gate rejects forged %s', (_label, forge) => {
+    const plate = structuredClone(buildFixturePlate([9, 9, 9, 9, 9, 9])) as any;
+    forge(plate);
+
+    expect(() => assertPlateV2RuntimeShape(plate)).toThrow('PlateV2 运行时结构无效');
+  });
+
+  it.each([
+    ['unregistered stem with matching undefined element', (plate: any) => {
+      const facet = plate.lines[0].changed;
+      facet.stem = '非法干';
+      delete facet.stemElement;
+      facet.ganZhi = `${facet.stem}${facet.branch}`;
+    }],
+    ['unregistered branch with internally coherent forged relations', (plate: any) => {
+      const facet = plate.lines[0].changed;
+      facet.branch = '非法支';
+      delete facet.branchElement;
+      facet.ganZhi = `${facet.stem}${facet.branch}`;
+      facet.relationToBasePalace = '妻财';
+      facet.relationToOwnPalace = '妻财';
+    }],
+  ])('runtime gate rejects %s', (_label, forge) => {
+    const plate = structuredClone(buildFixturePlate([7, 7, 7, 7, 7, 7])) as any;
+    forge(plate);
+
+    expect(() => assertPlateV2RuntimeShape(plate)).toThrow('PlateV2 运行时结构无效');
+  });
+
+  it.each([
+    ['missing base 世', (plate: any) => { plate.lines[5].base.role = null; }],
+    ['duplicate base 世', (plate: any) => { plate.lines[4].base.role = '世'; }],
+    ['misplaced base 应', (plate: any) => {
+      plate.lines[2].base.role = null;
+      plate.lines[1].base.role = '应';
+    }],
+    ['missing changed 世', (plate: any) => { plate.lines[0].changed.role = null; }],
+    ['duplicate changed 应', (plate: any) => { plate.lines[4].changed.role = '应'; }],
+    ['misplaced changed 世', (plate: any) => {
+      plate.lines[0].changed.role = null;
+      plate.lines[1].changed.role = '世';
+    }],
+  ])('runtime gate rejects %s role metadata', (_label, forge) => {
+    const plate = structuredClone(buildFixturePlate([9, 7, 7, 7, 7, 7])) as any;
+    forge(plate);
+
+    expect(() => assertPlateV2RuntimeShape(plate)).toThrow('PlateV2 运行时结构无效');
+  });
+
+  it.each([
+    ['sparse candidate array', (plate: any) => {
+      plate.lines[2].hiddenSpiritCandidates = Object.assign(new Array(1), {});
+    }],
+    ['non-plain candidate', (plate: any) => {
+      plate.lines[2].hiddenSpiritCandidates[0] = Object.assign(
+        Object.create({ forged: true }),
+        plate.lines[2].hiddenSpiritCandidates[0],
+      );
+    }],
+    ['forged id', (plate: any) => { plate.lines[2].hiddenSpiritCandidates[0].id = 'hidden:forged'; }],
+    ['forged hostLineId', (plate: any) => { plate.lines[2].hiddenSpiritCandidates[0].hostLineId = 'line:4'; }],
+    ['forged sourceLine', (plate: any) => { plate.lines[2].hiddenSpiritCandidates[0].sourceLine = 4; }],
+    ['forged relation', (plate: any) => { plate.lines[2].hiddenSpiritCandidates[0].relation = '官鬼'; }],
+    ['forged stem', (plate: any) => { plate.lines[2].hiddenSpiritCandidates[0].stem = '甲'; }],
+    ['forged branch', (plate: any) => { plate.lines[2].hiddenSpiritCandidates[0].branch = '子'; }],
+    ['forged ganZhi', (plate: any) => { plate.lines[2].hiddenSpiritCandidates[0].ganZhi = '甲子'; }],
+    ['forged element', (plate: any) => { plate.lines[2].hiddenSpiritCandidates[0].element = '木'; }],
+    ['forged sourceHexagram', (plate: any) => { plate.lines[2].hiddenSpiritCandidates[0].sourceHexagram = '乾为天'; }],
+    ['forged status', (plate: any) => { plate.lines[2].hiddenSpiritCandidates[0].status = 'active'; }],
+    ['forged extra field', (plate: any) => { plate.lines[2].hiddenSpiritCandidates[0].forged = true; }],
+    ['candidate moved to another host', (plate: any) => {
+      plate.lines[3].hiddenSpiritCandidates = plate.lines[2].hiddenSpiritCandidates;
+      plate.lines[2].hiddenSpiritCandidates = [];
+    }],
+    ['missing reviewed candidate', (plate: any) => { plate.lines[2].hiddenSpiritCandidates = []; }],
+    ['globally duplicated candidate id', (plate: any) => {
+      plate.lines[2].hiddenSpiritCandidates.push(structuredClone(plate.lines[2].hiddenSpiritCandidates[0]));
+    }],
+  ])('runtime gate rejects hidden-spirit %s', (_label, forge) => {
+    const plate = structuredClone(buildStaticHexagram('风泽中孚')) as any;
+    forge(plate);
+
+    expect(() => assertPlateV2RuntimeShape(plate)).toThrow('PlateV2 运行时结构无效');
+  });
+
   it.each([0, null])('rejects a non-object JS input: %s', (input) => {
     expect(() => buildPlateV2(input as unknown as Parameters<typeof buildPlateV2>[0]))
       .toThrow('buildPlateV2 input 必须是对象');
@@ -576,6 +699,7 @@ describe('buildPlateV2', () => {
       const second = buildFixturePlate(tossValues);
 
       expect(first).toEqual(second);
+      expect(() => assertPlateV2RuntimeShape(first)).not.toThrow();
       expect(first.lines).toHaveLength(6);
       baseChangedPairs.add(`${first.baseHexagram.key}>${first.changedHexagram.key}`);
       const changedNajia = GOLDEN_NAJIA_BY_KEY.get(first.changedHexagram.key);

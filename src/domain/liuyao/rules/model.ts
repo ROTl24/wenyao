@@ -63,6 +63,22 @@ export interface EffectsRuleBundleManifest {
   sourceRefs: readonly string[];
 }
 
+export interface UseGodRuleBundleManifest {
+  bundleId: 'use_god_core_v1';
+  version: '1.0.0';
+  artifactHash: string;
+  verificationLevel: VerificationLevel;
+  runtimeStatus: RulePackRuntimeStatus;
+  reviews: readonly RuleReviewRecord[];
+  sourceRefs: readonly string[];
+}
+
+export interface UseGodBundleRef {
+  id: 'use_god_core_v1';
+  version: '1.0.0';
+  artifactHash: string;
+}
+
 export interface EffectsBundleRef {
   id: 'liuyao_effects_v1';
   version: '1.0.0';
@@ -153,8 +169,11 @@ export interface RuleContext {
   };
   useGodProfile: {
     id: 'explicit_intent_first_v1';
+    bundle: UseGodBundleRef;
     ambiguousIntent: 'ask-user';
-    multipleCandidates: 'retain-ranked-candidates';
+    candidateTiers: readonly ['base-visible', 'true-changed', 'palace-head-hidden'];
+    multipleCandidates: 'retain-all-without-auto-choice';
+    hiddenSpiritPolicy: 'yehe-last-resort-disputed-v1';
   };
   sources: readonly RuleSourceRef[];
 }

@@ -31,9 +31,12 @@ function sameSourceRef(
   actual: unknown,
   expected: RuleSourceRef | undefined,
 ): boolean {
-  return actual !== null
-    && typeof actual === 'object'
-    && !Array.isArray(actual)
+  if (actual === null || typeof actual !== 'object' || Array.isArray(actual)) return false;
+  const prototype = Object.getPrototypeOf(actual);
+  const keys = Reflect.ownKeys(actual);
+  return (prototype === Object.prototype || prototype === null)
+    && keys.length === 5
+    && ['id', 'title', 'url', 'locator', 'contentHash'].every((key) => keys.includes(key))
     && expected !== undefined
     && (actual as RuleSourceRef).id === expected.id
     && (actual as RuleSourceRef).title === expected.title

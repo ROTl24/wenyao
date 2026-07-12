@@ -1,4 +1,6 @@
 export * from './calendar.js';
+export { resolveUseGod } from './use-god.js';
+export type { ResolveUseGodInput } from './use-god.js';
 export * from './facts/branch-relations.js';
 export {
   deriveEffectsFacts,
@@ -59,6 +61,27 @@ export * from './rules/model.js';
 export * from './rules/review-gate.js';
 export * from './rules/registry.js';
 export * from './rules/tables.js';
+export {
+  USE_GOD_CORE_V1_ARTIFACT,
+  USE_GOD_CORE_V1_ARTIFACT_HASH,
+  USE_GOD_CORE_V1_CANONICAL_PAYLOAD,
+  USE_GOD_CORE_V1_MANIFEST,
+  USE_GOD_SOURCE_EVIDENCE_CAPSULES,
+  useGodIntentRule,
+  useGodRule,
+} from './rules/use-god-core-v1.js';
+export type {
+  UseGodIntentRule,
+  UseGodSourceEvidenceCapsule,
+} from './rules/use-god-core-v1.js';
+export {
+  USE_GOD_REVIEW_CHECKED_CLAIMS,
+  USE_GOD_REVIEW_REPORT_PATHS,
+} from './rules/use-god-manifest-expectations.js';
+export {
+  assertProjectEnabledUseGodBundle,
+  assertProjectEnabledUseGodContext,
+} from './rules/use-god-registry.js';
 export * from './rules/wenwang-najia-v2.js';
 export * from './rules/wenwang-manifest-expectations.js';
 export {

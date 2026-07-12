@@ -21,6 +21,10 @@ import {
   assertProjectEnabledRelationContext,
 } from './relation-registry.js';
 import { RELATION_CORE_V1_ARTIFACT } from './relation-core-v1.js';
+import {
+  deriveUseGodDependentFacts,
+  deriveUseGodIndependentFacts,
+} from './use-god-effects.js';
 
 type ComparisonScope = 'calendar' | 'base' | 'transition';
 type RelationEntityRef = Extract<EntityRef, { type: 'pillar' | 'line' }>;
@@ -284,11 +288,16 @@ interface TrustedFactPipeline {
   readonly relationFacts: readonly DerivedFact[];
   readonly growthFacts: readonly DerivedFact[];
   readonly effectsFacts: readonly DerivedFact[];
+  readonly useGodIndependentFacts: readonly DerivedFact[];
 }
 
 function deriveTrustedFactPipeline(
   plate: PlateV2,
   ruleContext: RuleContext,
+  useGodIndependentDeriver: ((
+    targetPlate: PlateV2,
+    context: RuleContext,
+  ) => readonly DerivedFact[]) | null = deriveUseGodIndependentFacts,
 ): TrustedFactPipeline {
   const relationFacts = deriveRelationFactsForInternalPipeline(plate, ruleContext);
   const growthFacts = deriveGrowthShenShaFacts({ plate, ruleContext });
@@ -298,7 +307,10 @@ function deriveTrustedFactPipeline(
     relationFacts,
     growthFacts,
   );
-  return { relationFacts, growthFacts, effectsFacts };
+  const useGodIndependentFacts = useGodIndependentDeriver === null
+    ? []
+    : useGodIndependentDeriver(plate, ruleContext);
+  return { relationFacts, growthFacts, effectsFacts, useGodIndependentFacts };
 }
 
 function assertEffectsInput(input: unknown): asserts input is DeriveEffectsFactsInput {
@@ -319,7 +331,7 @@ export function deriveEffectsFacts(input: unknown): readonly DerivedFact[] {
   assertEffectsInput(input);
   assertPlateV2RuntimeShape(input.plate);
   assertProjectEnabledEffectsContext(input.ruleContext);
-  return deriveTrustedFactPipeline(input.plate, input.ruleContext).effectsFacts;
+  return deriveTrustedFactPipeline(input.plate, input.ruleContext, null).effectsFacts;
 }
 
 export function deriveFacts(input: DeriveFactsInput): readonly DerivedFact[];
@@ -334,9 +346,14 @@ export function deriveFacts(input: unknown): readonly DerivedFact[] {
     validated.plate,
     validated.ruleContext,
   );
+  const dependentFacts = Object.prototype.hasOwnProperty.call(candidate, 'useGod')
+    ? deriveUseGodDependentFacts(validated.plate, validated.ruleContext, candidate.useGod)
+    : [];
   return stableFacts([
     ...pipeline.relationFacts,
     ...pipeline.growthFacts,
     ...pipeline.effectsFacts,
+    ...pipeline.useGodIndependentFacts,
+    ...dependentFacts,
   ]);
 }

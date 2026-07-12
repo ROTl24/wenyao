@@ -123,6 +123,7 @@ export type FactRelation =
   | 'is-growth-stage' | 'is-six-beast' | 'is-shen-sha'
   | 'is-source-spirit' | 'is-avoid-spirit' | 'is-enemy-spirit'
   | 'flying-generates-hidden' | 'flying-controls-hidden'
+  | 'hidden-generates-flying' | 'hidden-controls-flying'
   | 'holds-shi' | 'holds-ying';
 
 export interface DerivedFact {
@@ -142,14 +143,16 @@ export interface DerivedFact {
 
 export type QuestionIntentId =
   | 'career.rank-or-office'
-  | 'career.project-or-contract'
+  | 'career.contract-or-approval'
+  | 'career.project-profit'
   | 'study.learning-or-documents'
   | 'study.exam-rank-or-admission'
-  | 'wealth.income-or-asset'
+  | 'wealth.money-or-valuables'
   | 'relationship.female-partner'
   | 'relationship.male-partner'
   | 'relationship.relationship-dynamic'
   | 'health.self'
+  | 'health.other-person'
   | 'lost-item.money-or-valuables'
   | 'lost-item.documents-or-vehicle'
   | 'lost-item.animal'
@@ -157,30 +160,142 @@ export type QuestionIntentId =
   | 'travel.other-person'
   | 'other.explicit';
 
+export type QuestionCategory =
+  | 'career'
+  | 'wealth'
+  | 'relationship'
+  | 'health'
+  | 'study'
+  | 'lost_item'
+  | 'travel'
+  | 'other';
+
+export type UseGodSubjectRelation = SixRelation | 'distant-other';
+
+export type UseGodTargetSelector =
+  | { kind: 'six-relation'; relation: SixRelation }
+  | { kind: 'role'; role: '世' | '应' }
+  | { kind: 'shi-ying-pair' }
+  | { kind: 'explicit-entity'; entity: UseGodEntityRef };
+
 export interface UseGodCandidate {
   entity: UseGodEntityRef;
   relation: SixRelation;
-  role: 'primary' | 'secondary' | 'supporting';
-  score: number;
+  candidateSource: 'base-visible' | 'true-changed' | 'palace-head-hidden';
+  sourceTier: 0 | 1 | 2;
+  features: Readonly<{
+    moving: boolean;
+    role: '世' | '应' | null;
+    factIds: readonly string[];
+  }>;
+  authority: RuleAuthority;
+  certainty: 'computed' | 'conditional' | 'disputed';
+  profileId: string;
+  sourceRefs: readonly string[];
+  conditions: readonly string[];
   reasonRuleIds: readonly string[];
 }
 
-export interface UseGodSelection {
-  status: 'resolved' | 'ambiguous' | 'needs-user-input';
-  intent: {
-    id: QuestionIntentId;
-    label: string;
-    selectedBy: 'explicit-user-choice' | 'deterministic-rule';
-  } | null;
-  primary: UseGodCandidate | null;
-  candidates: readonly UseGodCandidate[];
+export interface UseGodClarificationPatch {
+  explicitIntentId?: QuestionIntentId;
+  subjectRelation?: UseGodSubjectRelation;
+  explicitTarget?: UseGodTargetSelector;
+}
+
+export interface UseGodClarificationOption {
+  id: string;
+  label: string;
+  patch: Readonly<UseGodClarificationPatch>;
+}
+
+export interface UseGodClarification {
+  reason: 'intent-required' | 'subject-relation-required' | 'explicit-target-required';
+  prompt: string;
+  options: readonly UseGodClarificationOption[];
+}
+
+export interface UseGodResolvedIntent {
+  id: QuestionIntentId;
+  label: string;
+  selectedBy: 'explicit-user-choice' | 'deterministic-rule';
+  subjectRelation?: UseGodSubjectRelation;
+  explicitTarget?: UseGodTargetSelector;
+}
+
+interface UseGodSelectionCommon {
+  plateRef: Readonly<{
+    id: string;
+    sessionId: string;
+    castAt: string;
+    rawTosses: PlateV2['rawTosses'];
+    rulePackRef: PlateV2['rulePackRef'];
+  }>;
+  category: QuestionCategory;
   relatedRelations: readonly SixRelation[];
-  clarification?: {
-    prompt: string;
-    options: readonly { intentId: QuestionIntentId; label: string }[];
-  };
   ruleIds: readonly string[];
 }
+
+export interface UseGodNeedsUserInputSelection extends UseGodSelectionCommon {
+  status: 'needs-user-input';
+  selectionMode: 'single';
+  intent: UseGodResolvedIntent | null;
+  targetSelector: null;
+  primary: null;
+  focusEntities: readonly [];
+  candidates: readonly [];
+  clarification: UseGodClarification;
+}
+
+export interface UseGodUnresolvedSelection extends UseGodSelectionCommon {
+  status: 'unresolved';
+  selectionMode: 'single';
+  intent: UseGodResolvedIntent;
+  targetSelector: Exclude<UseGodTargetSelector, { kind: 'shi-ying-pair' }>;
+  primary: null;
+  focusEntities: readonly [];
+  candidates: readonly [];
+  clarification?: never;
+}
+
+export interface UseGodAmbiguousSelection extends UseGodSelectionCommon {
+  status: 'ambiguous';
+  selectionMode: 'single';
+  intent: UseGodResolvedIntent;
+  targetSelector: Exclude<UseGodTargetSelector, { kind: 'shi-ying-pair' }>;
+  primary: null;
+  focusEntities: readonly UseGodEntityRef[];
+  candidates: readonly [UseGodCandidate, UseGodCandidate, ...UseGodCandidate[]];
+  clarification?: never;
+}
+
+export interface UseGodResolvedSingleSelection extends UseGodSelectionCommon {
+  status: 'resolved';
+  selectionMode: 'single';
+  intent: UseGodResolvedIntent;
+  targetSelector: Exclude<UseGodTargetSelector, { kind: 'shi-ying-pair' }>;
+  primary: UseGodCandidate;
+  focusEntities: readonly [UseGodEntityRef];
+  candidates: readonly [UseGodCandidate];
+  clarification?: never;
+}
+
+export interface UseGodResolvedPairSelection extends UseGodSelectionCommon {
+  status: 'resolved';
+  selectionMode: 'shi-ying-pair';
+  intent: UseGodResolvedIntent;
+  targetSelector: Extract<UseGodTargetSelector, { kind: 'shi-ying-pair' }>;
+  primary: null;
+  focusEntities: readonly [UseGodEntityRef, UseGodEntityRef];
+  candidates: readonly [];
+  clarification?: never;
+}
+
+export type UseGodSelection =
+  | UseGodNeedsUserInputSelection
+  | UseGodUnresolvedSelection
+  | UseGodAmbiguousSelection
+  | UseGodResolvedSingleSelection
+  | UseGodResolvedPairSelection;
 
 export interface DivinationCaseV2 {
   schemaVersion: '2.0.0';

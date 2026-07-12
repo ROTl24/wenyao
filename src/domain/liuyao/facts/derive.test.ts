@@ -621,64 +621,47 @@ describe('production relation fact derivation', () => {
       });
     }
 
-    const overlapPlate = structuredClone(plate);
-    overlapPlate.calendar.pillars.year.branch = { value: '寅', element: '木' };
-    overlapPlate.calendar.pillars.year.ganZhi = `${overlapPlate.calendar.pillars.year.stem.value}寅`;
-    overlapPlate.lines[0].base.branch = '巳';
-    overlapPlate.lines[0].base.branchElement = '火';
-    overlapPlate.lines[0].base.ganZhi = `${overlapPlate.lines[0].base.stem}巳`;
-    const overlapRelations = productionFacts(overlapPlate)
-      .filter(({ values }) => (
-        values.comparisonId === 'calendar|pillar:year|line:line:1:base'
-      ))
-      .map(({ relation }) => relation);
+    const overlapRelations = [
+      elementRelation('木', '火'),
+      ...branchRelationMatches('寅', '巳', DEFAULT_RULE_CONTEXT.relationProfile)
+        .map(({ relation }) => relation),
+    ].filter((relation) => relation !== null);
     expect(overlapRelations).toEqual(expect.arrayContaining(['generates', 'harms', 'punishes']));
     expect(new Set(overlapRelations).size).toBe(overlapRelations.length);
   });
 
   it('orients element facts against hard-coded source and target expectations', () => {
     const base = buildFixturePlate([9, 7, 7, 7, 7, 7]);
-    const waterControlsFire = structuredClone(base);
-    waterControlsFire.calendar.pillars.year.branch = { value: '子', element: '水' };
-    waterControlsFire.calendar.pillars.year.ganZhi = `${waterControlsFire.calendar.pillars.year.stem.value}子`;
-    waterControlsFire.lines[0].base.branch = '午';
-    waterControlsFire.lines[0].base.branchElement = '火';
-    waterControlsFire.lines[0].base.ganZhi = `${waterControlsFire.lines[0].base.stem}午`;
-    const forward = productionFacts(waterControlsFire).find(({ relation, values }) => (
+    const facts = productionFacts(base);
+    const forward = facts.find(({ relation, values }) => (
       relation === 'controls'
-      && values.comparisonId === 'calendar|pillar:year|line:line:1:base'
+      && values.comparisonId === 'base|line:line:1:base|line:line:4:base'
     ));
     expect(forward).toMatchObject({
-      source: { type: 'pillar', id: 'year' },
-      target: { type: 'line', id: 'line:1', side: 'base' },
+      source: { type: 'line', id: 'line:1', side: 'base' },
+      target: { type: 'line', id: 'line:4', side: 'base' },
       values: { sourceElement: '水', targetElement: '火' },
     });
 
-    const woodControlsEarth = structuredClone(base);
-    woodControlsEarth.calendar.pillars.year.branch = { value: '丑', element: '土' };
-    woodControlsEarth.calendar.pillars.year.ganZhi = `${woodControlsEarth.calendar.pillars.year.stem.value}丑`;
-    woodControlsEarth.lines[0].base.branch = '寅';
-    woodControlsEarth.lines[0].base.branchElement = '木';
-    woodControlsEarth.lines[0].base.ganZhi = `${woodControlsEarth.lines[0].base.stem}寅`;
-    const reverse = productionFacts(woodControlsEarth).find(({ relation, values }) => (
+    const reverse = facts.find(({ relation, values }) => (
       relation === 'controls'
-      && values.comparisonId === 'calendar|pillar:year|line:line:1:base'
+      && values.comparisonId === 'calendar|pillar:month|line:line:2:base'
     ));
     expect(reverse).toMatchObject({
-      source: { type: 'line', id: 'line:1', side: 'base' },
-      target: { type: 'pillar', id: 'year' },
+      source: { type: 'line', id: 'line:2', side: 'base' },
+      target: { type: 'pillar', id: 'month' },
       values: { sourceElement: '木', targetElement: '土' },
     });
   });
 
-  it('rejects a plate built from any structural artifact other than the declared dependency', () => {
+  it('rejects a forged structural artifact reference at the Plate boundary', () => {
     const plate = buildFixturePlate([9, 7, 7, 7, 7, 7]);
     const forged = {
       ...plate,
       rulePackRef: { ...plate.rulePackRef, artifactHash: 'f'.repeat(64) },
     } as PlateV2;
 
-    expect(() => productionFacts(forged)).toThrow('关系事实排盘依赖不匹配');
+    expect(() => productionFacts(forged)).toThrow('PlateV2 运行时结构无效');
   });
 
   it('uses pillar branches rather than stems and fixes transitions as changed to base', () => {
@@ -718,10 +701,9 @@ describe('production relation fact derivation', () => {
     ))).toBe(true);
   });
 
-  it('is stable across deep clone and runtime traversal order', () => {
+  it('is stable across deep clone and plain-object key order', () => {
     const plate = buildFixturePlate([9, 7, 8, 6, 7, 8]);
     const reordered = structuredClone(plate);
-    reordered.lines = [...reordered.lines].reverse() as unknown as PlateV2['lines'];
     const { year, month, day, hour } = reordered.calendar.pillars;
     reordered.calendar.pillars = { hour, day, month, year } as typeof reordered.calendar.pillars;
 

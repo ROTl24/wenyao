@@ -167,42 +167,14 @@ function enabledGrowthManifest(
   };
 }
 
-const BRANCH_ELEMENT: Readonly<Record<Branch, Element>> = {
-  子: '水', 丑: '土', 寅: '木', 卯: '木', 辰: '土', 巳: '火',
-  午: '火', 未: '土', 申: '金', 酉: '金', 戌: '土', 亥: '水',
-};
-
-function withFacetBranch(
-  facet: PlateV2['lines'][number]['base'],
-  branch: Branch,
-): PlateV2['lines'][number]['base'] {
-  return {
-    ...facet,
-    branch,
-    branchElement: BRANCH_ELEMENT[branch],
-    ganZhi: `${facet.stem}${branch}`,
-  };
-}
-
 function shenShaFixture(): PlateV2 {
-  const plate = structuredClone(FIXED_PLATE);
-  const baseBranches = ['丑', '未', '寅', '戌', '子', '辰'] as const;
-  plate.calendar.pillars.day = {
-    ...plate.calendar.pillars.day,
-    ganZhi: '甲子',
-    stem: { value: '甲', element: '木' },
-    branch: { value: '子', element: '水' },
-  };
-  plate.calendar.pillars.month = {
-    ...plate.calendar.pillars.month,
-    ganZhi: `${plate.calendar.pillars.month.stem.value}辰`,
-    branch: { value: '辰', element: '土' },
-  };
-  plate.lines = plate.lines.map((line, index) => ({
-    ...line,
-    base: withFacetBranch(line.base, baseBranches[index]),
-  })) as unknown as PlateV2['lines'];
-  return plate;
+  return buildPlateV2({
+    plateId: 'plate-shensha-oracle',
+    sessionId: 'session-shensha-oracle',
+    castAt: '2026-01-01T04:00:00.000Z',
+    tossValues: [8, 8, 8, 7, 8, 8],
+    ruleContext: DEFAULT_RULE_CONTEXT,
+  });
 }
 
 describe('growth_shensha_core_v1 十二长生独立 oracle', () => {
@@ -216,20 +188,21 @@ describe('growth_shensha_core_v1 十二长生独立 oracle', () => {
     }
   });
 
-  it('土从水逐格一致，并把所有土长生事实标为 disputed', () => {
+  it('土从水逐格一致，并把合法盘中所有土长生事实标为 disputed', () => {
     for (const branch of BRANCHES) {
       expect(twelveStage('土', branch, DEFAULT_RULE_CONTEXT.growthProfile))
         .toBe(twelveStage('水', branch, DEFAULT_RULE_CONTEXT.growthProfile));
     }
-    const earthPlate = structuredClone(FIXED_PLATE);
-    earthPlate.lines = earthPlate.lines.map((line) => ({
-      ...line,
-      base: withFacetBranch(line.base, '辰'),
-      changed: withFacetBranch(line.changed, '辰'),
-    })) as unknown as PlateV2['lines'];
-    const facts = productionGrowthFacts(earthPlate);
-    expect(facts).toHaveLength(48 + earthPlate.movingLines.length);
-    expect(facts.every(({ certainty }) => certainty === 'disputed')).toBe(true);
+    const facts = productionGrowthFacts(FIXED_PLATE);
+    const earthFacts = facts.filter(({ values }) => values.element === '土');
+    expect(facts).toHaveLength(48 + FIXED_PLATE.movingLines.length);
+    expect(earthFacts.length).toBeGreaterThan(0);
+    expect(earthFacts.every(({ certainty, conditions }) => (
+      certainty === 'disputed'
+      && conditions.includes('default-earth-follows-water-disputed')
+    ))).toBe(true);
+    expect(facts.filter(({ values }) => values.element !== '土')
+      .every(({ certainty }) => certainty === 'computed')).toBe(true);
   });
 
   it('固定输出 48 条本变四柱事实及每个动爻一条 transition', () => {
@@ -610,15 +583,13 @@ describe('growth_shensha_core_v1 artifact、纯度与生产门禁', () => {
     }
   });
 
-  it('生产计算经 deep clone 与爻数组换序后 ID 和顺序完全稳定且无重复', () => {
+  it('生产计算经 deep clone 后 ID 和顺序完全稳定且无重复', () => {
     const first = productionBundleFacts(
       structuredClone(FIXED_PLATE),
       structuredClone(DEFAULT_RULE_CONTEXT),
     );
-    const reordered = structuredClone(FIXED_PLATE);
-    reordered.lines = [...reordered.lines].reverse() as unknown as PlateV2['lines'];
     const second = productionBundleFacts(
-      reordered,
+      structuredClone(FIXED_PLATE),
       structuredClone(DEFAULT_RULE_CONTEXT),
     );
 

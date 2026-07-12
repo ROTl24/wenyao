@@ -5,15 +5,23 @@ import * as calendarEffectsModule from './calendar-effects.js';
 import * as movingEffectsModule from './moving-effects.js';
 import * as formationsModule from './formations.js';
 import { SIXTY_JIA_ZI_GOLDEN } from '../__fixtures__/golden-calendar.js';
-import type { Branch, Element, PlateV2, Stem } from '../model.js';
+import type {
+  Branch,
+  DerivedFact,
+  Element,
+  EntityRef,
+  PlateV2,
+  Stem,
+} from '../model.js';
 import { buildPlateV2 } from '../plate.js';
 import {
   DEFAULT_RULE_CONTEXT,
   mergeRuleSourceRefs,
 } from '../rules/default-context.js';
 import type { RuleContext } from '../rules/model.js';
-import { BRANCHES } from './branch-relations.js';
+import { BRANCHES, branchRelationMatches } from './branch-relations.js';
 import { deriveEffectsFacts, deriveFacts } from './derive.js';
+import { elementRelation } from './element-relations.js';
 import {
   EFFECTS_SOURCE_EVIDENCE_CAPSULES,
   LIUYAO_EFFECTS_V1_ARTIFACT,
@@ -30,8 +38,10 @@ import {
   assertProjectEnabledEffectsContext,
 } from './effects-registry.js';
 import {
+  deriveCalendarEffectsFromTrustedFacts,
   monthStatusForBranches,
 } from './calendar-effects.js';
+import { RELATION_CORE_V1_ARTIFACT } from './relation-core-v1.js';
 
 const BUILD_INPUT = {
   plateId: 'plate-effects-calendar',
@@ -76,6 +86,148 @@ function calendarFixture(
   tossValues: PlateV2['rawTosses'] = [7, 8, 7, 8, 7, 8],
 ): PlateV2 {
   return structuredClone(buildPlateV2({ ...BUILD_INPUT, tossValues }));
+}
+
+type RelationRef = Extract<EntityRef, { type: 'pillar' | 'line' }>;
+
+interface RelationEntity {
+  readonly ref: RelationRef;
+  readonly element: Element;
+  readonly branch: Branch;
+}
+
+interface RelationComparison {
+  readonly id: string;
+  readonly scope: 'calendar' | 'base';
+  readonly source: RelationEntity;
+  readonly target: RelationEntity;
+}
+
+const PILLAR_ORDER = ['year', 'month', 'day', 'hour'] as const;
+
+function relationEntityKey(ref: RelationRef): string {
+  return ref.type === 'pillar'
+    ? `pillar:${ref.id}`
+    : `line:${ref.id}:${ref.side}`;
+}
+
+function fixtureRelationFacts(
+  plate: PlateV2,
+  ruleContext: RuleContext,
+): readonly DerivedFact[] {
+  const comparisons: RelationComparison[] = [];
+  for (const kind of PILLAR_ORDER) {
+    const pillar = plate.calendar.pillars[kind];
+    for (const line of plate.lines) {
+      const source: RelationEntity = {
+        ref: { type: 'pillar', id: kind },
+        element: pillar.branch.element,
+        branch: pillar.branch.value,
+      };
+      const target: RelationEntity = {
+        ref: { type: 'line', id: line.id, side: 'base' },
+        element: line.base.branchElement,
+        branch: line.base.branch,
+      };
+      comparisons.push({
+        id: `calendar|${relationEntityKey(source.ref)}|${relationEntityKey(target.ref)}`,
+        scope: 'calendar',
+        source,
+        target,
+      });
+    }
+  }
+  for (let leftIndex = 0; leftIndex < plate.lines.length; leftIndex += 1) {
+    for (let rightIndex = leftIndex + 1; rightIndex < plate.lines.length; rightIndex += 1) {
+      const leftLine = plate.lines[leftIndex];
+      const rightLine = plate.lines[rightIndex];
+      if (!leftLine.moving && !rightLine.moving) continue;
+      const source: RelationEntity = {
+        ref: { type: 'line', id: leftLine.id, side: 'base' },
+        element: leftLine.base.branchElement,
+        branch: leftLine.base.branch,
+      };
+      const target: RelationEntity = {
+        ref: { type: 'line', id: rightLine.id, side: 'base' },
+        element: rightLine.base.branchElement,
+        branch: rightLine.base.branch,
+      };
+      comparisons.push({
+        id: `base|${relationEntityKey(source.ref)}|${relationEntityKey(target.ref)}`,
+        scope: 'base',
+        source,
+        target,
+      });
+    }
+  }
+
+  return comparisons.flatMap((comparison): readonly DerivedFact[] => {
+    const facts: DerivedFact[] = [];
+    const forward = elementRelation(comparison.source.element, comparison.target.element);
+    const reverse = forward === null
+      ? elementRelation(comparison.target.element, comparison.source.element)
+      : null;
+    const relation = forward ?? reverse;
+    if (relation === null) throw new Error('测试五行关系矩阵不完整');
+    const source = forward === null ? comparison.target : comparison.source;
+    const target = forward === null ? comparison.source : comparison.target;
+    const elementRule = RELATION_CORE_V1_ARTIFACT.elementRules.find(
+      (candidate) => candidate.relation === relation,
+    );
+    if (!elementRule) throw new Error(`测试五行规则缺失：${relation}`);
+    facts.push({
+      id: `fixture:${comparison.id}:${relation}:${elementRule.ruleId}`,
+      relation,
+      source: source.ref,
+      target: target.ref,
+      scope: comparison.scope,
+      authority: elementRule.authority,
+      ruleId: elementRule.ruleId,
+      profileId: elementRule.profileId,
+      certainty: elementRule.certainty,
+      conditions: [],
+      values: { comparisonId: comparison.id },
+      sourceRefs: elementRule.sourceRefs,
+    });
+    for (const match of branchRelationMatches(
+      comparison.source.branch,
+      comparison.target.branch,
+      ruleContext.relationProfile,
+    )) {
+      const branchSource = match.direction === 'reverse'
+        ? comparison.target
+        : comparison.source;
+      const branchTarget = match.direction === 'reverse'
+        ? comparison.source
+        : comparison.target;
+      facts.push({
+        id: `fixture:${comparison.id}:${match.relation}:${match.ruleId}`,
+        relation: match.relation,
+        source: branchSource.ref,
+        target: branchTarget.ref,
+        scope: comparison.scope,
+        authority: match.authority,
+        ruleId: match.ruleId,
+        profileId: match.profileId,
+        certainty: match.certainty,
+        conditions: [],
+        values: { comparisonId: comparison.id },
+        sourceRefs: match.sourceRefs,
+      });
+    }
+    return facts;
+  });
+}
+
+function deriveCalendarEffectsFromFixture(
+  plate: PlateV2,
+  ruleContext: RuleContext,
+): readonly import('../model.js').DerivedFact[] {
+  return deriveCalendarEffectsFromTrustedFacts(
+    plate,
+    ruleContext,
+    fixtureRelationFacts(plate, ruleContext),
+  );
 }
 
 function deriveCalendarEffects(
@@ -126,7 +278,7 @@ describe('liuyao_effects_v1 production calendar facts', () => {
     setFacetBranch(strong, 1, 'changed', '卯');
     setPillarBranch(strong, 'day', '酉');
     setPillarBranch(strong, 'month', '亥');
-    const strongFacts = deriveCalendarEffects(strong, DEFAULT_RULE_CONTEXT)
+    const strongFacts = deriveCalendarEffectsFromFixture(strong, DEFAULT_RULE_CONTEXT)
       .filter(({ target }) => target?.type === 'line' && target.id === 'line:1');
     expect(strongFacts.map(({ relation }) => relation)).toContain('is-dark-moving');
     expect(strongFacts.map(({ relation }) => relation)).not.toContain('is-day-break');
@@ -136,7 +288,7 @@ describe('liuyao_effects_v1 production calendar facts', () => {
     setFacetBranch(weak, 1, 'changed', '卯');
     setPillarBranch(weak, 'day', '酉');
     setPillarBranch(weak, 'month', '申');
-    const weakFacts = deriveCalendarEffects(weak, DEFAULT_RULE_CONTEXT)
+    const weakFacts = deriveCalendarEffectsFromFixture(weak, DEFAULT_RULE_CONTEXT)
       .filter(({ target }) => target?.type === 'line' && target.id === 'line:1');
     expect(weakFacts.map(({ relation }) => relation)).toContain('is-day-break');
     expect(weakFacts.map(({ relation }) => relation)).not.toContain('is-dark-moving');
@@ -152,12 +304,12 @@ describe('liuyao_effects_v1 production calendar facts', () => {
     setFacetBranch(plate, 1, 'changed', '卯');
     setPillarBranch(plate, 'day', '酉');
     setPillarBranch(plate, 'month', '巳');
-    const effects = deriveCalendarEffects(plate, DEFAULT_RULE_CONTEXT)
+    const effects = deriveCalendarEffectsFromFixture(plate, DEFAULT_RULE_CONTEXT)
       .filter(({ target }) => target?.type === 'line' && target.id === 'line:1');
     expect(effects.map(({ relation }) => relation)).not.toEqual(expect.arrayContaining([
       'is-dark-moving', 'is-day-break',
     ]));
-    expect(deriveFacts({ plate, ruleContext: DEFAULT_RULE_CONTEXT }))
+    expect(fixtureRelationFacts(plate, DEFAULT_RULE_CONTEXT))
       .toEqual(expect.arrayContaining([expect.objectContaining({
         relation: 'clashes',
         source: { type: 'pillar', id: 'day' },
@@ -171,7 +323,7 @@ describe('liuyao_effects_v1 production calendar facts', () => {
     setFacetBranch(plate, 1, 'changed', '申');
     setPillarBranch(plate, 'day', '寅');
     setPillarBranch(plate, 'month', '卯');
-    const effects = deriveCalendarEffects(plate, DEFAULT_RULE_CONTEXT)
+    const effects = deriveCalendarEffectsFromFixture(plate, DEFAULT_RULE_CONTEXT)
       .filter(({ target }) => target?.type === 'line' && target.id === 'line:1');
     expect(effects.map(({ relation }) => relation).filter((relation) => (
       relation === 'is-dark-moving' || relation === 'is-day-break'
@@ -185,7 +337,7 @@ describe('liuyao_effects_v1 production calendar facts', () => {
     setFacetBranch(plate, 2, 'base', '亥');
     setPillarBranch(plate, 'day', '酉');
     setPillarBranch(plate, 'month', '申');
-    const facts = deriveCalendarEffects(plate, DEFAULT_RULE_CONTEXT)
+    const facts = deriveCalendarEffectsFromFixture(plate, DEFAULT_RULE_CONTEXT)
       .filter(({ target }) => target?.type === 'line' && target.id === 'line:1');
     expect(facts.map(({ relation }) => relation).filter((relation) => (
       relation === 'is-dark-moving' || relation === 'is-day-break'
@@ -198,7 +350,7 @@ describe('liuyao_effects_v1 production calendar facts', () => {
     setFacetBranch(daySupport, 1, 'changed', '未');
     setPillarBranch(daySupport, 'day', '丑');
     setPillarBranch(daySupport, 'month', '寅');
-    expect(deriveCalendarEffects(daySupport, DEFAULT_RULE_CONTEXT)
+    expect(deriveCalendarEffectsFromFixture(daySupport, DEFAULT_RULE_CONTEXT)
       .some(({ relation, target }) => (
         relation === 'is-day-break'
         && target?.type === 'line'
@@ -212,7 +364,7 @@ describe('liuyao_effects_v1 production calendar facts', () => {
     setFacetBranch(movingSameElement, 2, 'changed', '酉');
     setPillarBranch(movingSameElement, 'day', '寅');
     setPillarBranch(movingSameElement, 'month', '午');
-    expect(deriveCalendarEffects(movingSameElement, DEFAULT_RULE_CONTEXT)
+    expect(deriveCalendarEffectsFromFixture(movingSameElement, DEFAULT_RULE_CONTEXT)
       .some(({ relation, target }) => (
         relation === 'is-day-break'
         && target?.type === 'line'
@@ -230,7 +382,7 @@ describe('liuyao_effects_v1 production calendar facts', () => {
     setPillarBranch(plate, 'day', '酉');
     setPillarBranch(plate, 'month', '申');
     setPillarBranch(plate, kind, branch);
-    expect(deriveCalendarEffects(plate, DEFAULT_RULE_CONTEXT))
+    expect(deriveCalendarEffectsFromFixture(plate, DEFAULT_RULE_CONTEXT))
       .toEqual(expect.arrayContaining([expect.objectContaining({
         relation: 'is-day-break',
         target: { type: 'line', id: 'line:1', side: 'base' },
@@ -245,7 +397,7 @@ describe('liuyao_effects_v1 production calendar facts', () => {
     setFacetBranch(combinesOnly, 2, 'changed', '戌');
     setPillarBranch(combinesOnly, 'day', '酉');
     setPillarBranch(combinesOnly, 'month', '申');
-    expect(deriveCalendarEffects(combinesOnly, DEFAULT_RULE_CONTEXT))
+    expect(deriveCalendarEffectsFromFixture(combinesOnly, DEFAULT_RULE_CONTEXT))
       .toEqual(expect.arrayContaining([expect.objectContaining({
         relation: 'is-day-break',
         target: { type: 'line', id: 'line:1', side: 'base' },
@@ -256,7 +408,7 @@ describe('liuyao_effects_v1 production calendar facts', () => {
     setFacetBranch(residualQi, 1, 'changed', '巳');
     setPillarBranch(residualQi, 'day', '亥');
     setPillarBranch(residualQi, 'month', '未');
-    const residualFacts = deriveCalendarEffects(residualQi, DEFAULT_RULE_CONTEXT)
+    const residualFacts = deriveCalendarEffectsFromFixture(residualQi, DEFAULT_RULE_CONTEXT)
       .filter(({ target }) => target?.type === 'line' && target.id === 'line:1');
     expect(residualFacts).toEqual(expect.arrayContaining([expect.objectContaining({
       relation: 'has-month-status',
@@ -271,7 +423,7 @@ describe('liuyao_effects_v1 production calendar facts', () => {
     setFacetBranch(movingTarget, 1, 'changed', '子');
     setPillarBranch(movingTarget, 'day', '酉');
     setPillarBranch(movingTarget, 'month', '申');
-    const targetFacts = deriveCalendarEffects(movingTarget, DEFAULT_RULE_CONTEXT)
+    const targetFacts = deriveCalendarEffectsFromFixture(movingTarget, DEFAULT_RULE_CONTEXT)
       .filter(({ target }) => target?.type === 'line' && target.id === 'line:1');
     expect(targetFacts.some(({ relation }) => (
       relation === 'is-dark-moving' || relation === 'is-day-break'
@@ -286,7 +438,7 @@ describe('liuyao_effects_v1 production calendar facts', () => {
     setFacetBranch(plate, 1, 'changed', '午');
     setFacetBranch(plate, 2, 'base', '巳');
     setFacetBranch(plate, 2, 'changed', '午');
-    const facts = deriveCalendarEffects(plate, DEFAULT_RULE_CONTEXT);
+    const facts = deriveCalendarEffectsFromFixture(plate, DEFAULT_RULE_CONTEXT);
     expect(facts).toEqual(expect.arrayContaining([
       expect.objectContaining({ relation: 'is-month-break', target: { type: 'line', id: 'line:1', side: 'changed' } }),
       expect.objectContaining({ relation: 'is-void', target: { type: 'line', id: 'line:1', side: 'changed' } }),
@@ -316,7 +468,7 @@ describe('liuyao_effects_v1 production calendar facts', () => {
           setFacetBranch(fixture, index + 1, 'base', branch);
           setFacetBranch(fixture, index + 1, 'changed', branch);
         });
-        const facts = deriveCalendarEffects(fixture, DEFAULT_RULE_CONTEXT);
+        const facts = deriveCalendarEffectsFromFixture(fixture, DEFAULT_RULE_CONTEXT);
         testedBranches.forEach((branch, index) => {
           const isVoid = facts.some(({ relation, target }) => (
             relation === 'is-void'

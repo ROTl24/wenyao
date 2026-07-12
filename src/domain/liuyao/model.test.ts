@@ -10,6 +10,8 @@ import {
   RELATION_CORE_V1_ARTIFACT_HASH,
   RELATION_SOURCE_EVIDENCE_CAPSULES,
   RULE_SOURCE_EVIDENCE_CAPSULES,
+  USE_GOD_CORE_V1_ARTIFACT_HASH,
+  USE_GOD_SOURCE_EVIDENCE_CAPSULES,
 } from './index';
 
 describe('V2 domain contract', () => {
@@ -75,6 +77,17 @@ describe('V2 domain contract', () => {
         enabled: ['tianyi', 'lushen', 'yima', 'tianxi'],
         authority: 'secondary',
       },
+      useGodProfile: {
+        id: 'explicit_intent_first_v1',
+        bundle: {
+          id: 'use_god_core_v1',
+          version: '1.0.0',
+          artifactHash: USE_GOD_CORE_V1_ARTIFACT_HASH,
+        },
+        candidateTiers: ['base-visible', 'true-changed', 'palace-head-hidden'],
+        multipleCandidates: 'retain-all-without-auto-choice',
+        hiddenSpiritPolicy: 'yehe-last-resort-disputed-v1',
+      },
     });
     expect(Object.isFrozen(BASE_RULE_CONTEXT)).toBe(true);
   });
@@ -88,6 +101,9 @@ describe('V2 domain contract', () => {
     expect(Object.isFrozen(BASE_RULE_CONTEXT.sixSpiritProfile.bundle)).toBe(true);
     expect(Object.isFrozen(BASE_RULE_CONTEXT.shenShaProfile)).toBe(true);
     expect(Object.isFrozen(BASE_RULE_CONTEXT.shenShaProfile.enabled)).toBe(true);
+    expect(Object.isFrozen(BASE_RULE_CONTEXT.useGodProfile)).toBe(true);
+    expect(Object.isFrozen(BASE_RULE_CONTEXT.useGodProfile.bundle)).toBe(true);
+    expect(Object.isFrozen(BASE_RULE_CONTEXT.useGodProfile.candidateTiers)).toBe(true);
     expect(Object.isFrozen(BASE_RULE_CONTEXT.sources)).toBe(true);
     expect(BASE_RULE_CONTEXT.sources).toEqual([]);
   });
@@ -103,10 +119,11 @@ describe('V2 domain contract', () => {
       ...RELATION_SOURCE_EVIDENCE_CAPSULES.map(({ ref }) => ref),
       ...GROWTH_SHENSHA_SOURCE_EVIDENCE_CAPSULES.map(({ ref }) => ref),
       ...EFFECTS_SOURCE_EVIDENCE_CAPSULES.map(({ ref }) => ref),
+      ...USE_GOD_SOURCE_EVIDENCE_CAPSULES.map(({ ref }) => ref),
     ];
     expect(DEFAULT_RULE_CONTEXT.sources.map(({ id }) => id))
       .toEqual([...new Set(allSources.map(({ id }) => id))]);
-    expect(DEFAULT_RULE_CONTEXT.sources).toHaveLength(26);
+    expect(DEFAULT_RULE_CONTEXT.sources).toHaveLength(35);
     expect(Object.isFrozen(DEFAULT_RULE_CONTEXT)).toBe(true);
     expect(Object.isFrozen(DEFAULT_RULE_CONTEXT.sources)).toBe(true);
     expect(DEFAULT_RULE_CONTEXT.sources.every(Object.isFrozen)).toBe(true);

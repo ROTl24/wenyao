@@ -1,5 +1,11 @@
-import type { PlateV2 } from './model.js';
-import { WENWANG_NAJIA_V2_ARTIFACT } from './rules/wenwang-najia-v2.js';
+import type { Element, PlateV2, SixRelation } from './model.js';
+import { buildCalendarSnapshot } from './calendar.js';
+import { BASE_RULE_CONTEXT } from './rules/default-context.js';
+import { canonicalStringify } from './rules/tables.js';
+import {
+  WENWANG_NAJIA_V2_ARTIFACT,
+  WENWANG_NAJIA_V2_ARTIFACT_HASH,
+} from './rules/wenwang-najia-v2.js';
 
 const PLATE_GATE_ERROR = 'PlateV2 运行时结构无效';
 const PILLAR_KINDS = ['year', 'month', 'day', 'hour'] as const;
@@ -12,6 +18,24 @@ const STEM_ELEMENTS = new Map(
 const BRANCH_ELEMENTS = new Map(
   WENWANG_NAJIA_V2_ARTIFACT.branchElements.map(({ branch, element }) => [branch, element]),
 );
+const TRIGRAM_BY_KEY: ReadonlyMap<string, (typeof WENWANG_NAJIA_V2_ARTIFACT.trigrams)[number]> = new Map(
+  WENWANG_NAJIA_V2_ARTIFACT.trigrams.map((trigram) => [trigram.key, trigram]),
+);
+const HEXAGRAM_BY_KEY: ReadonlyMap<string, (typeof WENWANG_NAJIA_V2_ARTIFACT.hexagrams)[number]> = new Map(
+  WENWANG_NAJIA_V2_ARTIFACT.hexagrams.map((hexagram) => [hexagram.key, hexagram]),
+);
+const HIDDEN_CANDIDATE_KEYS = [
+  'id',
+  'hostLineId',
+  'sourceLine',
+  'relation',
+  'stem',
+  'branch',
+  'ganZhi',
+  'element',
+  'sourceHexagram',
+  'status',
+] as const;
 
 function isPlainObject(value: unknown): value is Record<string, unknown> {
   if (value === null || typeof value !== 'object' || Array.isArray(value)) return false;
@@ -29,19 +53,68 @@ function isNonEmptyString(value: unknown): value is string {
   return typeof value === 'string' && value.length > 0 && value === value.trim();
 }
 
-function validFacet(value: unknown): boolean {
+function relationOf(lineElement: Element, palaceElement: Element): SixRelation {
+  if (lineElement === palaceElement) return '兄弟';
+  if (WENWANG_NAJIA_V2_ARTIFACT.generates.some(
+    ({ source, target }) => source === lineElement && target === palaceElement,
+  )) return '父母';
+  if (WENWANG_NAJIA_V2_ARTIFACT.generates.some(
+    ({ source, target }) => source === palaceElement && target === lineElement,
+  )) return '子孙';
+  if (WENWANG_NAJIA_V2_ARTIFACT.controls.some(
+    ({ source, target }) => source === lineElement && target === palaceElement,
+  )) return '官鬼';
+  return '妻财';
+}
+
+function validFacet(
+  value: unknown,
+  basePalaceElement: Element,
+  ownPalaceElement: Element,
+  expected: Readonly<{
+    stem: string;
+    branch: string;
+    yang: boolean;
+    role: '世' | '应' | null;
+  }>,
+): boolean {
   if (!isPlainObject(value)) return false;
   const stem = value.stem;
   const branch = value.branch;
+  const branchElement = value.branchElement;
   return typeof stem === 'string'
     && typeof branch === 'string'
+    && stem === expected.stem
+    && branch === expected.branch
+    && STEM_ELEMENTS.has(stem as never)
+    && BRANCH_ELEMENTS.has(branch as never)
     && STEM_ELEMENTS.get(stem as never) === value.stemElement
-    && BRANCH_ELEMENTS.get(branch as never) === value.branchElement
+    && BRANCH_ELEMENTS.get(branch as never) === branchElement
     && value.ganZhi === `${stem}${branch}`
-    && typeof value.yang === 'boolean'
-    && SIX_RELATIONS.has(value.relationToBasePalace as never)
-    && SIX_RELATIONS.has(value.relationToOwnPalace as never)
-    && (value.role === null || value.role === '世' || value.role === '应');
+    && value.yang === expected.yang
+    && value.relationToBasePalace === relationOf(branchElement as Element, basePalaceElement)
+    && value.relationToOwnPalace === relationOf(branchElement as Element, ownPalaceElement)
+    && value.role === expected.role;
+}
+
+function expectedFacetForSide(
+  hexagramKey: string,
+  position: number,
+): Readonly<{ stem: string; branch: string; yang: boolean }> | null {
+  const hexagram = HEXAGRAM_BY_KEY.get(hexagramKey);
+  if (!hexagram) return null;
+  const inner = position <= 3;
+  const trigram = TRIGRAM_BY_KEY.get(
+    inner ? hexagram.lowerTrigram : hexagram.upperTrigram,
+  );
+  if (!trigram) return null;
+  const index = (position - 1) % 3;
+  const najia = inner ? trigram.inner : trigram.outer;
+  return {
+    stem: najia.stem,
+    branch: najia.branches[index],
+    yang: trigram.bits[index],
+  };
 }
 
 function validPillar(value: unknown, kind: (typeof PILLAR_KINDS)[number]): boolean {
@@ -62,13 +135,125 @@ function validPillar(value: unknown, kind: (typeof PILLAR_KINDS)[number]): boole
 }
 
 function validHexagramSide(value: unknown): boolean {
-  return isPlainObject(value)
-    && isNonEmptyString(value.key)
-    && isNonEmptyString(value.name)
-    && isNonEmptyString(value.palace)
-    && [...STEM_ELEMENTS.values(), ...BRANCH_ELEMENTS.values()].includes(value.palaceElement as never)
-    && LINE_POSITIONS.includes(value.shiLine as never)
-    && LINE_POSITIONS.includes(value.yingLine as never);
+  if (!isPlainObject(value) || typeof value.key !== 'string') return false;
+  const rule = HEXAGRAM_BY_KEY.get(value.key);
+  const palace = rule ? TRIGRAM_BY_KEY.get(rule.palace) : undefined;
+  return rule !== undefined
+    && palace !== undefined
+    && value.name === rule.name
+    && value.shortName === rule.shortName
+    && value.upperTrigram === rule.upperTrigram
+    && value.lowerTrigram === rule.lowerTrigram
+    && value.palace === rule.palace
+    && value.palaceElement === palace.element
+    && value.generation === rule.generation
+    && value.shiLine === rule.shiLine
+    && value.yingLine === rule.yingLine
+    && rule.shiLine !== rule.yingLine;
+}
+
+function hasExactKeys(value: Record<string, unknown>, expected: readonly string[]): boolean {
+  const actual = Object.keys(value).sort();
+  const sortedExpected = [...expected].sort();
+  return actual.length === sortedExpected.length
+    && actual.every((key, index) => key === sortedExpected[index]);
+}
+
+function validHiddenSpiritCandidates(
+  lines: readonly unknown[],
+  baseHexagram: Record<string, unknown>,
+): boolean {
+  if (typeof baseHexagram.key !== 'string') return false;
+  const baseRule = HEXAGRAM_BY_KEY.get(baseHexagram.key);
+  if (!baseRule) return false;
+  const palaceHead = WENWANG_NAJIA_V2_ARTIFACT.hexagrams.find(
+    ({ palace, generation }) => palace === baseRule.palace && generation === '本宫',
+  );
+  const palace = TRIGRAM_BY_KEY.get(baseRule.palace);
+  if (!palaceHead || !palace) return false;
+
+  const visibleRelations = new Set<SixRelation>();
+  for (const lineValue of lines) {
+    if (!isPlainObject(lineValue) || !isPlainObject(lineValue.base)) return false;
+    const relation = lineValue.base.relationToBasePalace;
+    if (!SIX_RELATIONS.has(relation as never)) return false;
+    visibleRelations.add(relation as SixRelation);
+  }
+
+  const sourceLines = LINE_POSITIONS.map((position) => {
+    const inner = position <= 3;
+    const trigramKey = inner ? palaceHead.lowerTrigram : palaceHead.upperTrigram;
+    const trigram = TRIGRAM_BY_KEY.get(trigramKey);
+    if (!trigram) return null;
+    const najia = inner ? trigram.inner : trigram.outer;
+    const stem = najia.stem;
+    const branch = najia.branches[(position - 1) % 3];
+    const element = BRANCH_ELEMENTS.get(branch);
+    if (!element) return null;
+    return {
+      position,
+      stem,
+      branch,
+      ganZhi: `${stem}${branch}`,
+      element,
+      relation: relationOf(element, palace.element),
+    };
+  });
+  if (sourceLines.some((line) => line === null)) return false;
+
+  const expectedByHost = new Map<number, Record<string, unknown>[]>();
+  for (const relation of WENWANG_NAJIA_V2_ARTIFACT.relationOrder) {
+    if (visibleRelations.has(relation)) continue;
+    const matches = sourceLines.filter((line) => line?.relation === relation);
+    if (matches.length !== 1 || !matches[0]) return false;
+    const source = matches[0];
+    const expected = {
+      id: `hidden:line:${source.position}:${relation}`,
+      hostLineId: `line:${source.position}`,
+      sourceLine: source.position,
+      relation,
+      stem: source.stem,
+      branch: source.branch,
+      ganZhi: source.ganZhi,
+      element: source.element,
+      sourceHexagram: palaceHead.name,
+      status: 'potential',
+    };
+    let hostCandidates = expectedByHost.get(source.position);
+    if (!hostCandidates) {
+      hostCandidates = [];
+      expectedByHost.set(source.position, hostCandidates);
+    }
+    hostCandidates.push(expected);
+  }
+  for (const expected of expectedByHost.values()) {
+    expected.sort((left, right) => Number(left.sourceLine) - Number(right.sourceLine));
+  }
+
+  const globalIds = new Set<string>();
+  for (const lineValue of lines) {
+    if (!isPlainObject(lineValue) || typeof lineValue.position !== 'number') return false;
+    const actual = lineValue.hiddenSpiritCandidates;
+    const expected = expectedByHost.get(lineValue.position) ?? [];
+    if (!isDenseArray(actual, expected.length)) return false;
+    for (let index = 0; index < actual.length; index += 1) {
+      const candidate = actual[index];
+      const expectedCandidate = expected[index];
+      if (
+        !isPlainObject(candidate)
+        || !hasExactKeys(candidate, HIDDEN_CANDIDATE_KEYS)
+        || !SIX_RELATIONS.has(candidate.relation as never)
+        || candidate.id !== `hidden:line:${candidate.sourceLine}:${candidate.relation}`
+        || candidate.hostLineId !== `line:${lineValue.position}`
+        || candidate.sourceLine !== lineValue.position
+        || HIDDEN_CANDIDATE_KEYS.some((key) => candidate[key] !== expectedCandidate[key])
+        || typeof candidate.id !== 'string'
+        || globalIds.has(candidate.id)
+      ) return false;
+      globalIds.add(candidate.id);
+    }
+  }
+  return true;
 }
 
 export function assertPlateV2RuntimeShape(value: unknown): asserts value is PlateV2 {
@@ -92,9 +277,8 @@ export function assertPlateV2RuntimeShape(value: unknown): asserts value is Plat
     const rulePackRef = candidate.rulePackRef as Record<string, unknown>;
     if (
       rulePackRef.id !== 'wenwang_najia_v2'
-      || !isNonEmptyString(rulePackRef.version)
-      || typeof rulePackRef.artifactHash !== 'string'
-      || !/^[0-9a-f]{64}$/.test(rulePackRef.artifactHash)
+      || rulePackRef.version !== WENWANG_NAJIA_V2_ARTIFACT.version
+      || rulePackRef.artifactHash !== WENWANG_NAJIA_V2_ARTIFACT_HASH
     ) reject();
 
     if (!isPlainObject(candidate.calendar)) reject();
@@ -106,22 +290,45 @@ export function assertPlateV2RuntimeShape(value: unknown): asserts value is Plat
     ) reject();
     const pillars = calendar.pillars as Record<string, unknown>;
     if (!PILLAR_KINDS.every((kind) => validPillar(pillars[kind], kind))) reject();
+    const expectedCalendar = buildCalendarSnapshot(
+      candidate.castAt as string,
+      BASE_RULE_CONTEXT.calendarProfile,
+    );
+    if (canonicalStringify(calendar) !== canonicalStringify(expectedCalendar)) reject();
 
     const rawTosses = candidate.rawTosses as unknown[];
     const lines = candidate.lines as unknown[];
     const movingLines = candidate.movingLines as unknown[];
+    const baseHexagram = candidate.baseHexagram as Record<string, unknown>;
+    const changedHexagram = candidate.changedHexagram as Record<string, unknown>;
+    const basePalaceElement = baseHexagram.palaceElement as Element;
+    const changedPalaceElement = changedHexagram.palaceElement as Element;
 
     const positions = new Set<number>();
     const ids = new Set<string>();
     const movingPositions: number[] = [];
-    for (const lineValue of lines) {
+    for (let lineIndex = 0; lineIndex < lines.length; lineIndex += 1) {
+      const lineValue = lines[lineIndex];
       if (!isPlainObject(lineValue)) reject();
       const line = lineValue as Record<string, unknown>;
       const position = line.position;
       const tossValue = line.tossValue;
+      const baseRole = position === baseHexagram.shiLine ? '世'
+        : position === baseHexagram.yingLine ? '应' : null;
+      const changedRole = position === changedHexagram.shiLine ? '世'
+        : position === changedHexagram.yingLine ? '应' : null;
+      const baseExpected = typeof position === 'number'
+        ? expectedFacetForSide(baseHexagram.key as string, position)
+        : null;
+      const changedExpected = typeof position === 'number'
+        ? expectedFacetForSide(changedHexagram.key as string, position)
+        : null;
+      const tossBaseYang = tossValue === 7 || tossValue === 9;
+      const tossChangedYang = line.moving ? !tossBaseYang : tossBaseYang;
       if (
         typeof position !== 'number'
         || !LINE_POSITIONS.includes(position as never)
+        || position !== lineIndex + 1
         || positions.has(position)
         || line.id !== `line:${position}`
         || ids.has(line.id as string)
@@ -130,8 +337,18 @@ export function assertPlateV2RuntimeShape(value: unknown): asserts value is Plat
         || rawTosses[position - 1] !== tossValue
         || typeof line.moving !== 'boolean'
         || line.moving !== (tossValue === 6 || tossValue === 9)
-        || !validFacet(line.base)
-        || !validFacet(line.changed)
+        || baseExpected === null
+        || changedExpected === null
+        || baseExpected.yang !== tossBaseYang
+        || changedExpected.yang !== tossChangedYang
+        || !validFacet(line.base, basePalaceElement, basePalaceElement, {
+          ...baseExpected,
+          role: baseRole,
+        })
+        || !validFacet(line.changed, basePalaceElement, changedPalaceElement, {
+          ...changedExpected,
+          role: changedRole,
+        })
         || !isDenseArray(line.hiddenSpiritCandidates)
       ) reject();
       const linePosition = position as number;
@@ -154,6 +371,7 @@ export function assertPlateV2RuntimeShape(value: unknown): asserts value is Plat
     if (
       positions.size !== 6
       || ids.size !== 6
+      || !validHiddenSpiritCandidates(lines, baseHexagram)
       || movingLines.length !== movingPositions.length
       || movingLines.some((position, index) => (
         position !== movingPositions[index] || !LINE_POSITIONS.includes(position as never)
