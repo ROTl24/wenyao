@@ -58,6 +58,8 @@
 
 `electron/services/reading-service.cjs` 是主进程应用服务。它从 `JsonStore` 取会话，调用领域内核，执行检索与 AI 校验并持久化结果。渲染进程通过窄 IPC 获取只读快照。
 
+Renderer 只依赖统一 `ReadingClient`。桌面 adapter 调窄 IPC；本地浏览器预览 adapter 可以直接调用纯领域内核以便视觉验收，但必须把结果标成 `browser-preview`，不得显示为“主进程已验证”。App 在第六爻后先进入 `building-case`，收到 authoritative/preview Case 后才进入结果页，不能继续以 legacy `session.plate` 作为路由条件。
+
 `src/lib/divination.ts` 在迁移期间只保留旧会话解析和旧 import 的薄转发；所有调用方迁移后删除其中重复的排盘规则。
 
 ### 3.2 依赖方向
@@ -551,6 +553,8 @@ export const ELEMENT_TOKENS = {
 ```
 
 天干、地支分别着色，因为同一干支中的干与支可以属于不同五行。禁止给整段 `甲子` 只套一个颜色。移动端允许横向滚动双盘，但不能删掉变卦列或用省略号隐藏关键事实。
+
+结果层必须通过单一 `createCaseFactIndex` 把 facts 建成 `byId/byEntity/byRelation/byAuthority/byRuleId`，再生成 header、四柱、双盘、用神和 claim view models。组件不得各自全表扫描或从字符串反推五行；`HistoryPanel` 也读取 `caseSnapshot.plate` 和 migration state，legacy 只能标“历史未验证”。
 
 ## 7. AI 事实契约与信任边界
 

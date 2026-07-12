@@ -1125,7 +1125,7 @@ export function hashCasePayload(payload: unknown, port: HashPort): string {
 }
 ```
 
-先单独计算 `ruleContextHash = sha256(canonicalStringify(ruleContext))` 并写入 `DivinationCaseV2`。`factSetHash` payload 包含 question、intent、tosses、castAt、RuleContext、PlateV2、UseGodSelection、facts；明确排除 `builtAt` 和旧 analysis。两个哈希都不写入结构 Plate。
+先单独计算 `ruleContextHash = sha256(canonicalStringify(ruleContext))` 并写入 `DivinationCaseV2`。`factSetHash` payload 包含 question、intent 及 subjectRelation/explicitTarget、tosses、castAt、RuleContext、PlateV2、UseGodSelection、facts；明确排除 `builtAt` 和旧 analysis。两个哈希都不写入结构 Plate。
 
 - [ ] **Step 5: 实现 Case 编排和 legacy 纯迁移**
 
@@ -1161,6 +1161,9 @@ git commit -m "feat(domain): 组装可哈希卦例并纯迁移旧会话"
 - Create: `electron/services/reading-service.test.cjs`
 - Create: `electron/services/migration.cjs`
 - Create: `electron/services/migration.test.cjs`
+- Create: `src/lib/readingClient.ts`
+- Create: `src/lib/readingClient.test.ts`
+- Create: `src/lib/browserReadingAdapter.ts`
 - Modify: `electron/services/store.cjs`
 - Modify: `electron/services/store.test.cjs`
 - Modify: `electron/main.cjs`
@@ -1172,6 +1175,7 @@ git commit -m "feat(domain): 组装可哈希卦例并纯迁移旧会话"
 **Interfaces:**
 - Consumes: `sessionId`、可选 `intentId`、追问文本；主进程内部依赖 store、domain、retrieval、AI。
 - Produces: `reading.buildCase`、`reading.selectIntent`、`reading.analyze`、`reading.followUp`。
+- Produces: Electron IPC 与 browser-preview 两个 `ReadingClient` adapter；页面只依赖这一窄接口。
 
 - [ ] **Step 1: 写伪造 renderer 数据不被信任的红灯测试**
 
@@ -1264,14 +1268,18 @@ reading: {
 
 `main.cjs` 对 payload 只提取 allowlist 字段。删除 `ai:analyze` 接收 plate/evidence 的路径，但在 Task 10 完成前保留内部 AI 函数调用适配。
 
-- [ ] **Step 6: 调整 App 的完成路径**
+- [ ] **Step 6: 保留浏览器预览 adapter 而不伪装桌面信任**
 
-第六爻确认后仍由当前原子状态机完成 session 保存；随后调用 `reading.buildCase({ sessionId })`，用主进程返回快照替换本地只读视图。App 不再调用渲染端 `buildPlate` 作为权威结果。
+`readingClient.ts` 定义 renderer 唯一依赖的 `ReadingClient`。Electron adapter 只调用 `desktop.reading`；`browserReadingAdapter.ts` 可在 `http://localhost` 中本地调用领域内核构建预览 Case，但结果显式标 `runtimeTrust='browser-preview'`，不能显示“主进程已验证”。两套 adapter 必须通过相同 contract tests，避免 Task 9 后浏览器验收直接失效。
 
-- [ ] **Step 7: 验证与提交**
+- [ ] **Step 7: 调整 App 的完成路径**
+
+第六爻确认后仍由当前原子状态机完成交互字段保存；App 先进入明确 `building-case` 状态，再调用 `reading.buildCase({ sessionId })`，用返回快照替换本地只读视图，随后才进入 result/analyzing。App 不再调用渲染端 `buildPlate/upgradePlate` 作为权威结果；保留现有 owner epoch/operationId 机制，迟到 case/report 不得覆盖新会话。
+
+- [ ] **Step 8: 验证与提交**
 
 Run: `cmd /c npm run test:electron && npx vitest run src/App.confirm.test.tsx && npm run typecheck`
-Expected: PASS；伪造字段测试被主进程忽略；第六爻仍只生成一次 case。
+Expected: PASS；伪造字段测试被主进程忽略；第六爻仍只生成一次 case；browser-preview 能完成同一流程且明确降低信任标识。
 
 ```bash
 git add electron src/types/desktop.d.ts src/App.tsx src/App.confirm.test.tsx
@@ -1383,7 +1391,7 @@ const REPORT_V2_SCHEMA = {
 
 - [ ] **Step 6: ReadingService 在主进程检索**
 
-检索词由 question、intent、primary/related relations、moving facts 和 rule IDs 生成；renderer 不再先检索再把 evidence 发回。`reading.analyze` 返回 `{ caseSnapshot, report, evidence, retrievalDiagnostics }` 并一次持久化。
+检索词由 question、intent、primary/related relations、moving facts 和 rule IDs 生成；renderer 不再先检索再把 evidence 发回，也不能提供 evidence 正文。`reading.analyze` 返回 `{ caseSnapshot, report, evidence, retrievalDiagnostics }` 并一次持久化。移除公开 `ai:analyze/ai:follow-up/retrieval:search` 业务 channel，只保留 ReadingService 内部调用；Store 拒绝 renderer 写 validated report。
 
 - [ ] **Step 7: 验证与提交**
 
@@ -1407,8 +1415,11 @@ git commit -m "feat(ai): 以事实与证据引用校验专业解卦"
 - Create: `src/components/result/FactExplorer.tsx`
 - Create: `src/components/result/UseGodPanel.tsx`
 - Create: `src/components/result/AnalysisReportV2.tsx`
+- Create: `src/components/result/selectors.ts`
+- Create: `src/components/result/selectors.test.ts`
 - Create: `src/components/result/ResultV2.test.tsx`
 - Modify: `src/components/ResultScreen.tsx`
+- Modify: `src/components/HistoryPanel.tsx`
 - Modify: `src/styles.css`
 - Modify: `src/App.tsx`
 - Modify: `src/types/desktop.d.ts`
@@ -1416,6 +1427,7 @@ git commit -m "feat(ai): 以事实与证据引用校验专业解卦"
 **Interfaces:**
 - Consumes: `DivinationCaseV2`、`AnalysisReportV2`、evidence、`onSelectIntent(intentId)`。
 - Produces: 五层结果页面；本变六行、四柱旬空、关系事实、用神澄清、claim 引用展开。
+- Produces: 单一 `createCaseFactIndex` 深模块；结果组件和历史列表不各自重算领域事实。
 
 - [ ] **Step 1: 写完整页面红灯测试**
 
@@ -1451,12 +1463,16 @@ Expected: FAIL。
 
 - [ ] **Step 4: 实现五层组件**
 
+先由 `selectors.ts` 一次建立 `{ byId, byEntity, byRelation, byAuthority, byRuleId }`，并导出 header/pillars/hexagram rows/use-god/claim view models。entity key、fact 排序、六神同行复用、claim 引用解析只实现一次；七个展示组件不得各自扫描整份 facts 或从 `ganZhi` 字符串反推五行。
+
 1. `CaseHeader`：日期、占问、意图、时区、rule pack/profile。
 2. `PillarGrid`：四柱各显示干、支、元素、旬、旬空。
 3. `HexagramComparison`：领域数组反转为上爻到初爻显示；本/变各六行对齐；变卦静爻也显示；区分 `relationToBasePalace` 与 `relationToOwnPalace` 的标题。通过纯 selector 按 line/hexagram entity 聚合 `is-growth-stage/is-six-beast/is-six-harmony/is-six-clash` facts，不能假设这些字段存在于 Plate。
 4. `UseGodPanel`：显示状态、具体候选 line/伏神、取用规则；需澄清时调用 `reading.buildCase({ sessionId, intentId })`。
 5. `FactExplorer`：按 structural/profile-dependent/secondary 分组，条件与来源可展开。
 6. `AnalysisReportV2`：按 section 排序 claims，每条可展开 fact/rule/evidence。
+
+`HistoryPanel` 同步改读 `caseSnapshot.plate` 与 migration state；legacy 会话只显示“历史未验证”，不得继续调用 `upgradePlate` 或自行搜索旧 `session.plate`。
 
 - [ ] **Step 5: 实现五行令牌与响应式双盘**
 
