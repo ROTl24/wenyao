@@ -322,6 +322,41 @@ test('every named reviewed artifact and capsule collection fails closed when mis
   }
 });
 
+test('capsule payload bytes are bound to ref.contentHash before localEntries are trusted', async () => {
+  const imported = await import('../generated/domain/index.js');
+  const domain = Object.fromEntries(Object.entries(imported));
+  const collectionName = 'GROWTH_SHENSHA_SOURCE_EVIDENCE_CAPSULES';
+  const targetId = 'WS-ZENGSHAN-SIX-SPIRIT-2101727';
+  const target = domain[collectionName].find((capsule) => capsule.ref.id === targetId);
+  assert.ok(target?.payload.includes('localEntries='));
+
+  const forgeTarget = (replacement) => ({
+    ...domain,
+    [collectionName]: domain[collectionName].map((capsule) => (
+      capsule.ref.id === targetId ? replacement(capsule) : capsule
+    )),
+  });
+  const changedByte = forgeTarget((capsule) => ({
+    ...capsule,
+    payload: capsule.payload.replace('normalizedClaim=', 'normalizedClaim=改'),
+  }));
+  const removedBinding = forgeTarget((capsule) => ({
+    ...capsule,
+    payload: capsule.payload.split(/\r?\n/).filter((line) => !line.startsWith('localEntries=')).join('\n'),
+  }));
+  const forgedHash = forgeTarget((capsule) => ({
+    ...capsule,
+    ref: { ...capsule.ref, contentHash: '0'.repeat(64) },
+  }));
+
+  assert.throws(() => reviewedRuleEvidenceFromDomain(changedByte), /payload|contentHash|哈希/);
+  assert.throws(() => reviewedRuleEvidenceFromDomain(removedBinding), /payload|contentHash|哈希/);
+  assert.throws(() => reviewedRuleEvidenceFromDomain(forgedHash), /payload|contentHash|哈希/);
+  const reviewed = reviewedRuleEvidenceFromDomain(domain);
+  assert.equal(reviewed.knownRuleIds.length, 69);
+  assert.equal(reviewed.mappings.length, 610);
+});
+
 test('bundled corpus and knowledge v2 load as one coherent canonical catalog', async () => {
   const catalog = await loadEvidenceCatalog();
   const manifest = require('../../resources/corpus-manifest.json');

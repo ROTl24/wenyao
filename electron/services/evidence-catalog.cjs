@@ -478,6 +478,7 @@ function reviewedRuleEvidenceFromDomain(domain) {
       assertString(ref.locator, `${spec.name}[${index}].ref.locator`);
       assertString(ref.contentHash, `${spec.name}[${index}].ref.contentHash`, { pattern: HASH_PATTERN });
       const payload = assertString(capsule.payload, `${spec.name}[${index}].payload`);
+      if (sha256(payload) !== ref.contentHash) throw new Error(`${spec.name}[${index}] payload 与 contentHash 不一致`);
       if (!payload.split(/\r?\n/).includes(`sourceId=${id}`)) throw new TypeError(`${spec.name}[${index}] payload sourceId 不一致`);
       if (ids.has(id)) throw new TypeError(`${spec.name} 来源 ID 重复：${id}`);
       ids.add(id);
