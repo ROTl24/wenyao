@@ -293,7 +293,7 @@ function presentAuthoritativeSession(
   };
 }
 
-function sessionWithCase(
+export function sessionWithCase(
   session: DivinationSession,
   envelope: ReadingCaseEnvelope,
 ): DivinationSession {
@@ -311,7 +311,10 @@ function sessionWithCase(
     plate: legacyPlateFromCase(envelope.caseSnapshot),
     updatedAt: latestTimestamp(session.updatedAt, envelope.caseSnapshot.builtAt),
   };
-  if (!sameCase) delete next.analysis;
+  if (!sameCase) {
+    delete next.analysis;
+    next.messages = [];
+  }
   return next;
 }
 

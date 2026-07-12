@@ -46,6 +46,7 @@ test('renderer create normalizes question and rejects invalid immutable identity
   assert.equal(created.question, '事业是否顺利？');
 
   const invalid = [
+    { id: '  padded-id  ', question: '问题', category: VALID_CATEGORY, castAt: VALID_CAST_AT },
     { id: 'empty-question', question: '   ', category: VALID_CATEGORY, castAt: VALID_CAST_AT },
     { id: 'long-question', question: '问'.repeat(501), category: VALID_CATEGORY, castAt: VALID_CAST_AT },
     { id: 'missing-category', question: '问题', castAt: VALID_CAST_AT },

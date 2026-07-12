@@ -226,6 +226,7 @@ describe('ReadingClient adapters', () => {
     expect(normalized.question).toBe('事业是否顺利？');
 
     const invalid = [
+      { ...completedSession('  browser-padded-id  ') },
       { ...completedSession('browser-empty-question'), question: '   ' },
       { ...completedSession('browser-long-question'), question: '问'.repeat(501) },
       { ...completedSession('browser-missing-category'), category: undefined },

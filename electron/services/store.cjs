@@ -61,6 +61,7 @@ function rendererCreateSnapshot(input) {
   if (
     !isRecord(input)
     || !nonEmptyString(input.id)
+    || input.id !== input.id.trim()
     || !question
     || question.length > 500
     || !SESSION_CATEGORIES.has(input.category)

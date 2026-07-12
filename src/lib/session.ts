@@ -82,6 +82,7 @@ export function normalizeSessionIdentity(value: unknown): Pick<DivinationSession
   if (
     typeof candidate.id !== 'string'
     || !candidate.id.trim()
+    || candidate.id !== candidate.id.trim()
     || !question
     || question.length > 500
     || typeof candidate.category !== 'string'

@@ -116,7 +116,7 @@ vi.mock('./components/HistoryPanel', () => ({
   },
 }));
 
-import { App, appFlowReducer, mergeSavedSession } from './App';
+import { App, appFlowReducer, mergeSavedSession, sessionWithCase } from './App';
 
 function readingEnvelope(
   session: DivinationSession,
@@ -215,6 +215,46 @@ beforeEach(() => {
 });
 
 describe('App 原子确认命令', () => {
+  it('sessionWithCase 在相同 factSetHash 重建时保留本地分析和完整对话', () => {
+    const completed = completeFixture('相同 Case 保留上下文');
+    const envelope = readingEnvelope(completed);
+    const withCase = sessionWithCase(completed, envelope);
+    const existing = {
+      ...withCase,
+      analysis: analysisResult(withCase).report,
+      messages: [
+        { id: 'same-user', role: 'user' as const, content: '旧追问', createdAt: '2026-07-12T00:00:07.000Z' },
+        { id: 'same-assistant', role: 'assistant' as const, content: '旧回答', createdAt: '2026-07-12T00:00:08.000Z' },
+      ],
+    };
+
+    const rebuilt = sessionWithCase(existing, { ...envelope, runtimeTrust: 'browser-preview' });
+    expect(rebuilt.analysis).toEqual(existing.analysis);
+    expect(rebuilt.messages).toEqual(existing.messages);
+  });
+
+  it('sessionWithCase 在 factSetHash 改变时同时清除本地分析和旧对话', () => {
+    const completed = completeFixture('变化 Case 隔离上下文');
+    const envelope = readingEnvelope(completed);
+    const withCase = sessionWithCase(completed, envelope);
+    const existing = {
+      ...withCase,
+      analysis: analysisResult(withCase).report,
+      messages: [
+        { id: 'changed-user', role: 'user' as const, content: '旧追问', createdAt: '2026-07-12T00:00:07.000Z' },
+        { id: 'changed-assistant', role: 'assistant' as const, content: '旧回答', createdAt: '2026-07-12T00:00:08.000Z' },
+      ],
+    };
+    const changedEnvelope = {
+      ...envelope,
+      caseSnapshot: { ...envelope.caseSnapshot, factSetHash: 'changed-fact-set-hash' },
+    };
+
+    const rebuilt = sessionWithCase(existing, changedEnvelope);
+    expect(rebuilt.analysis).toBeUndefined();
+    expect(rebuilt.messages).toEqual([]);
+  });
+
   it('相同 state/action 的 reducer 重放得到完全相同的下一爻身份与时间', () => {
     const session = prepareToss(
       createSession('纯 reducer', 'other', new Date('2026-07-12T00:00:00.000Z')),
