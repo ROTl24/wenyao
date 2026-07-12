@@ -1,5 +1,10 @@
 import { createHash } from 'node:crypto';
 import { describe, expect, it } from 'vitest';
+import {
+  createToss,
+  type CoinFace,
+  type LineValue,
+} from '../../lib/divination.js';
 import { buildDivinationCase } from './case.js';
 import {
   migrateLegacySession,
@@ -22,6 +27,17 @@ const MIGRATION_INPUT = {
 
 const TOSSES = [9, 7, 7, 7, 7, 7] as const;
 
+const FACES_BY_VALUE: Readonly<Record<LineValue, readonly CoinFace[]>> = {
+  6: ['text', 'text', 'text'],
+  7: ['text', 'text', 'reverse'],
+  8: ['text', 'reverse', 'reverse'],
+  9: ['reverse', 'reverse', 'reverse'],
+};
+
+function tossPayload(value: LineValue) {
+  return createToss(FACES_BY_VALUE[value]);
+}
+
 function legacySessionFixture(overrides: Record<string, unknown> = {}) {
   const authoritative = buildDivinationCase({
     sessionId: 'legacy-session',
@@ -42,11 +58,11 @@ function legacySessionFixture(overrides: Record<string, unknown> = {}) {
     updatedAt: '2026-07-11T04:05:00.000Z',
     status: 'complete',
     tosses: TOSSES.map((value, index) => ({
+      ...tossPayload(value),
       id: `toss-${index + 1}`,
       lineIndex: index + 1,
       visualSeed: `seed-${index + 1}`,
       confirmedAt: `2026-07-11T04:0${index}:00.000Z`,
-      value,
     })),
     plate: {
       id: 'legacy-plate',
@@ -143,7 +159,12 @@ describe('legacy session pure migration', () => {
       ...complete,
       status: 'casting',
       tosses: complete.tosses.slice(0, 3),
-      currentToss: { id: 'pending', lineIndex: 4, value: 8, visualSeed: 'pending-seed' },
+      currentToss: {
+        ...tossPayload(8),
+        id: 'pending',
+        lineIndex: 4,
+        visualSeed: 'pending-seed',
+      },
     };
     delete (legacy as Partial<typeof legacy>).plate;
     delete (legacy as Partial<typeof legacy>).analysis;
@@ -180,6 +201,133 @@ describe('legacy session pure migration', () => {
     expect(result.state).toBe('needs-review');
     expect(result.audit.legacyDifferences).toContain('caseSnapshot');
   });
+
+  it('rechecks every legacy plate invariant after a migrationVersion 2 snapshot rebuild', () => {
+    const first = migrateLegacySession(legacySessionFixture(), MIGRATION_INPUT, HASH_PORT);
+    expect(first.state).toBe('migrated');
+    if (first.state !== 'migrated') return;
+    const forged = structuredClone(first.session) as unknown as Record<string, unknown> & {
+      plate: {
+        baseHexagram: { name: string };
+        changedHexagram: { name: string };
+        movingLines: number[];
+        lines: Array<{ value: number }>;
+        castAt: string;
+      };
+    };
+    forged.plate.baseHexagram.name = '坤为地';
+    forged.plate.changedHexagram.name = '坤为地';
+    forged.plate.movingLines = [];
+    forged.plate.lines[0].value = 6;
+    forged.plate.castAt = '2026-07-12T04:00:00.000Z';
+    const before = structuredClone(forged);
+
+    const result = migrateLegacySession(forged, MIGRATION_INPUT, HASH_PORT);
+
+    expect(result.state).toBe('needs-review');
+    expect(result.audit.legacyDifferences).toEqual([
+      'baseHexagram.name',
+      'castAt',
+      'changedHexagram.name',
+      'movingLines',
+      'tosses.values',
+    ]);
+    if (result.state === 'needs-review') expect(result.original).toEqual(before);
+    expect(forged).toEqual(before);
+  });
+
+  it('rejects six value-only toss objects without confirmed TossRecord evidence', () => {
+    const legacy = legacySessionFixture({
+      tosses: TOSSES.map((value, index) => ({
+        lineIndex: index + 1,
+        value,
+      })),
+    });
+    const before = structuredClone(legacy);
+
+    const result = migrateLegacySession(legacy, MIGRATION_INPUT, HASH_PORT);
+
+    expect(result.state).toBe('needs-review');
+    expect(result.audit.legacyDifferences).toEqual(['tosses.values']);
+    if (result.state === 'needs-review') expect(result.original).toEqual(before);
+    expect(legacy).toEqual(before);
+  });
+
+  it.each([
+    ['missing id', (legacy: ReturnType<typeof legacySessionFixture>) => {
+      delete (legacy.tosses[0] as Partial<(typeof legacy.tosses)[number]>).id;
+    }],
+    ['duplicate id', (legacy: ReturnType<typeof legacySessionFixture>) => {
+      legacy.tosses[1].id = legacy.tosses[0].id;
+    }],
+    ['missing confirmedAt', (legacy: ReturnType<typeof legacySessionFixture>) => {
+      delete (legacy.tosses[0] as Partial<(typeof legacy.tosses)[number]>).confirmedAt;
+    }],
+    ['non-canonical confirmedAt', (legacy: ReturnType<typeof legacySessionFixture>) => {
+      legacy.tosses[0].confirmedAt = '2026-07-11T12:00:00+08:00';
+    }],
+    ['missing visualSeed', (legacy: ReturnType<typeof legacySessionFixture>) => {
+      delete (legacy.tosses[0] as Partial<(typeof legacy.tosses)[number]>).visualSeed;
+    }],
+    ['missing faces', (legacy: ReturnType<typeof legacySessionFixture>) => {
+      delete (legacy.tosses[0] as Partial<(typeof legacy.tosses)[number]>).faces;
+    }],
+    ['label/value mismatch', (legacy: ReturnType<typeof legacySessionFixture>) => {
+      legacy.tosses[0].label = '少阳';
+    }],
+  ])('rejects incomplete or inconsistent confirmed TossRecord data: %s', (_label, mutate) => {
+    const legacy = legacySessionFixture();
+    mutate(legacy);
+    const before = structuredClone(legacy);
+
+    const result = migrateLegacySession(legacy, MIGRATION_INPUT, HASH_PORT);
+
+    expect(result.state).toBe('needs-review');
+    expect(result.audit.legacyDifferences).toEqual(['tosses.values']);
+    if (result.state === 'needs-review') expect(result.original).toEqual(before);
+    expect(legacy).toEqual(before);
+  });
+
+  it('rejects an inconsistent prepared currentToss without requiring confirmedAt', () => {
+    const complete = legacySessionFixture();
+    const legacy = {
+      ...complete,
+      status: 'casting',
+      tosses: complete.tosses.slice(0, 3),
+      currentToss: {
+        ...tossPayload(8),
+        id: 'pending',
+        lineIndex: 4,
+        visualSeed: 'pending-seed',
+        label: '少阳',
+      },
+    };
+    delete (legacy as Partial<typeof legacy>).plate;
+    delete (legacy as Partial<typeof legacy>).analysis;
+    const before = structuredClone(legacy);
+
+    const result = migrateLegacySession(legacy, MIGRATION_INPUT, HASH_PORT);
+
+    expect(result.state).toBe('needs-review');
+    expect(result.audit.legacyDifferences).toEqual(['tosses.values']);
+    if (result.state === 'needs-review') expect(result.original).toEqual(before);
+    expect(legacy).toEqual(before);
+  });
+
+  it.each(['clean', 'needs-review'] as const)(
+    'does not overwrite a pre-existing legacy migrationState=%s',
+    (migrationState) => {
+      const legacy = legacySessionFixture({ migrationState });
+      const before = structuredClone(legacy);
+
+      const result = migrateLegacySession(legacy, MIGRATION_INPUT, HASH_PORT);
+
+      expect(result.state).toBe('needs-review');
+      expect(result.audit.legacyDifferences).toEqual(['migrationState']);
+      if (result.state === 'needs-review') expect(result.original).toEqual(before);
+      expect(legacy).toEqual(before);
+    },
+  );
 
   it.each([
     ['duplicate line index', (legacy: ReturnType<typeof legacySessionFixture>) => {

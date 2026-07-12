@@ -171,6 +171,7 @@ function needsReview(
 
 function expectedTossFields(value: number) {
   return {
+    label: value === 6 ? '老阴' : value === 7 ? '少阳' : value === 8 ? '少阴' : '老阳',
     moving: value === 6 || value === 9,
     baseYang: value === 7 || value === 9,
     changedYang: value === 7 || value === 6,
@@ -178,7 +179,6 @@ function expectedTossFields(value: number) {
 }
 
 function validateFaces(record: Record<string, unknown>, value: number): boolean {
-  if (!Object.prototype.hasOwnProperty.call(record, 'faces')) return true;
   if (
     !Array.isArray(record.faces)
     || record.faces.length !== 3
@@ -193,9 +193,20 @@ function validateFaces(record: Record<string, unknown>, value: number): boolean 
 
 function validateDerivedTossFields(record: Record<string, unknown>, value: number): boolean {
   const expected = expectedTossFields(value);
-  return (record.moving === undefined || record.moving === expected.moving)
-    && (record.baseYang === undefined || record.baseYang === expected.baseYang)
-    && (record.changedYang === undefined || record.changedYang === expected.changedYang);
+  return record.label === expected.label
+    && record.moving === expected.moving
+    && record.baseYang === expected.baseYang
+    && record.changedYang === expected.changedYang;
+}
+
+function validatePreparedTossFields(
+  record: Record<string, unknown>,
+  value: number,
+): record is Record<string, unknown> & { id: string; visualSeed: string } {
+  return nonEmptyTrimmed(record.id)
+    && nonEmptyTrimmed(record.visualSeed)
+    && validateFaces(record, value)
+    && validateDerivedTossFields(record, value);
 }
 
 function confirmedTossValues(
@@ -212,13 +223,11 @@ function confirmedTossValues(
       || record.lineIndex !== index + 1
       || typeof record.value !== 'number'
       || !TOSS_VALUES.has(record.value)
-      || !validateFaces(record, record.value)
-      || !validateDerivedTossFields(record, record.value)
+      || !validatePreparedTossFields(record, record.value)
+      || !exactIso(record.confirmedAt)
     ) return { valid: false };
-    if (Object.prototype.hasOwnProperty.call(record, 'id')) {
-      if (!nonEmptyTrimmed(record.id) || ids.has(record.id)) return { valid: false };
-      ids.add(record.id);
-    }
+    if (ids.has(record.id)) return { valid: false };
+    ids.add(record.id);
     values.push(record.value as 6 | 7 | 8 | 9);
   }
   return { valid: true, values };
@@ -231,8 +240,7 @@ function validPendingToss(session: Record<string, unknown>, confirmedCount: numb
     && pending.lineIndex === confirmedCount + 1
     && typeof pending.value === 'number'
     && TOSS_VALUES.has(pending.value)
-    && validateFaces(pending, pending.value)
-    && validateDerivedTossFields(pending, pending.value);
+    && validatePreparedTossFields(pending, pending.value);
 }
 
 function baseSessionValid(session: Record<string, unknown>): session is Record<string, unknown> & {
@@ -409,6 +417,14 @@ function verifyCurrentSession(
   if (!sameCanonical(session.caseSnapshot, expected)) {
     return needsReview(original, 'legacy-conflict', ['caseSnapshot']);
   }
+  const legacyDifferences = legacyPlateDifferences(
+    session,
+    expected,
+    tossValues as PlateV2['rawTosses'],
+  );
+  if (legacyDifferences.length > 0) {
+    return needsReview(original, 'legacy-conflict', legacyDifferences);
+  }
   return deepFreeze({
     state: 'unchanged',
     session: deepFreeze(session) as MigratedLegacySession,
@@ -455,6 +471,7 @@ export function migrateLegacySession(
   }
   if (
     Object.prototype.hasOwnProperty.call(session, 'migrationVersion')
+    || Object.prototype.hasOwnProperty.call(session, 'migrationState')
     || Object.prototype.hasOwnProperty.call(session, 'caseSnapshot')
     || Object.prototype.hasOwnProperty.call(session, 'ruleContext')
   ) return needsReview(original, 'legacy-conflict', ['migrationState']);
