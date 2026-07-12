@@ -2,6 +2,7 @@ import * as THREE from 'three';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import {
   QIANLONG_COIN_ASSET_NOTE,
+  QIANLONG_COIN_INSTANCE_VARIANTS,
   createQianlongTextureSet,
 } from './coinTextures';
 
@@ -45,6 +46,10 @@ describe('乾隆通宝程序纹理', () => {
     expect(set.dataTextures.every(
       (texture) => texture.colorSpace === THREE.NoColorSpace,
     )).toBe(true);
+    expect(set.surfaceChannelTextures).toEqual(set.dataTextures);
+    expect(set.heightTextures).toEqual(set.surfaceChannelTextures);
+    expect(set.roughnessTextures).toEqual(set.surfaceChannelTextures);
+    expect(set.metalnessTextures).toEqual(set.surfaceChannelTextures);
     expect(set.textures.every((texture) => texture.anisotropy === 12)).toBe(true);
     set.dispose();
   });
@@ -77,7 +82,7 @@ describe('乾隆通宝程序纹理', () => {
     set.dispose();
   });
 
-  it('材质满足铜质 PBR 范围、无 emissive，孔壁复用边缘材质且资源只释放一次', () => {
+  it('材质由独立 R/G/B 数据分别驱动高度、粗糙度和金属度，且无自发光', () => {
     const renderer = {
       capabilities: { getMaxAnisotropy: () => 8 },
     } as unknown as THREE.WebGLRenderer;
@@ -89,10 +94,12 @@ describe('乾隆通宝程序纹理', () => {
     ];
 
     for (const material of [set.frontMaterial, set.reverseMaterial, set.edgeMaterial]) {
-      expect(material.metalness).toBeGreaterThanOrEqual(0.88);
-      expect(material.metalness).toBeLessThanOrEqual(0.96);
-      expect(material.roughness).toBeGreaterThanOrEqual(0.38);
-      expect(material.roughness).toBeLessThanOrEqual(0.72);
+      expect(material.metalness).toBeCloseTo(0.98, 8);
+      expect(material.roughness).toBe(1);
+      expect(material.bumpMap).toBeTruthy();
+      expect(material.bumpMap).toBe(material.roughnessMap);
+      expect(material.bumpMap).toBe(material.metalnessMap);
+      expect(material.map).not.toBe(material.bumpMap);
       expect(material.emissive.getHex()).toBe(0);
       expect(material.emissiveMap).toBeNull();
     }
@@ -106,6 +113,50 @@ describe('乾隆通宝程序纹理', () => {
     set.dispose();
     set.dispose();
     disposals.forEach((dispose) => expect(dispose).toHaveBeenCalledTimes(1));
+  });
+
+  it('共享材质在每次 draw call 按钱币实例注入轻微色温、粗糙度和金属度差异', () => {
+    const renderer = {
+      capabilities: { getMaxAnisotropy: () => 8 },
+    } as unknown as THREE.WebGLRenderer;
+    const set = createQianlongTextureSet(renderer, 'balanced');
+    const shader = {
+      uniforms: {},
+      fragmentShader: [
+        '#include <common>',
+        '#include <map_fragment>',
+        '#include <roughnessmap_fragment>',
+        '#include <metalnessmap_fragment>',
+      ].join('\n'),
+    };
+
+    set.frontMaterial.onBeforeCompile(shader as never, renderer);
+    expect(shader.fragmentShader).toContain('uniform vec3 coinTint');
+    expect(shader.fragmentShader).toContain('roughnessFactor * coinRoughnessScale');
+    expect(shader.fragmentShader).toContain('metalnessFactor * coinMetalnessScale');
+    expect(set.frontMaterial.userData.coinInstanceVariants).toEqual(
+      QIANLONG_COIN_INSTANCE_VARIANTS,
+    );
+
+    const observed = Array.from({ length: 3 }, () => new THREE.Object3D()).map((object) => {
+      set.frontMaterial.onBeforeRender(
+        renderer,
+        new THREE.Scene(),
+        new THREE.PerspectiveCamera(),
+        new THREE.BufferGeometry(),
+        object,
+        new THREE.Group(),
+      );
+      const uniforms = shader.uniforms as Record<string, { value: unknown }>;
+      return {
+        tint: (uniforms.coinTint.value as THREE.Color).toArray(),
+        roughness: uniforms.coinRoughnessScale.value,
+        metalness: uniforms.coinMetalnessScale.value,
+      };
+    });
+
+    expect(new Set(observed.map((variant) => JSON.stringify(variant))).size).toBe(3);
+    set.dispose();
   });
 
   it('明确标记程序资产不是历史精确终稿', () => {

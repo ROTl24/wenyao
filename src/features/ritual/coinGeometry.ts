@@ -2,8 +2,8 @@ import * as THREE from 'three';
 
 const OUTER_RADIUS = 0.7;
 const HOLE_HALF_EXTENT = OUTER_RADIUS * 0.25;
-const DEPTH = 0.16;
-const BEVEL_THICKNESS = 0.025;
+const DEPTH = 0.09;
+const BEVEL_THICKNESS = 0.018;
 const RADIAL_SEGMENTS = 128;
 const BEVEL_SEGMENTS = 4;
 const FACE_NORMAL_THRESHOLD = 0.999;
@@ -89,7 +89,7 @@ export function createQianlongCoinGeometry(): THREE.BufferGeometry {
     steps: 1,
     bevelEnabled: true,
     bevelSegments: BEVEL_SEGMENTS,
-    bevelSize: 0.025,
+    bevelSize: BEVEL_THICKNESS,
     bevelThickness: BEVEL_THICKNESS,
     curveSegments: RADIAL_SEGMENTS,
   });

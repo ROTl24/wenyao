@@ -1,17 +1,22 @@
 import { render, waitFor } from '@testing-library/react';
 import { describe, expect, it, vi } from 'vitest';
 import CoinScene, {
+  COIN_SCENE_CAMERA,
+  COIN_SCENE_DPR,
   COIN_SCENE_TEXTURE_QUALITY,
   COIN_SCENE_SHADOW_MODE,
   coinSceneFrameloop,
 } from './CoinScene';
 
 describe('CoinScene 测试模式', () => {
-  it('把 active 映射为 always，把 settled 映射为 demand，并固定 balanced 资产', () => {
+  it('动画期持续渲染，落定后切回 demand，并启用高清贴图与软阴影', () => {
     expect(coinSceneFrameloop(true)).toBe('always');
     expect(coinSceneFrameloop(false)).toBe('demand');
-    expect(COIN_SCENE_TEXTURE_QUALITY).toBe('balanced');
-    expect(COIN_SCENE_SHADOW_MODE).toBe('basic');
+    expect(COIN_SCENE_TEXTURE_QUALITY).toBe('high');
+    expect(COIN_SCENE_SHADOW_MODE).toBe('percentage');
+    expect(COIN_SCENE_DPR).toEqual([1, 2]);
+    expect(COIN_SCENE_CAMERA.position[1]).toBeGreaterThan(COIN_SCENE_CAMERA.position[2]);
+    expect(COIN_SCENE_CAMERA.fov).toBeLessThan(36);
   });
 
   it('不创建 WebGL，暴露三枚可访问节点与随新轮次更新的 data-toss-id', async () => {

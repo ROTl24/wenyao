@@ -10,10 +10,15 @@ import {
   type CoinTrackInput,
 } from '../features/ritual/CoinRig';
 import { restoreOwnedCoinEnvironment } from '../features/ritual/coinEnvironment';
-import { DEFAULT_COIN_TEXTURE_QUALITY } from '../features/ritual/coinTextures';
 
-export const COIN_SCENE_TEXTURE_QUALITY = DEFAULT_COIN_TEXTURE_QUALITY;
-export const COIN_SCENE_SHADOW_MODE = 'basic' as const;
+export const COIN_SCENE_TEXTURE_QUALITY = 'high' as const;
+export const COIN_SCENE_SHADOW_MODE = 'percentage' as const;
+export const COIN_SCENE_DPR: [number, number] = [1, 2];
+export const COIN_SCENE_CAMERA = {
+  fov: 33,
+  position: [0, 6.8, 4.55] as [number, number, number],
+  target: [0, 0.18, 0] as [number, number, number],
+} as const;
 
 export function coinSceneFrameloop(active: boolean): 'always' | 'demand' {
   return active ? 'always' : 'demand';
@@ -50,7 +55,7 @@ function OfflineCoinEnvironment() {
     const target = generator.fromScene(room, 0.04);
 
     scene.environment = target.texture;
-    scene.environmentIntensity = 0.78;
+    scene.environmentIntensity = 0.38;
     invalidate();
 
     return () => {
@@ -78,25 +83,39 @@ function CoinSceneContents(props: CoinSceneProps) {
   return (
     <>
       <OfflineCoinEnvironment />
-      <ambientLight intensity={0.72} color="#f5e4c1" />
-      <hemisphereLight color="#f5dfb4" groundColor="#3a2414" intensity={0.64} />
+      <ambientLight intensity={0.16} color="#f2dfbd" />
+      <hemisphereLight color="#f1dbb1" groundColor="#241b15" intensity={0.28} />
       <directionalLight
         castShadow
-        color="#ffe1a3"
-        intensity={3.2}
-        position={[4.5, 7, 5.5]}
-        shadow-mapSize-height={1024}
-        shadow-mapSize-width={1024}
+        color="#f5d7a1"
+        intensity={1.6}
+        position={[4.8, 8.4, 3.6]}
+        shadow-bias={-0.00025}
+        shadow-camera-bottom={-3}
+        shadow-camera-far={18}
+        shadow-camera-left={-4}
+        shadow-camera-right={4}
+        shadow-camera-top={3}
+        shadow-mapSize-height={2048}
+        shadow-mapSize-width={2048}
+        shadow-normalBias={0.018}
+        shadow-radius={5}
       />
-      <pointLight color="#b96a35" distance={13} intensity={6.4} position={[-4, 2.5, 3]} />
+      <pointLight
+        color="#a85f35"
+        decay={2}
+        distance={12}
+        intensity={1.4}
+        position={[-4.2, 3.2, 2.4]}
+      />
       <CoinRig
         input={input}
         onReady={props.onRigReady}
         quality={COIN_SCENE_TEXTURE_QUALITY}
       />
-      <mesh position={[0, -0.12, 0]} receiveShadow rotation={[-Math.PI / 2, 0, 0]}>
-        <planeGeometry args={[8, 5]} />
-        <shadowMaterial color="#18120c" opacity={0.24} transparent />
+      <mesh position={[0, -0.07, 0]} receiveShadow rotation={[-Math.PI / 2, 0, 0]}>
+        <planeGeometry args={[7.6, 5.2]} />
+        <shadowMaterial color="#17110d" opacity={0.2} transparent />
       </mesh>
     </>
   );
@@ -140,16 +159,16 @@ export default function CoinScene(props: CoinSceneProps) {
 
   return (
     <Canvas
-      camera={{ fov: 36, position: [0, 4.2, 7.2] }}
+      camera={{ fov: COIN_SCENE_CAMERA.fov, position: COIN_SCENE_CAMERA.position }}
       className="coin-canvas"
-      dpr={[1, 1.6]}
+      dpr={COIN_SCENE_DPR}
       frameloop={coinSceneFrameloop(props.active)}
       gl={{ alpha: true, antialias: true }}
       onCreated={({ camera, gl }) => {
-        camera.lookAt(0, 0, 0);
+        camera.lookAt(...COIN_SCENE_CAMERA.target);
         gl.outputColorSpace = THREE.SRGBColorSpace;
         gl.toneMapping = THREE.ACESFilmicToneMapping;
-        gl.toneMappingExposure = 1.08;
+        gl.toneMappingExposure = 0.88;
       }}
       shadows={COIN_SCENE_SHADOW_MODE}
     >

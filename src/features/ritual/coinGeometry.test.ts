@@ -78,6 +78,17 @@ describe('乾隆通宝方孔几何', () => {
     expect(bounds.min.z).toBeCloseTo(-bounds.max.z, 5);
   });
 
+  it('币身厚度符合清代方孔钱的薄片视觉，不再像厚金牌', () => {
+    const geometry = createGeometry();
+    geometry.computeBoundingBox();
+    const bounds = geometry.boundingBox!;
+    const diameter = bounds.max.x - bounds.min.x;
+    const thickness = bounds.max.z - bounds.min.z;
+
+    expect(thickness).toBeCloseTo(0.126, 3);
+    expect(thickness / diameter).toBeLessThan(0.09);
+  });
+
   it('应用 Task 2 末帧后正背可见面的 U 向右、V 向上世界方向一致', () => {
     const geometry = createGeometry();
     const positions = geometry.getAttribute('position');
