@@ -4,7 +4,7 @@ Status: DONE
 
 Baseline: `42e1884`
 
-Implementation commit: `6498293`
+Implementation commits: `6498293`, `c57ff56`, `441a01b`
 
 ## Implemented
 
@@ -23,9 +23,10 @@ Implementation commit: `6498293`
 - Runtime trust is persisted beside the Case as `caseRuntimeTrust`; it never enters `DivinationCaseV2` or its hashes.
 - An intent-ID change clears provenance fields owned by the previous intent, while a same-intent relation/target delta retains authoritative provenance. Electron and browser adapters share this behavior.
 - Cached analysis is returned with freshly retrieved evidence without invoking the model again, so reopening history restores evidence context without a duplicate cloud request.
-- Follow-up persists the user message before the external call but sends the pre-append history to the temporary AI adapter, avoiding a duplicated current user turn.
-- A newly built Case clears analysis from an absent or different previous Case. Renderer presentation never retains analysis that the authoritative writer discarded.
-- Independent read-only review completed with `PASS — Ready to commit`; final Critical, Important, and Minor findings were all empty.
+- Follow-up calls retrieval and AI against the last complete conversation, then atomically persists exactly one user/assistant pair. Retrieval failure, model failure, deletion, or a changed Case leaves the conversation unchanged; retries cannot create orphan or duplicate turns.
+- A newly built Case clears analysis and messages from an absent or different previous Case in the Store, browser adapter, and renderer presentation. Same-hash rebuilds preserve both.
+- Electron and browser creation reject invalid immutable identity fields, including padded IDs, empty or overlong questions, unknown categories, and non-exact ISO cast times; questions are normalized before persistence.
+- Final independent re-review found no Critical or Important findings and returned Spec PASS / Quality PASS.
 
 ## TDD evidence
 
@@ -37,8 +38,8 @@ Implementation commit: `6498293`
 
 ## Final verification
 
-- `npx vitest run --reporter=json`: success; 665/665 tests passed, 0 failed or pending.
-- `npm run test:electron`: 50/50 tests passed after a clean domain build.
+- `npm run test:unit`: success; 669/669 tests passed, 0 failed or pending.
+- `npm run test:electron`: 57/57 tests passed after a clean domain build.
 - `npm run typecheck`: passed.
 - `npm run build:renderer`: passed; Vite reported only the existing non-blocking large-chunk warning.
 - `node --check` on main, preload, Store, migration, ReadingService, reading IPC, and payload sanitizer: passed.
