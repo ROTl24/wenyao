@@ -1,9 +1,13 @@
 import { ArrowLeft, BookMarked, RefreshCw, Send, Sparkles } from 'lucide-react';
-import { useState } from 'react';
+import { useMemo, useState } from 'react';
 import type { AnalysisClaimV2, AnalysisSectionV2 } from '../domain/liuyao/analysis-report';
-import type { PlateLine } from '../lib/divination';
+import type { UseGodClarificationPatch } from '../domain/liuyao';
 import type { DivinationSession } from '../lib/session';
-import { HexagramLines } from './HexagramLines';
+import { FactExplorer } from './result/FactExplorer';
+import { HexagramComparison } from './result/HexagramComparison';
+import { PillarGrid } from './result/PillarGrid';
+import { selectResultCase } from './result/selectors';
+import { UseGodPanel } from './result/UseGodPanel';
 
 interface Props {
   session: DivinationSession;
@@ -12,6 +16,7 @@ interface Props {
   chatting: boolean;
   onAnalyze(): void;
   onFollowUp(question: string): void;
+  onSelectIntent(patch: UseGodClarificationPatch): void;
   onBack(): void;
 }
 
@@ -26,14 +31,13 @@ const SECTION_LABELS: Readonly<Record<AnalysisSectionV2, string>> = {
 
 const SECTION_ORDER = Object.keys(SECTION_LABELS) as AnalysisSectionV2[];
 
-export function ResultScreen({ session, analyzing, analysisError, chatting, onAnalyze, onFollowUp, onBack }: Props) {
+export function ResultScreen({ session, analyzing, analysisError, chatting, onAnalyze, onFollowUp, onSelectIntent, onBack }: Props) {
   const [followUp, setFollowUp] = useState('');
-  const plate = session.plate!;
+  const caseSnapshot = session.caseSnapshot!;
+  const view = useMemo(() => selectResultCase(caseSnapshot), [caseSnapshot]);
   const bundle = session.analysisBundle;
   const evidence = bundle?.canonicalEvidence ?? [];
   const diagnostics = bundle?.retrievalDiagnostics;
-  const baseBits = plate.lines.map((line) => line.baseYang).reverse();
-  const changedBits = plate.lines.map((line) => line.changedYang).reverse();
   const submit = () => {
     if (!followUp.trim() || chatting) return;
     onFollowUp(followUp.trim());
@@ -43,33 +47,25 @@ export function ResultScreen({ session, analyzing, analysisError, chatting, onAn
     <main className="result-screen">
       <header className="result-header">
         <button className="text-button" type="button" onClick={onBack}><ArrowLeft size={17} />返回问事</button>
-        <div><span>{new Date(session.castAt).toLocaleString('zh-CN')}</span><strong>{session.question}</strong></div>
-        <span className="rule-version">文王纳甲 · 字二背三</span>
+        <div><span>{caseSnapshot.plate.calendar.localDateTime} · {caseSnapshot.plate.calendar.timezone}</span><strong>{caseSnapshot.question}</strong></div>
+        <span className="rule-version">{caseSnapshot.plate.rulePackRef.id} · v{caseSnapshot.plate.rulePackRef.version}</span>
       </header>
+      <section className="case-meta">
+        <div><span>占问</span><strong>{caseSnapshot.question}</strong></div>
+        <div><span>事项</span><strong>{caseSnapshot.useGod.intent?.label ?? '待澄清'}</strong></div>
+        <div><span>规则口径</span><strong>{caseSnapshot.ruleContext.relationProfile.id} · {caseSnapshot.ruleContext.effectsProfile.id}</strong></div>
+        <div><span>FactSet</span><code>{caseSnapshot.factSetHash.slice(0, 12)}</code></div>
+      </section>
+      <PillarGrid calendar={caseSnapshot.plate.calendar} />
+      <UseGodPanel caseSnapshot={caseSnapshot} onSelectIntent={onSelectIntent} />
+      <HexagramComparison
+        base={caseSnapshot.plate.baseHexagram}
+        changed={caseSnapshot.plate.changedHexagram}
+        baseLines={view.baseLines}
+        changedLines={view.changedLines}
+      />
       <div className="result-workspace">
-        <section className="plate-column">
-          <div className="section-title"><i />排盘</div>
-          <div className="hexagram-pair">
-            <div><span>本卦</span><strong>{plate.baseHexagram.name}</strong><HexagramLines lines={baseBits} moving={plate.movingLines} /></div>
-            <div className="change-arrow">→</div>
-            <div><span>变卦</span><strong>{plate.changedHexagram.name}</strong><HexagramLines lines={changedBits} /></div>
-          </div>
-          <div className="calendar-line">
-            <span>{plate.monthGanZhi}月</span><span>{plate.dayGanZhi}日</span><span>旬空 {plate.voidBranches.join('、')}</span><span>{plate.baseHexagram.palace}宫 · {plate.baseHexagram.generation}</span>
-          </div>
-          <div className="plate-table">
-            {[...plate.lines].reverse().map((line) => (
-              <div className={line.moving ? 'plate-row plate-row--moving' : 'plate-row'} key={line.index}>
-                <span className="line-index">{['初', '二', '三', '四', '五', '上'][line.index - 1]}爻</span>
-                <span className="beast">{line.beast}</span>
-                <span className="relation">{line.relation} {line.ganZhi}{line.element}<small>{lineFacts(line)}</small></span>
-                <span className="mini-line">{line.baseYang ? <i className="solid" /> : <><i /><i /></>}</span>
-                <span className="line-kind">{line.label}</span><span className="line-role">{line.role || ''}</span>
-                {line.moving && <><span className="moving-arrow">→</span><span className="changed-relation">{line.changedRelation} {line.changedGanZhi}{line.changedElement}<small>{changedLineFacts(line)}</small></span></>}
-              </div>
-            ))}
-          </div>
-        </section>
+        <FactExplorer factsByAuthority={view.factsByAuthority} />
         <section className="analysis-column">
           <div className="section-title"><i />AI 解读</div>
           {analyzing && <div className="analysis-loading"><span className="ink-loader" /><strong>正在检索古籍并校验排盘…</strong><p>排盘事实已经锁定，分析只能引用当前卦例与 canonical 证据。</p></div>}
@@ -155,12 +151,4 @@ function LegacyReport({ analysis }: { analysis: unknown }) {
       {fields.map((body, index) => <section className="report-section" key={`${index}-${body}`}><p>{body}</p></section>)}
     </article>
   );
-}
-
-function lineFacts(line: PlateLine) {
-  return [[line.void, '空'], [line.monthBreak, '月破'], [line.dayClash, '日冲'], [line.monthCombine, '月合'], [line.dayCombine, '日合']].filter(([active]) => active).map(([, label]) => label).join(' · ');
-}
-
-function changedLineFacts(line: PlateLine) {
-  return [[line.changedVoid, '空'], [line.changedMonthBreak, '月破'], [line.changedDayClash, '日冲'], [line.changedMonthCombine, '月合'], [line.changedDayCombine, '日合']].filter(([active]) => active).map(([, label]) => label).join(' · ');
 }

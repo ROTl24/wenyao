@@ -214,3 +214,81 @@ button:focus-visible, input:focus-visible, textarea:focus-visible { outline: 2px
 @media (prefers-reduced-motion: reduce) {
   *, *::before, *::after { animation-duration: .01ms !important; animation-iteration-count: 1 !important; transition-duration: .01ms !important; }
 }
+
+/* Task 11 authoritative Case presentation */
+.case-meta { display: grid; grid-template-columns: 1.35fr .9fr 1.25fr .7fr; gap: 10px; padding: 16px 0; }
+.case-meta > div { min-width: 0; padding: 12px 14px; border: 1px solid var(--line); background: rgba(244,239,227,.38); }
+.case-meta span { display: block; color: var(--muted); font-size: 10px; margin-bottom: 5px; }
+.case-meta strong, .case-meta code { display: block; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font: 13px/1.45 var(--serif); }
+.pillar-section { padding: 4px 0 18px; }
+.pillar-grid { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 10px; }
+.pillar-card { padding: 14px; border-top: 2px solid var(--bronze); background: rgba(245,240,228,.5); box-shadow: inset 0 0 0 1px rgba(41,42,38,.12); }
+.pillar-card h3 { margin: 0 0 9px; font: 16px var(--serif); }
+.pillar-card p, .pillar-card > span { display: block; margin: 5px 0 0; color: #5d5f59; font-size: 11px; }
+.pillar-ganzhi { display: flex; gap: 8px; }
+.element-text { display: inline-flex; align-items: center; gap: 3px; font-weight: 700; white-space: nowrap; }
+.element-text small { padding: 1px 4px; border: 1px solid currentColor; border-radius: 2px; font-size: 9px; line-height: 1.2; }
+.element-text--wood { color: #245637; }
+.element-text--fire { color: #873229; }
+.element-text--earth { color: #67471f; }
+.element-text--metal { color: #4b525c; }
+.element-text--water { color: #234f7a; }
+.use-god-panel { padding: 17px 18px; margin-bottom: 18px; border: 1px solid rgba(146,36,30,.23); background: rgba(246,239,224,.46); }
+.use-god-panel .section-title { margin-bottom: 10px; }
+.use-god-panel > p { margin: 6px 0; color: #555750; }
+.use-god-panel > strong { font: 16px var(--serif); color: #423d35; }
+.use-god-panel ul { display: flex; flex-wrap: wrap; gap: 8px; padding: 0; margin: 12px 0 0; list-style: none; }
+.use-god-panel li { display: grid; gap: 3px; min-width: 180px; padding: 10px; border: 1px solid var(--line); }
+.use-god-panel li small { color: var(--muted); }
+.intent-options { display: flex; flex-wrap: wrap; gap: 8px; margin: 12px 0; }
+.intent-options button { padding: 9px 13px; border: 1px solid var(--cinnabar); background: transparent; color: #72251f; cursor: pointer; }
+.intent-options button:hover { background: rgba(146,36,30,.08); }
+.hexagram-comparison-wrap { max-width: 100%; overflow-x: auto; border-block: 1px solid var(--line); scrollbar-gutter: stable; }
+.hexagram-comparison { min-width: 1040px; display: grid; grid-template-columns: 1fr 1fr; gap: 14px; padding: 18px 0; }
+.hexagram-panel { min-width: 0; border: 1px solid rgba(41,42,38,.18); background: rgba(242,237,224,.34); }
+.hexagram-panel > header { display: grid; grid-template-columns: 52px 1fr auto; align-items: center; gap: 8px; padding: 12px 14px; border-bottom: 1px solid var(--line); }
+.hexagram-panel > header span { color: var(--cinnabar); }
+.hexagram-panel > header h3 { margin: 0; font: 19px var(--serif); }
+.hexagram-panel > header p { margin: 0; color: var(--muted); font-size: 10px; }
+.hex-line-detail { min-height: 132px; padding: 10px 12px; border-bottom: 1px solid rgba(41,42,38,.12); font-size: 11px; }
+.hex-line-detail:last-child { border-bottom: 0; }
+.hex-line-heading { display: grid; grid-template-columns: 40px 94px 1fr 24px; align-items: center; gap: 9px; }
+.line-glyph { position: relative; display: block; width: 88px; height: 6px; color: #292a26; }
+.line-glyph::before, .line-glyph::after { content: ""; position: absolute; top: 0; height: 6px; background: currentColor; }
+.line-glyph--yang::before { left: 0; width: 100%; }
+.line-glyph--yin::before { left: 0; width: 39%; }
+.line-glyph--yin::after { right: 0; width: 39%; }
+.line-facets { display: grid; grid-template-columns: .65fr 1.25fr 1fr 1fr; gap: 8px; margin-top: 8px; color: #55564f; }
+.line-facets > span { min-width: 0; }
+.line-hidden, .line-derived { display: flex; flex-wrap: wrap; gap: 5px 8px; margin-top: 7px; color: #686960; }
+.line-hidden strong, .line-derived strong { color: #42433e; }
+.line-hidden span, .line-derived span { padding: 2px 5px; background: rgba(255,255,255,.28); }
+.line-derived--effects span { color: #772c25; border: 1px solid rgba(135,50,41,.22); }
+.fact-explorer { min-width: 0; padding-right: 22px; border-right: 1px solid var(--line); }
+.fact-explorer > details { border-bottom: 1px solid var(--line); }
+.fact-explorer summary { cursor: pointer; padding: 10px 4px; }
+.fact-explorer > details > summary { display: flex; justify-content: space-between; font: 15px var(--serif); }
+.fact-list { max-height: 530px; overflow: auto; padding: 0 5px 10px; }
+.fact-card { margin: 6px 0; border: 1px solid rgba(41,42,38,.13); background: rgba(246,241,229,.35); }
+.fact-card summary { display: grid; grid-template-columns: 80px 1fr; gap: 8px; font-size: 10px; }
+.fact-card p { margin: 0; padding: 4px 10px 8px; color: #66675f; font-size: 10px; overflow-wrap: anywhere; }
+.claim details { margin-top: 8px; }
+.claim details > summary { cursor: pointer; color: #6a5549; font-size: 11px; }
+.claim-references { display: grid !important; grid-template-columns: 44px 1fr; gap: 5px 8px !important; }
+.claim-references > span, .claim-references > a { grid-column: 2; margin-left: 0; overflow-wrap: anywhere; }
+.fact-explorer summary:focus-visible, .claim summary:focus-visible, .intent-options button:focus-visible { outline: 2px solid var(--cinnabar); outline-offset: 2px; }
+
+@media (max-width: 1120px) {
+  .result-screen { padding-inline: 18px; }
+  .case-meta { grid-template-columns: 1fr 1fr; }
+  .pillar-grid { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+  .fact-explorer { padding-right: 0; border-right: 0; }
+}
+
+@media print {
+  html, body, #root, .app-shell, .result-screen { height: auto; overflow: visible; background: #fff; }
+  .app-chrome, .chat-dock, .intent-options, .text-button { display: none !important; }
+  .hexagram-comparison-wrap { overflow: visible; }
+  .hexagram-comparison { min-width: 0; }
+  .element-text { color: #111 !important; }
+}

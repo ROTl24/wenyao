@@ -5,6 +5,7 @@ import { HomeScreen } from './components/HomeScreen';
 import { ResultScreen } from './components/ResultScreen';
 import { RitualScreen } from './components/RitualScreen';
 import { SettingsPanel } from './components/SettingsPanel';
+import type { UseGodClarificationPatch } from './domain/liuyao';
 import { legacyPlateFromCase } from './lib/casePresentation';
 import { desktop } from './lib/desktop';
 import { randomToss } from './lib/divination';
@@ -602,6 +603,34 @@ export function App() {
     }
   };
 
+  const selectIntent = async (patch: UseGodClarificationPatch) => {
+    if (!session?.caseSnapshot) return;
+    const owner = activeOwnerRef.current;
+    if (!owner || owner.sessionId !== session.id) return;
+    const operationId = crypto.randomUUID();
+    dispatchFlow({ type: 'BEGIN_CASE_BUILD', owner, operationId });
+    setCaseBuildError('');
+    try {
+      const expectedFactSetHash = session.caseSnapshot.factSetHash;
+      const envelope = await readingClient.selectIntent({
+        sessionId: session.id,
+        clarification: patch,
+        expectedFactSetHash,
+      });
+      if (deletedSessionIds.current.has(session.id)) return;
+      const next = sessionWithCase(session, envelope);
+      setHistory((current) => mergeSavedSession(current, next));
+      if (!isOwnerCurrent(owner)) return;
+      dispatchFlow({ type: 'APPLY_CASE_BUILD', owner, operationId, session: next });
+      void runAnalysis(next, owner);
+    } catch (error) {
+      if (isOwnerCurrent(owner)) {
+        setAnalysisError(error instanceof Error ? error.message : '占问事项澄清失败');
+        dispatchFlow({ type: 'APPLY_CASE_BUILD', owner, operationId, session });
+      }
+    }
+  };
+
   const returnHome = () => {
     openFlow(null, 'home');
     setQuestion('');
@@ -657,12 +686,12 @@ export function App() {
           </section>
         </main>
       )}
-      {screen === 'result' && session?.caseSnapshot && session.plate && (
+      {screen === 'result' && session?.caseSnapshot && (
         <>
           {session.caseRuntimeTrust === 'browser-preview' && (
             <p className="runtime-trust-note" role="status">浏览器预览结果，未经过桌面主进程验证。</p>
           )}
-          <ResultScreen session={session} analyzing={analyzing} analysisError={analysisError} chatting={chatting} onAnalyze={() => { const owner = activeOwnerRef.current; if (owner) void runAnalysis(session, owner); }} onFollowUp={followUp} onBack={returnHome} />
+          <ResultScreen session={session} analyzing={analyzing} analysisError={analysisError} chatting={chatting} onAnalyze={() => { const owner = activeOwnerRef.current; if (owner) void runAnalysis(session, owner); }} onFollowUp={followUp} onSelectIntent={(patch) => void selectIntent(patch)} onBack={returnHome} />
         </>
       )}
       {historyOpen && <HistoryPanel sessions={history} onClose={() => setHistoryOpen(false)} onOpen={(saved) => void openSession(saved)} onDelete={(id) => void deleteSession(id)} />}
