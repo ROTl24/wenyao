@@ -360,6 +360,49 @@ describe('growth_shensha_core_v1 四项神煞独立 oracle', () => {
     expect(facts.some(({ relation }) => relation === 'is-month-break')).toBe(false);
   });
 
+  it('四项神煞统一绑定 label、sourceKind 与 rule 元数据', () => {
+    const facts = productionShenShaFacts(shenShaFixture());
+    const descriptorOracle = {
+      tianyi: {
+        label: '天乙贵人',
+        sourceKind: 'day',
+        ruleId: 'tianyi-by-day-stem-zengshan/v1',
+        profileId: 'zengshan-taiyi-day-stem-v1',
+      },
+      lushen: {
+        label: '禄神',
+        sourceKind: 'day',
+        ruleId: 'lushen-by-day-stem-zengshan/v1',
+        profileId: 'zengshan-day-stem-lushen-v1',
+      },
+      yima: {
+        label: '驿马',
+        sourceKind: 'day',
+        ruleId: 'yima-by-day-branch-three-harmony/v1',
+        profileId: 'zengshan-day-branch-three-harmony-v1',
+      },
+      tianxi: {
+        label: '天喜',
+        sourceKind: 'month',
+        ruleId: 'tianxi-by-seasonal-month-branch/v1',
+        profileId: 'zengshan-seasonal-month-branch-v1',
+      },
+    } as const;
+
+    for (const [id, expected] of Object.entries(descriptorOracle)) {
+      const matching = facts.filter(({ values }) => values.shenShaId === id);
+      expect(matching.length, id).toBeGreaterThan(0);
+      expect(matching.every(({ source, ruleId, profileId, values }) => (
+        source.type === 'pillar'
+        && source.id === expected.sourceKind
+        && ruleId === expected.ruleId
+        && profileId === expected.profileId
+        && values.label === expected.label
+        && values.sourceKind === expected.sourceKind
+      )), id).toBe(true);
+    }
+  });
+
   it.each([
     null,
     {},
@@ -369,6 +412,24 @@ describe('growth_shensha_core_v1 四项神煞独立 oracle', () => {
     { id: 'yima', dayBranch: '甲' },
     { id: 'tianxi', monthBranch: null },
   ])('非法神煞公开输入统一抛领域错误：%#', (input) => {
+    expect(() => shenShaBranches(input as never)).toThrow('神煞输入无效');
+  });
+
+  it.each([
+    { id: 'tianyi', dayStem: '甲', dayBranch: '子' },
+    { id: 'lushen', dayStem: '甲', monthBranch: '寅' },
+    { id: 'yima', dayBranch: '子', dayStem: '甲' },
+    { id: 'tianxi', monthBranch: '寅', dayBranch: '子' },
+  ])('拒绝混入非本项 descriptor 输入键：%#', (input) => {
+    expect(() => shenShaBranches(input as never)).toThrow('神煞输入无效');
+  });
+
+  it.each([
+    { id: 'tianyi', dayStem: '甲', foo: true },
+    { id: 'lushen', dayStem: '甲', note: '额外' },
+    { id: 'yima', dayBranch: '子', value: 1 },
+    { id: 'tianxi', monthBranch: '寅', extra: null },
+  ])('每项输入只允许 id 与 descriptor 必需键：%#', (input) => {
     expect(() => shenShaBranches(input as never)).toThrow('神煞输入无效');
   });
 

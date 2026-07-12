@@ -27,6 +27,28 @@ type ShenShaProfile = RuleContext['shenShaProfile'];
 type LineEntityRef = Extract<EntityRef, { type: 'line' }>;
 type PillarEntityRef = Extract<EntityRef, { type: 'pillar' }>;
 type ShenShaId = ShenShaProfile['enabled'][number];
+type ShenShaArtifact = typeof GROWTH_SHENSHA_CORE_V1_ARTIFACT.shenSha;
+type ShenShaRule = ShenShaArtifact[ShenShaId]['rule'];
+type ShenShaInputKey = 'dayStem' | 'dayBranch' | 'monthBranch';
+
+interface ShenShaDescriptorSpec<Value extends Stem | Branch> {
+  readonly label: string;
+  readonly inputKey: ShenShaInputKey;
+  readonly sourceKind: 'day' | 'month';
+  readonly accepts: (value: unknown) => value is Value;
+  readonly inputFromPlate: (plate: PlateV2) => Value;
+  readonly lookupBranches: (value: Value) => readonly Branch[];
+  readonly rule: ShenShaRule;
+}
+
+interface ShenShaDescriptor {
+  readonly label: string;
+  readonly inputKey: ShenShaInputKey;
+  readonly sourceKind: 'day' | 'month';
+  readonly inputFromPlate: (plate: PlateV2) => Stem | Branch;
+  readonly lookupBranches: (value: unknown) => readonly Branch[];
+  readonly rule: ShenShaRule;
+}
 
 export type ShenShaBranchInput =
   | { readonly id: 'tianyi'; readonly dayStem: Stem }
@@ -75,6 +97,94 @@ function isBranch(value: unknown): value is Branch {
 
 function isStem(value: unknown): value is Stem {
   return typeof value === 'string' && STEMS.has(value);
+}
+
+function defineShenShaDescriptor<Value extends Stem | Branch>(
+  spec: ShenShaDescriptorSpec<Value>,
+): ShenShaDescriptor {
+  return {
+    label: spec.label,
+    inputKey: spec.inputKey,
+    sourceKind: spec.sourceKind,
+    inputFromPlate: spec.inputFromPlate,
+    lookupBranches(value: unknown): readonly Branch[] {
+      if (!spec.accepts(value)) throw new Error('神煞输入无效');
+      return spec.lookupBranches(value);
+    },
+    rule: spec.rule,
+  };
+}
+
+const SHEN_SHA_DESCRIPTORS = deepFreeze({
+  tianyi: defineShenShaDescriptor({
+    label: '天乙贵人',
+    inputKey: 'dayStem',
+    sourceKind: 'day',
+    accepts: isStem,
+    inputFromPlate: (plate) => plate.calendar.pillars.day.stem.value,
+    lookupBranches: (dayStem) => (
+      GROWTH_SHENSHA_CORE_V1_ARTIFACT.shenSha.tianyi.branchesByDayStem[dayStem]
+    ),
+    rule: GROWTH_SHENSHA_CORE_V1_ARTIFACT.shenSha.tianyi.rule,
+  }),
+  lushen: defineShenShaDescriptor({
+    label: '禄神',
+    inputKey: 'dayStem',
+    sourceKind: 'day',
+    accepts: isStem,
+    inputFromPlate: (plate) => plate.calendar.pillars.day.stem.value,
+    lookupBranches: (dayStem) => (
+      GROWTH_SHENSHA_CORE_V1_ARTIFACT.shenSha.lushen.branchesByDayStem[dayStem]
+    ),
+    rule: GROWTH_SHENSHA_CORE_V1_ARTIFACT.shenSha.lushen.rule,
+  }),
+  yima: defineShenShaDescriptor({
+    label: '驿马',
+    inputKey: 'dayBranch',
+    sourceKind: 'day',
+    accepts: isBranch,
+    inputFromPlate: (plate) => plate.calendar.pillars.day.branch.value,
+    lookupBranches: (dayBranch) => (
+      GROWTH_SHENSHA_CORE_V1_ARTIFACT.shenSha.yima.branchesByDayBranch[dayBranch]
+    ),
+    rule: GROWTH_SHENSHA_CORE_V1_ARTIFACT.shenSha.yima.rule,
+  }),
+  tianxi: defineShenShaDescriptor({
+    label: '天喜',
+    inputKey: 'monthBranch',
+    sourceKind: 'month',
+    accepts: isBranch,
+    inputFromPlate: (plate) => plate.calendar.pillars.month.branch.value,
+    lookupBranches: (monthBranch) => (
+      GROWTH_SHENSHA_CORE_V1_ARTIFACT.shenSha.tianxi.branchesByMonthBranch[monthBranch]
+    ),
+    rule: GROWTH_SHENSHA_CORE_V1_ARTIFACT.shenSha.tianxi.rule,
+  }),
+} as const satisfies Readonly<Record<ShenShaId, ShenShaDescriptor>>);
+
+function hasOwn(object: Record<string, unknown>, key: string): boolean {
+  return Object.prototype.hasOwnProperty.call(object, key);
+}
+
+function isShenShaId(value: unknown): value is ShenShaId {
+  return typeof value === 'string' && hasOwn(SHEN_SHA_DESCRIPTORS, value);
+}
+
+function descriptorForInput(input: Record<string, unknown>) {
+  const id = input.id;
+  if (
+    !hasOwn(input, 'id')
+    || !isShenShaId(id)
+  ) throw new Error('神煞输入无效');
+
+  const descriptor = SHEN_SHA_DESCRIPTORS[id];
+  const ownKeys = Reflect.ownKeys(input);
+  if (
+    !hasOwn(input, descriptor.inputKey)
+    || ownKeys.length !== 2
+    || ownKeys.some((key) => key !== 'id' && key !== descriptor.inputKey)
+  ) throw new Error('神煞输入无效');
+  return descriptor;
 }
 
 function assertGrowthProfile(profile: unknown): asserts profile is GrowthProfile {
@@ -197,26 +307,8 @@ export function shenShaBranches(
 ): readonly Branch[] {
   if (!isPlainObject(input)) throw new Error('神煞输入无效');
   assertShenShaProfile(profile);
-  switch (input.id) {
-    case 'tianyi': {
-      if (!isStem(input.dayStem)) throw new Error('神煞输入无效');
-      return GROWTH_SHENSHA_CORE_V1_ARTIFACT.shenSha.tianyi.branchesByDayStem[input.dayStem];
-    }
-    case 'lushen': {
-      if (!isStem(input.dayStem)) throw new Error('神煞输入无效');
-      return GROWTH_SHENSHA_CORE_V1_ARTIFACT.shenSha.lushen.branchesByDayStem[input.dayStem];
-    }
-    case 'yima': {
-      if (!isBranch(input.dayBranch)) throw new Error('神煞输入无效');
-      return GROWTH_SHENSHA_CORE_V1_ARTIFACT.shenSha.yima.branchesByDayBranch[input.dayBranch];
-    }
-    case 'tianxi': {
-      if (!isBranch(input.monthBranch)) throw new Error('神煞输入无效');
-      return GROWTH_SHENSHA_CORE_V1_ARTIFACT.shenSha.tianxi.branchesByMonthBranch[input.monthBranch];
-    }
-    default:
-      throw new Error('神煞输入无效');
-  }
+  const descriptor = descriptorForInput(input);
+  return descriptor.lookupBranches(input[descriptor.inputKey]);
 }
 
 function growthFact(
@@ -332,35 +424,6 @@ function deriveSixSpiritFactsValidated(
   return stableFacts(facts);
 }
 
-const SHEN_SHA_LABEL: Readonly<Record<ShenShaId, string>> = {
-  tianyi: '天乙贵人',
-  lushen: '禄神',
-  yima: '驿马',
-  tianxi: '天喜',
-};
-
-function shenShaRule(id: ShenShaId) {
-  return GROWTH_SHENSHA_CORE_V1_ARTIFACT.shenSha[id].rule;
-}
-
-function shenShaMatch(
-  id: ShenShaId,
-  plate: PlateV2,
-): { readonly branches: readonly Branch[]; readonly sourceKind: 'day' | 'month' } {
-  const day = plate.calendar.pillars.day;
-  const month = plate.calendar.pillars.month;
-  switch (id) {
-    case 'tianyi':
-      return { branches: shenShaBranches({ id, dayStem: day.stem.value }), sourceKind: 'day' };
-    case 'lushen':
-      return { branches: shenShaBranches({ id, dayStem: day.stem.value }), sourceKind: 'day' };
-    case 'yima':
-      return { branches: shenShaBranches({ id, dayBranch: day.branch.value }), sourceKind: 'day' };
-    case 'tianxi':
-      return { branches: shenShaBranches({ id, monthBranch: month.branch.value }), sourceKind: 'month' };
-  }
-}
-
 function deriveShenShaFactsValidated(
   plate: PlateV2,
   ruleContext: RuleContext,
@@ -368,31 +431,38 @@ function deriveShenShaFactsValidated(
   const lines = [...plate.lines].sort((left, right) => left.position - right.position);
   const facts: DerivedFact[] = [];
   for (const id of ruleContext.shenShaProfile.enabled) {
-    const { branches, sourceKind } = shenShaMatch(id, plate);
-    const rule = shenShaRule(id);
-    const source = pillarRef(sourceKind);
+    const descriptor = SHEN_SHA_DESCRIPTORS[id];
+    const branches = descriptor.lookupBranches(descriptor.inputFromPlate(plate));
+    const source = pillarRef(descriptor.sourceKind);
     for (const line of lines) {
       if (!branches.includes(line.base.branch)) continue;
       const target = lineRef(line.id, 'base');
       facts.push({
-        id: makeFactId('auxiliary', source, 'is-shen-sha', target, rule.ruleId, rule.profileId),
+        id: makeFactId(
+          'auxiliary',
+          source,
+          'is-shen-sha',
+          target,
+          descriptor.rule.ruleId,
+          descriptor.rule.profileId,
+        ),
         relation: 'is-shen-sha',
         source,
         target,
         scope: 'auxiliary',
         authority: 'secondary',
-        ruleId: rule.ruleId,
-        profileId: rule.profileId,
+        ruleId: descriptor.rule.ruleId,
+        profileId: descriptor.rule.profileId,
         certainty: 'conditional',
         conditions: ['auxiliary-only', 'does-not-override-use-god-strength'],
         values: {
           shenShaId: id,
-          label: SHEN_SHA_LABEL[id],
+          label: descriptor.label,
           matchedBranch: line.base.branch,
-          sourceKind,
+          sourceKind: descriptor.sourceKind,
           linePosition: line.position,
         },
-        sourceRefs: rule.sourceRefs,
+        sourceRefs: descriptor.rule.sourceRefs,
       });
     }
   }
