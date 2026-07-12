@@ -127,4 +127,3 @@ test('knowledge output is byte deterministic under reordered artifact and capsul
 
   assert.equal(serializeKnowledgeIndex(first), serializeKnowledgeIndex(second));
 });
-

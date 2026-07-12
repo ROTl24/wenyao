@@ -7,6 +7,30 @@ const KNOWLEDGE_VERSION = 2;
 const CANONICAL_SCHEMA_VERSION = 'canonical-evidence/v2';
 const HASH_PATTERN = /^[a-f0-9]{64}$/;
 const RULE_ID_PATTERN = /^[^\u0000-\u001f\u007f]+$/;
+const DOMAIN_ARTIFACT_SPECS = [
+  {
+    name: 'RELATION_CORE_V1_ARTIFACT', hashName: 'RELATION_CORE_V1_ARTIFACT_HASH',
+    artifactSchema: 'liuyao-relation-core/v1', bundleId: 'relation_core_v1', version: '1.0.0',
+  },
+  {
+    name: 'GROWTH_SHENSHA_CORE_V1_ARTIFACT', hashName: 'GROWTH_SHENSHA_CORE_V1_ARTIFACT_HASH',
+    artifactSchema: 'liuyao-growth-shensha-core/v1', bundleId: 'growth_shensha_core_v1', version: '1.0.0',
+  },
+  {
+    name: 'LIUYAO_EFFECTS_V1_ARTIFACT', hashName: 'LIUYAO_EFFECTS_V1_ARTIFACT_HASH',
+    artifactSchema: 'liuyao-effects-core/v1', bundleId: 'liuyao_effects_v1', version: '1.0.0',
+  },
+  {
+    name: 'USE_GOD_CORE_V1_ARTIFACT', hashName: 'USE_GOD_CORE_V1_ARTIFACT_HASH',
+    artifactSchema: 'liuyao-use-god-core/v1', bundleId: 'use_god_core_v1', version: '1.0.0',
+  },
+];
+const DOMAIN_CAPSULE_SPECS = [
+  { name: 'RELATION_SOURCE_EVIDENCE_CAPSULES', count: 6 },
+  { name: 'GROWTH_SHENSHA_SOURCE_EVIDENCE_CAPSULES', count: 5 },
+  { name: 'EFFECTS_SOURCE_EVIDENCE_CAPSULES', count: 13 },
+  { name: 'USE_GOD_SOURCE_EVIDENCE_CAPSULES', count: 9 },
+];
 
 function canonicalStringify(value, stack = new Set()) {
   if (value === null || typeof value === 'boolean' || typeof value === 'string') return JSON.stringify(value);
@@ -220,6 +244,51 @@ function normalizeKnowledgeIndex(raw, corpusManifest, knownRuleIds) {
   return { version: KNOWLEDGE_VERSION, corpusVersion: index.corpusVersion, corpusHash: index.corpusHash, units };
 }
 
+function normalizeReviewedEvidence(raw, corpus) {
+  const reviewed = assertPlainRecord(raw, '权威 reviewed mapping');
+  assertExactKeys(reviewed, ['knownRuleIds', 'mappings'], [], '权威 reviewed mapping');
+  const knownRuleIds = stringSet(reviewed.knownRuleIds, '权威 reviewed mapping.knownRuleIds', { sortRequired: true });
+  if (!knownRuleIds.length) throw new TypeError('权威 reviewed mapping 规则集合为空');
+  const knownRules = new Set(knownRuleIds);
+  const corpusById = new Map(corpus.map((entry) => [entry.id, entry]));
+  const pairKeys = new Set();
+  const mappings = assertDenseArray(reviewed.mappings, '权威 reviewed mapping.mappings').map((rawMapping, index) => {
+    const mapping = assertPlainRecord(rawMapping, `权威 reviewed mapping.mappings[${index}]`);
+    assertExactKeys(mapping, ['ruleId', 'evidenceId', 'textSha256', 'sourceRef'], [], `权威 reviewed mapping.mappings[${index}]`);
+    const normalized = {
+      ruleId: assertString(mapping.ruleId, `权威 reviewed mapping.mappings[${index}].ruleId`, { pattern: RULE_ID_PATTERN }),
+      evidenceId: assertString(mapping.evidenceId, `权威 reviewed mapping.mappings[${index}].evidenceId`),
+      textSha256: assertString(mapping.textSha256, `权威 reviewed mapping.mappings[${index}].textSha256`, { pattern: HASH_PATTERN }),
+      sourceRef: assertString(mapping.sourceRef, `权威 reviewed mapping.mappings[${index}].sourceRef`),
+    };
+    if (!knownRules.has(normalized.ruleId)) throw new TypeError(`权威 reviewed mapping 包含未知规则：${normalized.ruleId}`);
+    const entry = corpusById.get(normalized.evidenceId);
+    if (!entry) throw new TypeError(`权威 reviewed mapping 包含未知证据：${normalized.evidenceId}`);
+    if (sha256(entry.text) !== normalized.textSha256) throw new Error(`权威 reviewed mapping 正文哈希陈旧：${normalized.evidenceId}`);
+    const pairKey = `${normalized.ruleId}\u0000${normalized.evidenceId}`;
+    if (pairKeys.has(pairKey)) throw new TypeError(`权威 reviewed mapping 重复：${normalized.ruleId} -> ${normalized.evidenceId}`);
+    pairKeys.add(pairKey);
+    return normalized;
+  });
+  return { knownRuleIds, mappings };
+}
+
+function assertKnowledgeMatchesReviewed(units, reviewed) {
+  const expectedByEvidence = new Map(units.map((unit) => [unit.id, new Set()]));
+  for (const mapping of reviewed.mappings) {
+    const expected = expectedByEvidence.get(mapping.evidenceId);
+    if (!expected) throw new Error(`知识索引缺失权威证据：${mapping.evidenceId}`);
+    expected.add(mapping.ruleId);
+  }
+  for (const unit of units) {
+    const expected = [...expectedByEvidence.get(unit.id)].sort((left, right) => left.localeCompare(right));
+    if (unit.supportsRuleIds.length !== expected.length
+      || unit.supportsRuleIds.some((ruleId, index) => ruleId !== expected[index])) {
+      throw new Error(`知识索引支持映射与权威 reviewed mapping 不一致：${unit.id}`);
+    }
+  }
+}
+
 function buildCanonicalEvidence({ corpus, corpusManifest, units }) {
   const unitById = new Map(units.map((unit) => [unit.id, unit]));
   if (unitById.size !== corpus.length || units.length !== corpus.length) throw new TypeError('语料与知识索引必须一一对应');
@@ -255,10 +324,12 @@ function buildCanonicalEvidence({ corpus, corpusManifest, units }) {
   return { entries, hash: sha256(canonicalStringify(payload)) };
 }
 
-function createEvidenceCatalog({ corpus: rawCorpus, corpusManifest: rawManifest, knowledgeIndex: rawIndex, knownRuleIds }) {
+function createEvidenceCatalog({ corpus: rawCorpus, corpusManifest: rawManifest, knowledgeIndex: rawIndex, reviewed: rawReviewed }) {
   const corpusManifest = normalizeManifest(rawManifest);
   const corpus = normalizeCorpus(rawCorpus, corpusManifest);
-  const knowledgeIndex = normalizeKnowledgeIndex(rawIndex, corpusManifest, knownRuleIds);
+  const reviewed = normalizeReviewedEvidence(rawReviewed, corpus);
+  const knowledgeIndex = normalizeKnowledgeIndex(rawIndex, corpusManifest, reviewed.knownRuleIds);
+  assertKnowledgeMatchesReviewed(knowledgeIndex.units, reviewed);
   const canonical = buildCanonicalEvidence({ corpus, corpusManifest, units: knowledgeIndex.units });
   if (canonical.hash !== knowledgeIndex.corpusHash) throw new Error('知识索引 corpusHash 陈旧或语料哈希损坏');
 
@@ -378,32 +449,47 @@ function collectReviewedRuleEvidence({ artifacts, capsules }) {
 
 function reviewedRuleEvidenceFromDomain(domain) {
   if (!domain || typeof domain !== 'object') throw new TypeError('compiled domain 缺失');
-  const artifactNames = [
-    'RELATION_CORE_V1_ARTIFACT',
-    'GROWTH_SHENSHA_CORE_V1_ARTIFACT',
-    'LIUYAO_EFFECTS_V1_ARTIFACT',
-    'USE_GOD_CORE_V1_ARTIFACT',
-  ];
-  const capsuleNames = [
-    'RELATION_SOURCE_EVIDENCE_CAPSULES',
-    'GROWTH_SHENSHA_SOURCE_EVIDENCE_CAPSULES',
-    'EFFECTS_SOURCE_EVIDENCE_CAPSULES',
-    'USE_GOD_SOURCE_EVIDENCE_CAPSULES',
-  ];
-  const artifacts = artifactNames.map((name) => {
-    if (!domain[name]) throw new TypeError(`compiled domain artifact 缺失：${name}`);
-    return domain[name];
+  const artifacts = DOMAIN_ARTIFACT_SPECS.map((spec) => {
+    const artifact = assertPlainRecord(domain[spec.name], spec.name);
+    if (artifact.artifactSchema !== spec.artifactSchema
+      || artifact.bundleId !== spec.bundleId
+      || artifact.version !== spec.version) {
+      throw new TypeError(`${spec.name} schema/bundle/version 无效`);
+    }
+    const artifactHash = assertString(domain[spec.hashName], `${spec.name} ${spec.hashName}`, { pattern: HASH_PATTERN });
+    if (sha256(canonicalStringify(artifact)) !== artifactHash) throw new Error(`${spec.name} artifact hash 不一致或内容被截断`);
+    const records = [];
+    collectRuleRecords(artifact, spec.name, records);
+    if (!records.length) throw new TypeError(`${spec.name} 规则集合为空`);
+    return artifact;
   });
-  const capsules = capsuleNames.flatMap((name) => {
-    if (!Array.isArray(domain[name])) throw new TypeError(`compiled domain capsule 缺失：${name}`);
-    return domain[name];
+  const capsules = DOMAIN_CAPSULE_SPECS.flatMap((spec) => {
+    const collection = assertDenseArray(domain[spec.name], spec.name);
+    if (collection.length !== spec.count) throw new TypeError(`${spec.name} 数量无效或被截断`);
+    const ids = new Set();
+    collection.forEach((rawCapsule, index) => {
+      const capsule = assertPlainRecord(rawCapsule, `${spec.name}[${index}]`);
+      assertExactKeys(capsule, ['ref', 'payload'], [], `${spec.name}[${index}]`);
+      const ref = assertPlainRecord(capsule.ref, `${spec.name}[${index}].ref`);
+      assertExactKeys(ref, ['id', 'title', 'url', 'locator', 'contentHash'], [], `${spec.name}[${index}].ref`);
+      const id = assertString(ref.id, `${spec.name}[${index}].ref.id`);
+      assertString(ref.title, `${spec.name}[${index}].ref.title`);
+      assertString(ref.url, `${spec.name}[${index}].ref.url`);
+      assertString(ref.locator, `${spec.name}[${index}].ref.locator`);
+      assertString(ref.contentHash, `${spec.name}[${index}].ref.contentHash`, { pattern: HASH_PATTERN });
+      const payload = assertString(capsule.payload, `${spec.name}[${index}].payload`);
+      if (!payload.split(/\r?\n/).includes(`sourceId=${id}`)) throw new TypeError(`${spec.name}[${index}] payload sourceId 不一致`);
+      if (ids.has(id)) throw new TypeError(`${spec.name} 来源 ID 重复：${id}`);
+      ids.add(id);
+    });
+    return collection;
   });
   return collectReviewedRuleEvidence({ artifacts, capsules });
 }
 
 async function loadEvidenceCatalog({
   resourcesDir = path.resolve(__dirname, '..', '..', 'resources'),
-  knownRuleIds,
+  reviewed: injectedReviewed,
   domain,
 } = {}) {
   function readJson(filename, label) {
@@ -414,16 +500,16 @@ async function loadEvidenceCatalog({
       throw new Error(`${label}（${filename}）缺失或损坏：${error.message}`);
     }
   }
-  let authoritativeRuleIds = knownRuleIds;
-  if (!authoritativeRuleIds) {
+  let reviewed = injectedReviewed;
+  if (!reviewed) {
     const compiled = domain || await import(pathToFileURL(path.resolve(__dirname, '..', 'generated', 'domain', 'index.js')).href);
-    authoritativeRuleIds = reviewedRuleEvidenceFromDomain(compiled).knownRuleIds;
+    reviewed = reviewedRuleEvidenceFromDomain(compiled);
   }
   return createEvidenceCatalog({
     corpus: readJson('corpus.json', '语料'),
     corpusManifest: readJson('corpus-manifest.json', '语料清单'),
     knowledgeIndex: readJson('knowledge-index.json', 'knowledge-index 知识索引'),
-    knownRuleIds: authoritativeRuleIds,
+    reviewed,
   });
 }
 

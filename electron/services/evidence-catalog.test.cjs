@@ -9,6 +9,7 @@ const {
   canonicalStringify,
   createEvidenceCatalog,
   loadEvidenceCatalog,
+  reviewedRuleEvidenceFromDomain,
 } = require('./evidence-catalog.cjs');
 
 function corpusFixture() {
@@ -72,6 +73,23 @@ function unitsFixture() {
   ];
 }
 
+function reviewedFixture(corpus = corpusFixture()) {
+  const byId = new Map(corpus.map((entry) => [entry.id, entry]));
+  const mapping = (ruleId, evidenceId, sourceRef) => ({
+    ruleId,
+    evidenceId,
+    sourceRef,
+    textSha256: crypto.createHash('sha256').update(byId.get(evidenceId).text, 'utf8').digest('hex'),
+  });
+  return {
+    knownRuleIds: ['rule:career', 'rule:wealth'],
+    mappings: [
+      mapping('rule:career', 'E1', 'SOURCE-CAREER'),
+      mapping('rule:wealth', 'E2', 'SOURCE-WEALTH'),
+    ],
+  };
+}
+
 function canonicalEntries(corpus, units) {
   const unitById = new Map(units.map((unit) => [unit.id, unit]));
   return [...corpus].sort((a, b) => a.id.localeCompare(b.id)).map((entry) => {
@@ -118,7 +136,7 @@ test('canonical catalog merges corpus and v2 knowledge one-to-one and owns a fro
     corpus,
     corpusManifest: manifest,
     knowledgeIndex: index,
-    knownRuleIds: ['rule:career', 'rule:wealth'],
+    reviewed: reviewedFixture(corpus),
   });
 
   corpus[0].text = '被调用方事后篡改';
@@ -143,7 +161,7 @@ test('hydrate trusts only candidate ids and first rank, dropping spoofed bodies,
     corpus,
     corpusManifest: manifest,
     knowledgeIndex: index,
-    knownRuleIds: ['rule:career', 'rule:wealth'],
+    reviewed: reviewedFixture(corpus),
   });
   const hydrated = catalog.hydrate([
     { id: 'UNKNOWN', rank: 0, text: '伪正文' },
@@ -168,8 +186,8 @@ test('catalog fails closed on invalid versions, one-to-one mismatches, unknown r
   const corpus = corpusFixture();
   const manifest = manifestFixture();
   const base = indexFixture(corpus, manifest);
-  const make = (knowledgeIndex, knownRuleIds = ['rule:career', 'rule:wealth']) => () => createEvidenceCatalog({
-    corpus, corpusManifest: manifest, knowledgeIndex, knownRuleIds,
+  const make = (knowledgeIndex, reviewed = reviewedFixture(corpus)) => () => createEvidenceCatalog({
+    corpus, corpusManifest: manifest, knowledgeIndex, reviewed,
   });
 
   assert.throws(make({ ...base, version: 1 }), /版本/);
@@ -188,7 +206,7 @@ test('catalog rejects sparse and duplicate semantic arrays instead of silently n
   const duplicateRules = base.units.map((unit, index) => index ? unit : { ...unit, supportsRuleIds: ['rule:career', 'rule:career'] });
   assert.throws(() => createEvidenceCatalog({
     corpus, corpusManifest: manifest, knowledgeIndex: { ...base, units: duplicateRules },
-    knownRuleIds: ['rule:career', 'rule:wealth'],
+    reviewed: reviewedFixture(corpus),
   }), /重复/);
 
   const sparseTopics = [...base.units[0].topics];
@@ -196,7 +214,7 @@ test('catalog rejects sparse and duplicate semantic arrays instead of silently n
   const sparseUnits = base.units.map((unit, index) => index ? unit : { ...unit, topics: sparseTopics });
   assert.throws(() => createEvidenceCatalog({
     corpus, corpusManifest: manifest, knowledgeIndex: { ...base, units: sparseUnits },
-    knownRuleIds: ['rule:career', 'rule:wealth'],
+    reviewed: reviewedFixture(corpus),
   }), /稀疏/);
 });
 
@@ -208,12 +226,12 @@ test('catalog rejects unsupported source types and malformed candidate ranks can
     corpus: corpus.map((entry, index) => index ? entry : { ...entry, sourceType: 'model-generated' }),
     corpusManifest: manifest,
     knowledgeIndex: base,
-    knownRuleIds: ['rule:career', 'rule:wealth'],
+    reviewed: reviewedFixture(corpus),
   }), /sourceType/);
 
   const catalog = createEvidenceCatalog({
     corpus, corpusManifest: manifest, knowledgeIndex: base,
-    knownRuleIds: ['rule:career', 'rule:wealth'],
+    reviewed: reviewedFixture(corpus),
   });
   const hydrated = catalog.hydrate([
     { id: 'E2', rank: -100 },
@@ -240,14 +258,68 @@ test('loader treats a missing or corrupt knowledge index as a startup error', as
   fs.writeFileSync(path.join(resourcesDir, 'corpus.json'), JSON.stringify(corpusFixture()));
   fs.writeFileSync(path.join(resourcesDir, 'corpus-manifest.json'), JSON.stringify(manifestFixture()));
   await assert.rejects(
-    () => loadEvidenceCatalog({ resourcesDir, knownRuleIds: ['rule:career', 'rule:wealth'] }),
+    () => loadEvidenceCatalog({ resourcesDir, reviewed: reviewedFixture() }),
     /knowledge-index|知识索引/,
   );
   fs.writeFileSync(path.join(resourcesDir, 'knowledge-index.json'), '{broken');
   await assert.rejects(
-    () => loadEvidenceCatalog({ resourcesDir, knownRuleIds: ['rule:career', 'rule:wealth'] }),
+    () => loadEvidenceCatalog({ resourcesDir, reviewed: reviewedFixture() }),
     /knowledge-index|知识索引/,
   );
+});
+
+test('a legal rule rebound to unrelated evidence is rejected even when corpusHash is recomputed', () => {
+  const corpus = corpusFixture();
+  const manifest = manifestFixture();
+  const forgedUnits = unitsFixture().map((unit) => {
+    if (unit.id === 'E1') return { ...unit, supportsRuleIds: [] };
+    if (unit.id === 'E2') return { ...unit, supportsRuleIds: ['rule:career', 'rule:wealth'] };
+    return unit;
+  });
+  const forgedIndex = indexFixture(corpus, manifest, forgedUnits);
+  assert.throws(() => createEvidenceCatalog({
+    corpus,
+    corpusManifest: manifest,
+    knowledgeIndex: forgedIndex,
+    reviewed: reviewedFixture(corpus),
+  }), /权威映射|支持映射|不一致/);
+});
+
+test('every named reviewed artifact and capsule collection fails closed when missing, malformed or truncated', async () => {
+  const imported = await import('../generated/domain/index.js');
+  const domain = Object.fromEntries(Object.entries(imported));
+  const artifacts = [
+    'RELATION_CORE_V1_ARTIFACT',
+    'GROWTH_SHENSHA_CORE_V1_ARTIFACT',
+    'LIUYAO_EFFECTS_V1_ARTIFACT',
+    'USE_GOD_CORE_V1_ARTIFACT',
+  ];
+  const capsules = [
+    'RELATION_SOURCE_EVIDENCE_CAPSULES',
+    'GROWTH_SHENSHA_SOURCE_EVIDENCE_CAPSULES',
+    'EFFECTS_SOURCE_EVIDENCE_CAPSULES',
+    'USE_GOD_SOURCE_EVIDENCE_CAPSULES',
+  ];
+  for (const name of artifacts) {
+    for (const replacement of [undefined, {}, 'broken', {
+      artifactSchema: domain[name].artifactSchema,
+      bundleId: domain[name].bundleId,
+      version: domain[name].version,
+    }]) {
+      const forged = { ...domain };
+      if (replacement === undefined) delete forged[name];
+      else forged[name] = replacement;
+      assert.throws(() => reviewedRuleEvidenceFromDomain(forged), new RegExp(name));
+    }
+  }
+  for (const name of capsules) {
+    for (const replacement of [undefined, {}, 'broken', domain[name].slice(0, -1)]) {
+      const forged = { ...domain };
+      if (replacement === undefined) delete forged[name];
+      else forged[name] = replacement;
+      assert.throws(() => reviewedRuleEvidenceFromDomain(forged), new RegExp(name));
+    }
+  }
 });
 
 test('bundled corpus and knowledge v2 load as one coherent canonical catalog', async () => {
