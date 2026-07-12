@@ -1,10 +1,17 @@
 const { contextBridge, ipcRenderer } = require('electron');
+const {
+  sanitizeAnalyzePayload,
+  sanitizeBuildCasePayload,
+  sanitizeFollowUpPayload,
+  sanitizeRendererSession,
+  sanitizeSelectIntentPayload,
+} = require('./services/ipc-payload.cjs');
 
 contextBridge.exposeInMainWorld('wenyao', {
   sessions: {
     list: () => ipcRenderer.invoke('sessions:list'),
     get: (id) => ipcRenderer.invoke('sessions:get', id),
-    save: (session) => ipcRenderer.invoke('sessions:save', session),
+    save: (session) => ipcRenderer.invoke('sessions:save', sanitizeRendererSession(session)),
     delete: (id) => ipcRenderer.invoke('sessions:delete', id),
   },
   settings: {
@@ -18,12 +25,11 @@ contextBridge.exposeInMainWorld('wenyao', {
     status: () => ipcRenderer.invoke('corpus:status'),
     rebuildVectors: () => ipcRenderer.invoke('corpus:rebuild-vectors'),
   },
-  retrieval: {
-    search: (payload) => ipcRenderer.invoke('retrieval:search', payload),
-  },
-  ai: {
-    analyze: (payload) => ipcRenderer.invoke('ai:analyze', payload),
-    followUp: (payload) => ipcRenderer.invoke('ai:follow-up', payload),
+  reading: {
+    buildCase: (payload) => ipcRenderer.invoke('reading:build-case', sanitizeBuildCasePayload(payload)),
+    selectIntent: (payload) => ipcRenderer.invoke('reading:select-intent', sanitizeSelectIntentPayload(payload)),
+    analyze: (payload) => ipcRenderer.invoke('reading:analyze', sanitizeAnalyzePayload(payload)),
+    followUp: (payload) => ipcRenderer.invoke('reading:follow-up', sanitizeFollowUpPayload(payload)),
   },
   platform: process.platform,
 });

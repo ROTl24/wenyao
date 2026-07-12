@@ -3,6 +3,10 @@ const fs = require('node:fs');
 const path = require('node:path');
 const crypto = require('node:crypto');
 const { JsonStore } = require('./services/store.cjs');
+const { migrateDataFile } = require('./services/migration.cjs');
+const { createReadingService } = require('./services/reading-service.cjs');
+const { registerReadingIpc } = require('./services/reading-ipc.cjs');
+const { sanitizeRendererSession } = require('./services/ipc-payload.cjs');
 const { analyzeCloud, createLocalReport, followUpCloud } = require('./services/ai.cjs');
 const { createAlibabaClient } = require('./services/alibaba.cjs');
 const { LocalVectorIndex } = require('./services/vector-index.cjs');
@@ -28,6 +32,7 @@ let corpus = [];
 let corpusHash = '';
 let vectorIndex;
 let vectorBuildPromise = null;
+let readingService;
 
 function resourcePath(name) {
   const candidates = [path.join(app.getAppPath(), 'resources', name), path.join(process.resourcesPath, 'resources', name)];
@@ -184,10 +189,41 @@ async function searchCorpus(payload) {
   });
 }
 
+async function analyzeReading(payload) {
+  const settings = store.getRawSettings();
+  const apiKey = getApiKey();
+  if (!apiKey || !settings.model) return createLocalReport(payload);
+  return analyzeCloud({
+    ...payload,
+    baseUrl: validateBaseUrl(settings.baseUrl),
+    model: settings.model,
+    apiKey,
+    signal: AbortSignal.timeout(180000),
+  });
+}
+
+async function followUpReading(payload) {
+  const settings = store.getRawSettings();
+  const apiKey = getApiKey();
+  if (!apiKey || !settings.model) {
+    return {
+      content: '当前未配置云端 AI。排盘和历史已安全保存；配置模型后可继续围绕同一卦象追问。',
+      evidenceIds: payload.evidence.slice(0, 2).map((item) => item.id),
+    };
+  }
+  return followUpCloud({
+    ...payload,
+    baseUrl: validateBaseUrl(settings.baseUrl),
+    model: settings.model,
+    apiKey,
+    signal: AbortSignal.timeout(180000),
+  });
+}
+
 function registerIpc() {
   ipcMain.handle('sessions:list', () => store.listSessions());
   ipcMain.handle('sessions:get', (_event, id) => store.getSession(id));
-  ipcMain.handle('sessions:save', (_event, session) => store.saveSession(session));
+  ipcMain.handle('sessions:save', (_event, session) => store.saveRendererSession(sanitizeRendererSession(session)));
   ipcMain.handle('sessions:delete', (_event, id) => store.deleteSession(id));
 
   ipcMain.handle('settings:get', () => store.getPublicSettings());
@@ -247,41 +283,22 @@ function registerIpc() {
     finally { if (vectorBuildPromise === buildTask) vectorBuildPromise = null; }
   });
 
-  ipcMain.handle('retrieval:search', (_event, payload) => searchCorpus(payload));
-
-  ipcMain.handle('ai:analyze', async (_event, payload) => {
-    const allowed = new Set(corpus.map((item) => item.id));
-    const evidence = (payload.evidence || []).filter((item) => allowed.has(item.id));
-    try {
-      const settings = store.getRawSettings();
-      const apiKey = getApiKey();
-      if (!apiKey || !settings.model) return { ok: true, report: createLocalReport({ ...payload, evidence }) };
-      const report = await analyzeCloud({ ...payload, evidence, baseUrl: validateBaseUrl(settings.baseUrl), model: settings.model, apiKey, signal: AbortSignal.timeout(180000) });
-      return { ok: true, report };
-    } catch (error) { return { ok: false, error: structuredError(error, 'AI_ANALYSIS_FAILED') }; }
-  });
-
-  ipcMain.handle('ai:follow-up', async (_event, payload) => {
-    const allowed = new Set(corpus.map((item) => item.id));
-    const evidence = (payload.evidence || []).filter((item) => allowed.has(item.id));
-    try {
-      const settings = store.getRawSettings();
-      const apiKey = getApiKey();
-      if (!apiKey || !settings.model) {
-        return { ok: true, answer: { content: '当前未配置云端 AI。排盘和历史已安全保存；配置模型后可继续围绕同一卦象追问。', evidenceIds: evidence.slice(0, 2).map((item) => item.id) } };
-      }
-      const answer = await followUpCloud({ ...payload, evidence, baseUrl: validateBaseUrl(settings.baseUrl), model: settings.model, apiKey, signal: AbortSignal.timeout(180000) });
-      return { ok: true, answer };
-    } catch (error) { return { ok: false, error: structuredError(error, 'AI_FOLLOW_UP_FAILED') }; }
-  });
+  registerReadingIpc({ ipcMain, service: readingService });
 }
 
-app.whenReady().then(() => {
+app.whenReady().then(async () => {
   registerAppProtocol();
+  await migrateDataFile(dataPath());
   store = new JsonStore(dataPath());
   corpus = loadCorpus();
   corpusHash = hashCorpus(corpus);
   vectorIndex = loadVectorIndex(store.getRawSettings().embeddingModel);
+  readingService = createReadingService({
+    store,
+    searchCorpus,
+    analyze: analyzeReading,
+    followUp: followUpReading,
+  });
   if (process.argv.includes('--configure-api-key-env')) {
     try {
       if (!oneTimeSetupKey) throw new Error('未收到 API 密钥');
@@ -342,6 +359,9 @@ app.whenReady().then(() => {
   registerIpc();
   createWindow();
   app.on('activate', () => { if (BrowserWindow.getAllWindows().length === 0) createWindow(); });
+}).catch((error) => {
+  process.stderr.write(`${error instanceof Error ? error.message : '应用启动失败'}\n`);
+  app.exit(1);
 });
 
 app.on('window-all-closed', () => { if (process.platform !== 'darwin') app.quit(); });

@@ -1,6 +1,6 @@
-import type { EvidenceEntry, RetrievalDiagnostics } from '../lib/retrieval';
+import type { EvidenceEntry } from '../lib/retrieval';
+import type { ReadingClient } from '../lib/readingClient';
 import type { DivinationSession } from '../lib/session';
-import type { AnalysisReport } from '../lib/types';
 
 interface PublicSettings { baseUrl: string; model: string; embeddingModel: string; rerankModel: string; rerankUrl: string; hasApiKey: boolean }
 interface DesktopError { code: string; message: string; dataSafe: boolean; nextAction: string }
@@ -24,13 +24,7 @@ export interface DesktopApi {
     status(): Promise<CorpusStatus>;
     rebuildVectors(): Promise<{ ok: boolean; result?: { count: number; model: string; dimensions: number }; error?: DesktopError }>;
   };
-  retrieval: {
-    search(payload: { query: string; domainTerms: string[]; limit?: number }): Promise<{ evidence: EvidenceEntry[]; diagnostics: RetrievalDiagnostics }>;
-  };
-  ai: {
-    analyze(payload: { question: string; category: string; plate: DivinationSession['plate']; evidence: EvidenceEntry[]; retrievalDiagnostics?: RetrievalDiagnostics }): Promise<{ ok: boolean; report?: AnalysisReport; error?: DesktopError }>;
-    followUp(payload: { question: string; session: DivinationSession; evidence: EvidenceEntry[] }): Promise<{ ok: boolean; answer?: { content: string; evidenceIds: string[] }; error?: DesktopError }>;
-  };
+  reading: ReadingClient;
   platform: string;
 }
 

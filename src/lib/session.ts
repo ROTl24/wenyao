@@ -51,6 +51,9 @@ export interface DivinationSession {
   ruleContext?: RuleContext;
   migrationVersion?: 2;
   migrationState?: 'clean' | 'needs-review';
+  caseRuntimeTrust?: 'authoritative' | 'browser-preview';
+  interactionRevision?: number;
+  authoritativeRevision?: number;
   analysis?: AnalysisReport;
   messages: ChatMessage[];
 }

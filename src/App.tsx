@@ -5,9 +5,10 @@ import { HomeScreen } from './components/HomeScreen';
 import { ResultScreen } from './components/ResultScreen';
 import { RitualScreen } from './components/RitualScreen';
 import { SettingsPanel } from './components/SettingsPanel';
+import { legacyPlateFromCase } from './lib/casePresentation';
 import { desktop } from './lib/desktop';
-import { randomToss, upgradePlate } from './lib/divination';
-import { createBrowserLocalReport } from './lib/localAnalysis';
+import { randomToss } from './lib/divination';
+import { createElectronReadingClient, type ReadingCaseEnvelope } from './lib/readingClient';
 import type { EvidenceEntry, RetrievalDiagnostics } from './lib/retrieval';
 import {
   advanceCurrentToss,
@@ -21,17 +22,12 @@ import {
 } from './lib/session';
 import type { AnalysisReport } from './lib/types';
 
-type Screen = 'home' | 'casting' | 'result';
+type Screen = 'home' | 'casting' | 'building-case' | 'result' | 'review-error';
 
 interface ConfirmCommitCommand {
   id: string;
   session: DivinationSession;
   owner: SessionOwner;
-}
-
-interface SessionWriteCommand {
-  id: string;
-  session: DivinationSession;
 }
 
 interface SessionOwner {
@@ -43,7 +39,7 @@ interface AppFlowState {
   screen: Screen;
   session: DivinationSession | null;
   pendingConfirmCommit: ConfirmCommitCommand | null;
-  pendingSessionWrite: SessionWriteCommand | null;
+  caseBuildOperationId: string | null;
   analysisOperationId: string | null;
   followUpOperationId: string | null;
   epoch: number;
@@ -58,12 +54,19 @@ type AppFlowAction =
     transaction: AdvanceCurrentTossTransaction;
   }
   | { type: 'CONSUME_CONFIRM_COMMIT'; id: string }
+  | { type: 'BEGIN_CASE_BUILD'; owner: SessionOwner; operationId: string }
+  | {
+    type: 'APPLY_CASE_BUILD';
+    owner: SessionOwner;
+    operationId: string;
+    session: DivinationSession;
+  }
+  | { type: 'END_CASE_BUILD'; owner: SessionOwner; operationId: string }
   | { type: 'BEGIN_ANALYSIS'; owner: SessionOwner; operationId: string }
   | {
     type: 'APPLY_ANALYSIS';
     owner: SessionOwner;
     operationId: string;
-    writeId: string;
     analysis: AnalysisReport;
   }
   | { type: 'END_ANALYSIS'; owner: SessionOwner; operationId: string }
@@ -71,24 +74,20 @@ type AppFlowAction =
     type: 'BEGIN_FOLLOW_UP';
     owner: SessionOwner;
     operationId: string;
-    writeId: string;
-    message: ChatMessage;
   }
   | {
     type: 'RESOLVE_FOLLOW_UP';
     owner: SessionOwner;
     operationId: string;
-    writeId: string;
-    message: ChatMessage;
+    messages: ChatMessage[];
   }
-  | { type: 'END_FOLLOW_UP'; owner: SessionOwner; operationId: string }
-  | { type: 'CONSUME_SESSION_WRITE'; id: string };
+  | { type: 'END_FOLLOW_UP'; owner: SessionOwner; operationId: string };
 
 const initialAppFlowState: AppFlowState = {
   screen: 'home',
   session: null,
   pendingConfirmCommit: null,
-  pendingSessionWrite: null,
+  caseBuildOperationId: null,
   analysisOperationId: null,
   followUpOperationId: null,
   epoch: 0,
@@ -98,24 +97,14 @@ function latestTimestamp(current: string, candidate: string): string {
   return current > candidate ? current : candidate;
 }
 
-function withPendingWrite(
-  state: AppFlowState,
-  session: DivinationSession,
-  writeId: string,
-): AppFlowState {
-  return {
-    ...state,
-    session,
-    pendingSessionWrite: { id: writeId, session },
-  };
-}
-
 function ownerMatches(state: AppFlowState, owner: SessionOwner): boolean {
   return state.epoch === owner.epoch && state.session?.id === owner.sessionId;
 }
 
 function sessionProgress(session: DivinationSession): number {
-  return session.tosses.length * 100
+  return (session.caseSnapshot ? 10_000 : 0)
+    + Number(session.authoritativeRevision || 0) * 1_000
+    + session.tosses.length * 100
     + (session.status === 'complete' ? 50 : 0)
     + (session.analysis ? 10 : 0)
     + session.messages.length;
@@ -126,8 +115,10 @@ export function mergeSavedSession(
   saved: DivinationSession,
 ): DivinationSession[] {
   const existing = history.find((item) => item.id === saved.id);
+  if (existing?.caseSnapshot && !saved.caseSnapshot) return history;
   if (
     existing
+    && !(saved.caseSnapshot && !existing.caseSnapshot)
     && (
       existing.updatedAt > saved.updatedAt
       || (
@@ -146,6 +137,7 @@ export function appFlowReducer(state: AppFlowState, action: AppFlowAction): AppF
         ...state,
         screen: action.screen,
         session: action.session,
+        caseBuildOperationId: null,
         analysisOperationId: null,
         followUpOperationId: null,
         epoch: state.epoch + 1,
@@ -160,7 +152,7 @@ export function appFlowReducer(state: AppFlowState, action: AppFlowAction): AppF
       if (next === state.session) return state;
       return {
         ...state,
-        screen: next.status === 'complete' ? 'result' : 'casting',
+        screen: next.status === 'complete' ? 'building-case' : 'casting',
         session: next,
         pendingConfirmCommit: {
           id: action.commandId,
@@ -172,6 +164,25 @@ export function appFlowReducer(state: AppFlowState, action: AppFlowAction): AppF
     case 'CONSUME_CONFIRM_COMMIT':
       return state.pendingConfirmCommit?.id === action.id
         ? { ...state, pendingConfirmCommit: null }
+        : state;
+    case 'BEGIN_CASE_BUILD':
+      return ownerMatches(state, action.owner) && state.session?.status === 'complete'
+        ? { ...state, screen: 'building-case', caseBuildOperationId: action.operationId }
+        : state;
+    case 'APPLY_CASE_BUILD':
+      return ownerMatches(state, action.owner)
+        && state.caseBuildOperationId === action.operationId
+        ? {
+          ...state,
+          screen: 'result',
+          session: action.session,
+          caseBuildOperationId: null,
+        }
+        : state;
+    case 'END_CASE_BUILD':
+      return ownerMatches(state, action.owner)
+        && state.caseBuildOperationId === action.operationId
+        ? { ...state, caseBuildOperationId: null }
         : state;
     case 'BEGIN_ANALYSIS':
       return ownerMatches(state, action.owner)
@@ -188,11 +199,7 @@ export function appFlowReducer(state: AppFlowState, action: AppFlowAction): AppF
         analysis: action.analysis,
         updatedAt: latestTimestamp(state.session.updatedAt, action.analysis.generatedAt),
       };
-      return withPendingWrite(
-        { ...state, analysisOperationId: null },
-        next,
-        action.writeId,
-      );
+      return { ...state, analysisOperationId: null, session: next };
     }
     case 'END_ANALYSIS':
       return ownerMatches(state, action.owner)
@@ -201,19 +208,7 @@ export function appFlowReducer(state: AppFlowState, action: AppFlowAction): AppF
         : state;
     case 'BEGIN_FOLLOW_UP': {
       if (!ownerMatches(state, action.owner) || !state.session) return state;
-      const messages = state.session.messages.some((message) => message.id === action.message.id)
-        ? state.session.messages
-        : [...state.session.messages, action.message];
-      const next = {
-        ...state.session,
-        messages,
-        updatedAt: latestTimestamp(state.session.updatedAt, action.message.createdAt),
-      };
-      return withPendingWrite(
-        { ...state, followUpOperationId: action.operationId },
-        next,
-        action.writeId,
-      );
+      return { ...state, followUpOperationId: action.operationId };
     }
     case 'RESOLVE_FOLLOW_UP': {
       if (
@@ -221,42 +216,104 @@ export function appFlowReducer(state: AppFlowState, action: AppFlowAction): AppF
         || state.followUpOperationId !== action.operationId
         || !state.session
       ) return state;
-      const messages = state.session.messages.some((message) => message.id === action.message.id)
-        ? state.session.messages
-        : [...state.session.messages, action.message];
+      const known = new Set(state.session.messages.map((message) => message.id));
+      const appended = action.messages.filter((message) => !known.has(message.id));
+      const messages = [...state.session.messages, ...appended];
+      const newest = appended.reduce(
+        (timestamp, message) => latestTimestamp(timestamp, message.createdAt),
+        state.session.updatedAt,
+      );
       const next = {
         ...state.session,
         messages,
-        updatedAt: latestTimestamp(state.session.updatedAt, action.message.createdAt),
+        updatedAt: newest,
       };
-      return withPendingWrite(
-        { ...state, followUpOperationId: null },
-        next,
-        action.writeId,
-      );
+      return { ...state, followUpOperationId: null, session: next };
     }
     case 'END_FOLLOW_UP':
       return ownerMatches(state, action.owner)
         && state.followUpOperationId === action.operationId
         ? { ...state, followUpOperationId: null }
         : state;
-    case 'CONSUME_SESSION_WRITE':
-      return state.pendingSessionWrite?.id === action.id
-        ? { ...state, pendingSessionWrite: null }
-        : state;
   }
 }
 
-const categoryTerms: Record<SessionCategory, string[]> = {
-  career: ['事业', '功名', '官禄', '仕宦', '求名', '官鬼', '世爻', '父母'],
-  wealth: ['财运', '求财', '买卖', '妻财', '子孙', '兄弟'],
-  relationship: ['感情', '婚姻', '世爻', '应爻', '官鬼', '妻财'],
-  health: ['健康', '疾病', '世爻', '官鬼', '子孙'],
-  study: ['学业', '考试', '科举', '科甲', '求名', '父母', '官鬼', '世爻'],
-  lost_item: ['寻物', '失物', '用神', '方位', '冲合'],
-  travel: ['出行', '行人', '世爻', '应爻', '动爻'],
-  other: ['世爻', '应爻', '日辰', '月建'],
-};
+const readingClient = createElectronReadingClient(desktop.reading);
+
+const SESSION_CATEGORIES = new Set<SessionCategory>([
+  'career', 'wealth', 'relationship', 'health', 'study', 'lost_item', 'travel', 'other',
+]);
+
+function isRecord(value: unknown): value is Record<string, unknown> {
+  return value !== null && typeof value === 'object' && !Array.isArray(value);
+}
+
+function normalizedReviewSession(value: unknown, fallbackKey: string): DivinationSession {
+  if (!isRecord(value) || value.migrationState !== 'needs-review') return value as DivinationSession;
+  const id = typeof value.id === 'string' && value.id.trim()
+    ? value.id
+    : `needs-review:${fallbackKey}`;
+  const castAt = typeof value.castAt === 'string' && Number.isFinite(Date.parse(value.castAt))
+    ? new Date(value.castAt).toISOString()
+    : '1970-01-01T00:00:00.000Z';
+  const updatedAt = typeof value.updatedAt === 'string' && Number.isFinite(Date.parse(value.updatedAt))
+    ? new Date(value.updatedAt).toISOString()
+    : castAt;
+  return {
+    ...value,
+    id,
+    question: typeof value.question === 'string' && value.question.trim()
+      ? value.question
+      : '旧记录（字段不完整）',
+    category: typeof value.category === 'string' && SESSION_CATEGORIES.has(value.category as SessionCategory)
+      ? value.category as SessionCategory
+      : 'other',
+    castAt,
+    updatedAt,
+    status: 'complete',
+    tosses: Array.isArray(value.tosses) ? value.tosses : [],
+    messages: Array.isArray(value.messages) ? value.messages : [],
+    migrationState: 'needs-review',
+  } as DivinationSession;
+}
+
+function presentAuthoritativeSession(
+  input: DivinationSession,
+  fallbackKey = 'record',
+): DivinationSession {
+  const session = normalizedReviewSession(input, fallbackKey);
+  if (session.migrationState === 'needs-review' || !session.caseSnapshot) {
+    const { plate: _legacyPlate, ...safe } = session;
+    return safe;
+  }
+  return {
+    ...session,
+    plate: legacyPlateFromCase(session.caseSnapshot),
+    ruleContext: session.caseSnapshot.ruleContext,
+  };
+}
+
+function sessionWithCase(
+  session: DivinationSession,
+  envelope: ReadingCaseEnvelope,
+): DivinationSession {
+  if (envelope.caseSnapshot.sessionId !== session.id) {
+    throw new Error('ReadingClient 返回了其他会话的 Case');
+  }
+  const sameCase = session.caseSnapshot?.factSetHash === envelope.caseSnapshot.factSetHash;
+  const next: DivinationSession = {
+    ...session,
+    caseSnapshot: envelope.caseSnapshot,
+    ruleContext: envelope.caseSnapshot.ruleContext,
+    migrationVersion: 2,
+    migrationState: 'clean',
+    caseRuntimeTrust: envelope.runtimeTrust,
+    plate: legacyPlateFromCase(envelope.caseSnapshot),
+    updatedAt: latestTimestamp(session.updatedAt, envelope.caseSnapshot.builtAt),
+  };
+  if (!sameCase) delete next.analysis;
+  return next;
+}
 
 function prepareNext(session: DivinationSession): DivinationSession {
   if (session.status === 'complete' || session.currentToss) return session;
@@ -274,11 +331,12 @@ export function App() {
   const [historyOpen, setHistoryOpen] = useState(false);
   const [settingsOpen, setSettingsOpen] = useState(false);
   const [analysisError, setAnalysisError] = useState('');
+  const [caseBuildError, setCaseBuildError] = useState('');
   const analyzing = flow.analysisOperationId !== null;
   const chatting = flow.followUpOperationId !== null;
   const handledConfirmCommands = useRef(new Set<string>());
-  const handledSessionWrites = useRef(new Set<string>());
   const deletedSessionIds = useRef(new Set<string>());
+  const failedCaseCommandRef = useRef<ConfirmCommitCommand | null>(null);
   const epochRef = useRef(0);
   const activeOwnerRef = useRef<SessionOwner | null>(null);
   const saveQueueRef = useRef<Promise<void>>(Promise.resolve());
@@ -292,6 +350,8 @@ export function App() {
     setEvidence([]);
     setRetrievalDiagnostics(null);
     setAnalysisError('');
+    setCaseBuildError('');
+    failedCaseCommandRef.current = null;
   };
 
   const openFlow = (
@@ -313,22 +373,18 @@ export function App() {
     void desktop.sessions.list().then((sessions) => {
       const loaded = sessions
         .filter((saved) => !deletedSessionIds.current.has(saved.id))
-        .map((saved) => saved.plate ? { ...saved, plate: upgradePlate(saved.plate) } : saved);
+        .map((saved, index) => presentAuthoritativeSession(saved, String(index)));
       setHistory((current) => loaded.reduceRight(mergeSavedSession, current));
     });
   }, []);
 
-  const saveSession = async (next: DivinationSession) => {
-    try {
-      const saved = await desktop.sessions.save(next);
-      if (deletedSessionIds.current.has(saved.id)) {
-        await desktop.sessions.delete(saved.id);
-        return;
-      }
-      setHistory((current) => mergeSavedSession(current, saved));
-    } catch (error) {
-      console.error('Failed to persist session', error);
+  const saveSession = async (next: DivinationSession): Promise<void> => {
+    const saved = presentAuthoritativeSession(await desktop.sessions.save(next));
+    if (deletedSessionIds.current.has(saved.id)) {
+      await desktop.sessions.delete(saved.id);
+      return;
     }
+    setHistory((current) => mergeSavedSession(current, saved));
   };
 
   const queueSaveSession = (next: DivinationSession): Promise<void> => {
@@ -337,47 +393,44 @@ export function App() {
     return queued;
   };
 
-  const evidenceFor = async (target: DivinationSession) => {
-    if (!target.plate) return { evidence: [], diagnostics: null };
-    const terms = [
-      ...categoryTerms[target.category],
-      target.plate.baseHexagram.shortName,
-      target.plate.changedHexagram.shortName,
-      ...target.plate.lines.filter((line) => line.moving || line.role).flatMap((line) => [line.relation, line.role || '']),
-    ].filter(Boolean);
-    const result = await desktop.retrieval.search({ query: target.question, domainTerms: terms, limit: 8 });
-    return { evidence: result.evidence, diagnostics: result.diagnostics };
+  const queueBackgroundSave = (next: DivinationSession) => {
+    void queueSaveSession(next).catch((error) => {
+      console.error('Failed to persist session', error);
+    });
   };
 
   const runAnalysis = async (target: DivinationSession, owner: SessionOwner) => {
-    if (!target.plate || !isOwnerCurrent(owner)) return;
+    if (!target.caseSnapshot || !isOwnerCurrent(owner)) return;
     const operationId = crypto.randomUUID();
     dispatchFlow({ type: 'BEGIN_ANALYSIS', owner, operationId });
     setAnalysisError('');
     try {
-      const found = await evidenceFor(target);
-      if (!isOwnerCurrent(owner)) return;
-      setEvidence(found.evidence);
-      setRetrievalDiagnostics(found.diagnostics);
-      const result = await desktop.ai.analyze({ question: target.question, category: target.category, plate: target.plate, evidence: found.evidence, retrievalDiagnostics: found.diagnostics || undefined });
-      if (!isOwnerCurrent(owner)) return;
-      const report = result.ok && result.report
-        ? result.report
-        : desktop.platform === 'browser'
-          ? createBrowserLocalReport(target, found.evidence)
-          : null;
-      if (report) {
-        dispatchFlow({
-          type: 'APPLY_ANALYSIS',
-          owner,
-          operationId,
-          writeId: crypto.randomUUID(),
-          analysis: report,
+      const expectedFactSetHash = target.caseSnapshot.factSetHash;
+      const result = await readingClient.analyze({
+        sessionId: target.id,
+        expectedFactSetHash,
+      });
+      if (result.caseSnapshot.factSetHash !== expectedFactSetHash) return;
+      if (!deletedSessionIds.current.has(target.id)) {
+        setHistory((current) => {
+          const existing = current.find((entry) => entry.id === target.id) ?? target;
+          if (existing.caseSnapshot?.factSetHash !== expectedFactSetHash) return current;
+          return mergeSavedSession(current, {
+            ...existing,
+            analysis: result.report,
+            updatedAt: latestTimestamp(existing.updatedAt, result.report.generatedAt),
+          });
         });
-      } else {
-        setAnalysisError(`${result.error?.message || 'AI 分析失败'} ${result.error?.nextAction || ''}`.trim());
-        dispatchFlow({ type: 'END_ANALYSIS', owner, operationId });
       }
+      if (!isOwnerCurrent(owner)) return;
+      setEvidence(result.evidence);
+      setRetrievalDiagnostics(result.retrievalDiagnostics);
+      dispatchFlow({
+        type: 'APPLY_ANALYSIS',
+        owner,
+        operationId,
+        analysis: result.report,
+      });
     } catch (error) {
       if (isOwnerCurrent(owner)) {
         setAnalysisError(error instanceof Error ? error.message : '检索或分析服务暂时不可用。');
@@ -386,11 +439,44 @@ export function App() {
     }
   };
 
+  const attemptCaseBuild = async (command: ConfirmCommitCommand) => {
+    const operationId = crypto.randomUUID();
+    if (isOwnerCurrent(command.owner)) {
+      failedCaseCommandRef.current = command;
+      setCaseBuildError('');
+      dispatchFlow({ type: 'BEGIN_CASE_BUILD', owner: command.owner, operationId });
+    }
+    try {
+      await queueSaveSession(command.session);
+      if (deletedSessionIds.current.has(command.session.id)) return;
+      const envelope = await readingClient.buildCase({ sessionId: command.session.id });
+      if (deletedSessionIds.current.has(command.session.id)) return;
+      const next = sessionWithCase(command.session, envelope);
+      setHistory((current) => mergeSavedSession(current, next));
+      if (!isOwnerCurrent(command.owner)) return;
+      failedCaseCommandRef.current = null;
+      dispatchFlow({
+        type: 'APPLY_CASE_BUILD',
+        owner: command.owner,
+        operationId,
+        session: next,
+      });
+      void runAnalysis(next, command.owner);
+    } catch (error) {
+      if (isOwnerCurrent(command.owner)) {
+        setCaseBuildError(error instanceof Error ? error.message : '权威卦例建立失败');
+        dispatchFlow({ type: 'END_CASE_BUILD', owner: command.owner, operationId });
+      } else {
+        console.error('Failed to persist completed session', error);
+      }
+    }
+  };
+
   const start = () => {
     if (!category || !isValidQuestion(question)) return;
     const next = prepareNext(createSession(question, category));
     const owner = openFlow(next, 'casting');
-    if (owner) void queueSaveSession(next);
+    if (owner) queueBackgroundSave(next);
   };
 
   const confirm = (expectedTossId: string) => {
@@ -421,90 +507,90 @@ export function App() {
     if (!command || handledConfirmCommands.current.has(command.id)) return;
     handledConfirmCommands.current.add(command.id);
     dispatchFlow({ type: 'CONSUME_CONFIRM_COMMIT', id: command.id });
-    void (async () => {
-      await queueSaveSession(command.session);
-      if (command.session.status === 'complete' && isOwnerCurrent(command.owner)) {
-        await runAnalysis(command.session, command.owner);
-      }
-    })();
+    if (command.session.status === 'complete') void attemptCaseBuild(command);
+    else queueBackgroundSave(command.session);
   }, [flow.pendingConfirmCommit]);
 
-  useEffect(() => {
-    const command = flow.pendingSessionWrite;
-    if (!command || handledSessionWrites.current.has(command.id)) return;
-    handledSessionWrites.current.add(command.id);
-    dispatchFlow({ type: 'CONSUME_SESSION_WRITE', id: command.id });
-    void queueSaveSession(command.session);
-  }, [flow.pendingSessionWrite]);
-
   const openSession = async (saved: DivinationSession) => {
-    let next = saved.plate ? { ...saved, plate: upgradePlate(saved.plate) } : saved;
+    const latest = saved.migrationState === 'needs-review'
+      ? null
+      : await desktop.sessions.get(saved.id);
+    if (deletedSessionIds.current.has(saved.id)) return;
+    let next = presentAuthoritativeSession(latest ?? saved, saved.id);
     if (saved.status === 'casting') next = prepareNext(next);
-    const owner = openFlow(next, next.status === 'complete' ? 'result' : 'casting');
+    const needsReview = next.status === 'complete' && next.migrationState === 'needs-review';
+    const needsCaseRecovery = next.status === 'complete' && !needsReview && !next.caseSnapshot;
+    const nextScreen: Screen = next.status === 'casting'
+      ? 'casting'
+      : needsReview
+        ? 'review-error'
+        : needsCaseRecovery
+          ? 'building-case'
+          : 'result';
+    const owner = openFlow(next, nextScreen);
     if (!owner) return;
     setQuestion(next.question);
     setCategory(next.category);
     setHistoryOpen(false);
-    if (next.status === 'complete') {
-      const found = await evidenceFor(next);
-      if (!isOwnerCurrent(owner)) return;
-      setEvidence(found.evidence);
-      setRetrievalDiagnostics(found.diagnostics);
-      if (!next.analysis) void runAnalysis(next, owner);
-    } else {
-      void queueSaveSession(next);
+    if (nextScreen === 'result') void runAnalysis(next, owner);
+    if (nextScreen === 'building-case') {
+      void attemptCaseBuild({ id: crypto.randomUUID(), session: next, owner });
     }
+    if (nextScreen === 'casting') queueBackgroundSave(next);
   };
 
   const deleteSession = async (id: string) => {
+    try {
+      await desktop.sessions.delete(id);
+    } catch (error) {
+      console.error('Failed to delete session', error);
+      return;
+    }
     deletedSessionIds.current.add(id);
     setHistory((current) => current.filter((item) => item.id !== id));
     if (activeOwnerRef.current?.sessionId === id) openFlow(null, 'home');
-    await desktop.sessions.delete(id);
   };
 
   const followUp = async (followQuestion: string) => {
-    if (!session || !session.plate) return;
+    if (!session?.caseSnapshot) return;
     const owner = activeOwnerRef.current;
     if (!owner || owner.sessionId !== session.id) return;
     const operationId = crypto.randomUUID();
-    const userMessage: ChatMessage = {
-      id: crypto.randomUUID(),
-      role: 'user',
-      content: followQuestion,
-      createdAt: new Date().toISOString(),
-    };
     dispatchFlow({
       type: 'BEGIN_FOLLOW_UP',
       owner,
       operationId,
-      writeId: crypto.randomUUID(),
-      message: userMessage,
     });
-    const requestSession = {
-      ...session,
-      messages: [...session.messages, userMessage],
-      updatedAt: latestTimestamp(session.updatedAt, userMessage.createdAt),
-    };
     try {
-      const result = await desktop.ai.followUp({ question: followQuestion, session: requestSession, evidence });
+      const expectedFactSetHash = session.caseSnapshot.factSetHash;
+      const result = await readingClient.followUp({
+        sessionId: session.id,
+        question: followQuestion,
+        expectedFactSetHash,
+      });
+      if (result.caseSnapshot.factSetHash !== expectedFactSetHash) return;
+      if (!deletedSessionIds.current.has(session.id)) {
+        setHistory((current) => {
+          const existing = current.find((entry) => entry.id === session.id) ?? session;
+          if (existing.caseSnapshot?.factSetHash !== expectedFactSetHash) return current;
+          const known = new Set(existing.messages.map((message) => message.id));
+          const messages = [
+            ...existing.messages,
+            ...result.messages.filter((message) => !known.has(message.id)),
+          ];
+          const updatedAt = result.messages.reduce(
+            (timestamp, message) => latestTimestamp(timestamp, message.createdAt),
+            existing.updatedAt,
+          );
+          return mergeSavedSession(current, { ...existing, messages, updatedAt });
+        });
+      }
       if (!isOwnerCurrent(owner)) return;
-      const answer = result.ok && result.answer ? result.answer : {
-        content: desktop.platform === 'browser' ? '浏览器预览不会发送 AI 请求；桌面应用会沿用本次排盘和古籍证据继续回答。' : `${result.error?.message || '追问失败'} ${result.error?.nextAction || ''}`,
-        evidenceIds: [],
-      };
       dispatchFlow({
         type: 'RESOLVE_FOLLOW_UP',
         owner,
         operationId,
-        writeId: crypto.randomUUID(),
-        message: {
-          id: crypto.randomUUID(),
-          role: 'assistant',
-          content: answer.content,
-          evidenceIds: answer.evidenceIds,
-          createdAt: new Date().toISOString(),
-        },
+        messages: result.messages,
       });
     } catch {
       if (isOwnerCurrent(owner)) {
@@ -513,7 +599,23 @@ export function App() {
     }
   };
 
-  const appTitle = useMemo(() => screen === 'home' ? '问爻' : screen === 'casting' ? '六爻起卦' : '排盘与解读', [screen]);
+  const returnHome = () => {
+    openFlow(null, 'home');
+    setQuestion('');
+    setCategory(null);
+  };
+
+  const appTitle = useMemo(() => (
+    screen === 'home'
+      ? '问爻'
+      : screen === 'casting'
+        ? '六爻起卦'
+        : screen === 'building-case'
+          ? '建立卦例'
+          : screen === 'review-error'
+            ? '历史复核'
+            : '排盘与解读'
+  ), [screen]);
   return (
     <div className="app-shell">
       <header className="app-chrome">
@@ -525,7 +627,41 @@ export function App() {
       </header>
       {screen === 'home' && <HomeScreen question={question} category={category} onQuestionChange={setQuestion} onCategoryChange={setCategory} onStart={start} />}
       {screen === 'casting' && session?.currentToss && <RitualScreen session={session} onConfirm={confirm} />}
-      {screen === 'result' && session?.plate && <ResultScreen session={session} evidence={evidence} retrievalDiagnostics={retrievalDiagnostics} analyzing={analyzing} analysisError={analysisError} chatting={chatting} onAnalyze={() => { const owner = activeOwnerRef.current; if (owner) void runAnalysis(session, owner); }} onFollowUp={followUp} onBack={() => { openFlow(null, 'home'); setQuestion(''); setCategory(null); }} />}
+      {screen === 'building-case' && (
+        <main className="result-screen">
+          <section className="analysis-loading" aria-live="polite">
+            <span className="ink-loader" />
+            <h1>正在建立权威卦例</h1>
+            <p>主进程正在依据已保存的六次投币重建排盘与事实。</p>
+            {caseBuildError && <p role="alert">{caseBuildError}</p>}
+            {caseBuildError && failedCaseCommandRef.current && (
+              <button
+                type="button"
+                onClick={() => { const command = failedCaseCommandRef.current; if (command) void attemptCaseBuild(command); }}
+              >
+                重试建立卦例
+              </button>
+            )}
+          </section>
+        </main>
+      )}
+      {screen === 'review-error' && (
+        <main className="result-screen">
+          <section className="analysis-loading" role="alert">
+            <h1>此历史记录需要人工复核</h1>
+            <p>旧数据没有可验证的权威 Case，已停止回退到旧排盘结果。</p>
+            <button type="button" onClick={returnHome}>返回首页</button>
+          </section>
+        </main>
+      )}
+      {screen === 'result' && session?.caseSnapshot && session.plate && (
+        <>
+          {session.caseRuntimeTrust === 'browser-preview' && (
+            <p className="runtime-trust-note" role="status">浏览器预览结果，未经过桌面主进程验证。</p>
+          )}
+          <ResultScreen session={session} evidence={evidence} retrievalDiagnostics={retrievalDiagnostics} analyzing={analyzing} analysisError={analysisError} chatting={chatting} onAnalyze={() => { const owner = activeOwnerRef.current; if (owner) void runAnalysis(session, owner); }} onFollowUp={followUp} onBack={returnHome} />
+        </>
+      )}
       {historyOpen && <HistoryPanel sessions={history} onClose={() => setHistoryOpen(false)} onOpen={(saved) => void openSession(saved)} onDelete={(id) => void deleteSession(id)} />}
       {settingsOpen && <SettingsPanel onClose={() => setSettingsOpen(false)} />}
     </div>
