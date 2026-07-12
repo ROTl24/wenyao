@@ -24,14 +24,14 @@
 | `codex-ctext-audit-a` | `automated-agent` | `wenwang-final-a-20260712` | `2026-07-12T08:00:00+08:00` |
 | `codex-wikisource-audit-b` | `automated-agent` | `wenwang-final-b-20260712` | `2026-07-12T07:57:25.9273596+08:00` |
 
-最终 manifest 已深冻结为 `independent-automated + project-enabled`，两条真实 records 也逐层冻结。
+最终 manifest 已深冻结为 `independent-automated + project-enabled`，两条真实 records 也逐层冻结。每条 record 现在绑定输入 source IDs、已提交报告路径与 checkedClaims；原始报告分别为 `docs/domain/reviews/wenwang-najia-v2-review-a.md`、`wenwang-najia-v2-review-b.md`。
 
 ## 3. 生产上下文与强制运行门
 
 - `BASE_RULE_CONTEXT` 保持空 sources，只用于 fixture/历法基础配置，调用生产 `buildPlateV2` 必须拒绝。
 - `DEFAULT_RULE_CONTEXT` 深冻结并包含 7 个真实 `RuleSourceRef`。
 - `buildPlateV2` 每次构建前实际执行 registry context gate，不存在“只导出但无人调用”的旁路。
-- Gate 严格验证最终 manifest、artifactHash、审查身份/run、schemaVersion、所有 profile 字段，以及每个 source 的 id、title、URL、locator、contentHash。
+- Gate 严格验证最终 manifest、artifactHash、精确 verificationLevel/reviewerKind、带时区可解析 reviewedAt、trim 后身份/run 唯一性、审阅输入/报告/checks、schemaVersion、所有 profile 字段，以及每个 source 的 id、title、URL、locator、contentHash。
 - 缺失、重复或伪造 source，以及伪造 calendar ID/换日边界、relation/growth/shenSha/useGod profile，均在运行时拒绝；不依赖 TypeScript literal 类型保护边界。
 
 ## 4. TDD 证据
@@ -40,12 +40,14 @@
 
 阶段 B 先把测试切换到尚不存在的 `DEFAULT_RULE_CONTEXT` 并要求真实 manifest records、BASE/伪造 source 拒绝，得到 43 个预期失败；接通 manifest、DEFAULT 和生产门后转绿。随后先增加伪造 schema/calendar/profile 的运行时测试，7 个用例均先失败，再补严格 profile gate 后转绿。
 
+最终代码审查的 4 个 Important 先得到 23 个目标红灯：缺少可追溯审阅字段/报告、伪造 verificationLevel 与日期/trim 身份、JS 入口无效 input/ID。补齐后目标测试转绿；4096 穷举新增的 changed 六行纳甲与世应黄金断言直接验证了现有实现，不改变 artifact。
+
 ## 5. 验证结果
 
 | 命令 | 结果 |
 |---|---|
-| `npx vitest run src/domain/liuyao/plate.test.ts` | 63 tests 通过 |
-| `npm run test:unit` | 24 files、283 tests 通过 |
+| `npx vitest run src/domain/liuyao/plate.test.ts` | 89 tests 通过 |
+| `npm run test:unit` | 24 files、309 tests 通过 |
 | `npm run build:domain` | 通过 |
 | `npm run typecheck` | 通过 |
 | `npm run test:electron` | 19 tests 通过 |

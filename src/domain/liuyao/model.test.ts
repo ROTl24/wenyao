@@ -31,7 +31,7 @@ describe('V2 domain contract', () => {
     expect(BASE_RULE_CONTEXT.sources).toEqual([]);
   });
 
-  it('exports one deeply frozen production context with all reviewed source refs', () => {
+  it('exports one deeply frozen production context with all registered source refs', () => {
     expect(DEFAULT_RULE_CONTEXT).toMatchObject({
       rulePackId: 'wenwang_najia_v2',
       rulePackVersion: '2.0.0',

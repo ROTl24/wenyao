@@ -1,4 +1,5 @@
 import { createHash } from 'node:crypto';
+import { existsSync, readFileSync } from 'node:fs';
 import { describe, expect, it } from 'vitest';
 import { GOLDEN_HEXAGRAMS, GOLDEN_TRIGRAM_BITS, type GoldenHexagram } from './__fixtures__/golden-hexagrams.js';
 import { GOLDEN_CHANGED_RELATION_CASES, GOLDEN_NAJIA } from './__fixtures__/golden-najia.js';
@@ -23,6 +24,22 @@ const FIXED_BUILD_INPUT = {
   ruleContext: DEFAULT_RULE_CONTEXT,
 } as const;
 
+const REVIEW_INPUT_SOURCE_REFS = RULE_SOURCE_EVIDENCE_CAPSULES.map(({ ref }) => ref.id);
+const REVIEW_CHECKED_CLAIMS = [
+  'hexagrams:64',
+  'najia-lines:384',
+  'review-assertions:25',
+  'qian-to-gou-full-changed-reinstall',
+  'qian-to-kun-dual-relations',
+  'hidden-spirit-candidates:56',
+] as const;
+const GOLDEN_NAJIA_BY_KEY: ReadonlyMap<string, (typeof GOLDEN_NAJIA)[number]> = new Map(
+  GOLDEN_NAJIA.map((entry) => [entry.key, entry]),
+);
+const GOLDEN_HEXAGRAM_BY_KEY: ReadonlyMap<string, (typeof GOLDEN_HEXAGRAMS)[number]> = new Map(
+  GOLDEN_HEXAGRAMS.map((entry) => [entry.key, entry]),
+);
+
 type TossTuple = PlateV2['rawTosses'];
 
 function staticTossesForHexagram(hexagram: GoldenHexagram): TossTuple {
@@ -46,7 +63,11 @@ function buildStaticHexagram(name: string): PlateV2 {
 function matchedReview(
   reviewerId: string,
   independentRunId: string,
-  overrides: Partial<RuleReviewRecord> = {},
+  overrides: Partial<RuleReviewRecord> & {
+    inputSourceRefs?: readonly string[];
+    reportPath?: string;
+    checkedClaims?: readonly string[];
+  } = {},
 ): RuleReviewRecord {
   return {
     reviewerId,
@@ -55,8 +76,11 @@ function matchedReview(
     reviewedAt: '2026-07-12T08:00:00+08:00',
     artifactHash: WENWANG_NAJIA_V2_ARTIFACT_HASH,
     outcome: 'matched',
+    inputSourceRefs: REVIEW_INPUT_SOURCE_REFS,
+    reportPath: `docs/domain/reviews/synthetic-${reviewerId}.md`,
+    checkedClaims: REVIEW_CHECKED_CLAIMS,
     ...overrides,
-  };
+  } as RuleReviewRecord;
 }
 
 function enabledManifest(overrides: Partial<RulePackManifest> = {}): RulePackManifest {
@@ -104,6 +128,9 @@ describe('wenwang_najia_v2 reviewed artifact', () => {
           reviewedAt: '2026-07-12T08:00:00+08:00',
           artifactHash: WENWANG_NAJIA_V2_ARTIFACT_HASH,
           outcome: 'matched',
+          inputSourceRefs: REVIEW_INPUT_SOURCE_REFS,
+          reportPath: 'docs/domain/reviews/wenwang-najia-v2-review-a.md',
+          checkedClaims: REVIEW_CHECKED_CLAIMS,
         },
         {
           reviewerId: 'codex-wikisource-audit-b',
@@ -112,11 +139,42 @@ describe('wenwang_najia_v2 reviewed artifact', () => {
           reviewedAt: '2026-07-12T07:57:25.9273596+08:00',
           artifactHash: WENWANG_NAJIA_V2_ARTIFACT_HASH,
           outcome: 'matched',
+          inputSourceRefs: REVIEW_INPUT_SOURCE_REFS,
+          reportPath: 'docs/domain/reviews/wenwang-najia-v2-review-b.md',
+          checkedClaims: REVIEW_CHECKED_CLAIMS,
         },
       ],
       sourceRefs: RULE_SOURCE_EVIDENCE_CAPSULES.map(({ ref }) => ref.id),
     });
     expect(WENWANG_NAJIA_V2_MANIFEST.reviews.every(Object.isFrozen)).toBe(true);
+    expect(WENWANG_NAJIA_V2_MANIFEST.reviews.every((review) => (
+      Object.isFrozen(review.inputSourceRefs) && Object.isFrozen(review.checkedClaims)
+    ))).toBe(true);
+  });
+
+  it('keeps each automated review report committed and bound to its manifest record', () => {
+    for (const review of WENWANG_NAJIA_V2_MANIFEST.reviews) {
+      expect(existsSync(review.reportPath), `缺少审阅报告 ${review.reportPath}`).toBe(true);
+      const report = readFileSync(review.reportPath, 'utf8');
+      expect(report).toContain(review.reviewerId);
+      expect(report).toContain(review.independentRunId);
+      expect(report).toContain(review.artifactHash);
+      expect(report).toContain('13,192');
+      expect(report).toContain('automated-agent');
+      for (const sourceId of review.inputSourceRefs) {
+        const source = RULE_SOURCE_EVIDENCE_CAPSULES.find(({ ref }) => ref.id === sourceId)?.ref;
+        expect(source).toBeDefined();
+        expect(report).toContain(sourceId);
+        expect(report).toContain(source?.url);
+      }
+      for (const checkedClaim of review.checkedClaims) expect(report).toContain(checkedClaim);
+    }
+
+    const reportA = readFileSync('docs/domain/reviews/wenwang-najia-v2-review-a.md', 'utf8');
+    const reportB = readFileSync('docs/domain/reviews/wenwang-najia-v2-review-b.md', 'utf8');
+    expect(reportA).toContain('CText live HTTP 403');
+    expect(reportA).toContain('未读取 `.superpowers/sdd/domain-source-second-review.md`');
+    expect(reportB).toContain('禁止读取 A');
   });
 
   it('hashes the exact local evidence capsules named by sourceRefs', () => {
@@ -158,12 +216,68 @@ describe('assertProjectEnabledRulePack', () => {
     ['unverified level', () => enabledManifest({ verificationLevel: 'unverified' })],
     ['fixture-only status', () => enabledManifest({ runtimeStatus: 'fixture-only' })],
     ['manifest hash differs from compiled artifact', () => enabledManifest({ artifactHash: 'e'.repeat(64) })],
+    ['forged verificationLevel', () => enabledManifest({ verificationLevel: 'forged' as RulePackManifest['verificationLevel'] })],
+    ['invalid reviewedAt', () => enabledManifest({ reviews: [
+      matchedReview('reviewer-a', 'run-a', { reviewedAt: 'not-a-date' }),
+      matchedReview('reviewer-b', 'run-b'),
+    ] })],
+    ['trim-equivalent reviewerId', () => enabledManifest({ reviews: [
+      matchedReview('same', 'run-a'),
+      matchedReview(' same', 'run-b'),
+    ] })],
+    ['trim-equivalent runId', () => enabledManifest({ reviews: [
+      matchedReview('reviewer-a', 'same'),
+      matchedReview('reviewer-b', ' same'),
+    ] })],
+    ['forged reviewerKind', () => enabledManifest({ reviews: [
+      matchedReview('reviewer-a', 'run-a'),
+      matchedReview('reviewer-b', 'run-b'),
+      matchedReview('reviewer-c', 'run-c', { reviewerKind: 'bot' as RuleReviewRecord['reviewerKind'] }),
+    ] })],
+    ['empty inputSourceRefs', () => enabledManifest({ reviews: [
+      matchedReview('reviewer-a', 'run-a', { inputSourceRefs: [] }),
+      matchedReview('reviewer-b', 'run-b'),
+    ] })],
+    ['duplicate inputSourceRefs', () => enabledManifest({ reviews: [
+      matchedReview('reviewer-a', 'run-a', { inputSourceRefs: [REVIEW_INPUT_SOURCE_REFS[0], REVIEW_INPUT_SOURCE_REFS[0]] }),
+      matchedReview('reviewer-b', 'run-b'),
+    ] })],
+    ['unknown inputSourceRef', () => enabledManifest({ reviews: [
+      matchedReview('reviewer-a', 'run-a', { inputSourceRefs: ['UNKNOWN-SOURCE'] }),
+      matchedReview('reviewer-b', 'run-b'),
+    ] })],
+    ['empty reportPath', () => enabledManifest({ reviews: [
+      matchedReview('reviewer-a', 'run-a', { reportPath: '   ' }),
+      matchedReview('reviewer-b', 'run-b'),
+    ] })],
+    ['duplicate reportPath', () => enabledManifest({ reviews: [
+      matchedReview('reviewer-a', 'run-a', { reportPath: 'docs/domain/reviews/same.md' }),
+      matchedReview('reviewer-b', 'run-b', { reportPath: 'docs/domain/reviews/same.md' }),
+    ] })],
+    ['empty checkedClaims', () => enabledManifest({ reviews: [
+      matchedReview('reviewer-a', 'run-a', { checkedClaims: [] }),
+      matchedReview('reviewer-b', 'run-b'),
+    ] })],
   ])('rejects %s', (_label, makeManifest) => {
     expect(() => assertProjectEnabledRulePack(makeManifest())).toThrow('结构规则包未通过项目运行门');
   });
 });
 
 describe('buildPlateV2', () => {
+  it.each([0, null])('rejects a non-object JS input: %s', (input) => {
+    expect(() => buildPlateV2(input as unknown as Parameters<typeof buildPlateV2>[0]))
+      .toThrow('buildPlateV2 input 必须是对象');
+  });
+
+  it.each([
+    ['plateId', ''], ['plateId', '   '], ['plateId', ' leading'], ['plateId', 'trailing '], ['plateId', 0], ['plateId', null],
+    ['sessionId', ''], ['sessionId', '   '], ['sessionId', ' leading'], ['sessionId', 'trailing '], ['sessionId', 0], ['sessionId', null],
+  ])('rejects invalid %s value %j', (field, value) => {
+    const input = { ...FIXED_BUILD_INPUT, tossValues: [9, 7, 7, 7, 7, 7], [field]: value };
+    expect(() => buildPlateV2(input as unknown as Parameters<typeof buildPlateV2>[0]))
+      .toThrow(`${field} 必须是无首尾空白的非空字符串`);
+  });
+
   it.each([
     ['missing context', undefined],
     ['non-array sources', { ...DEFAULT_RULE_CONTEXT, sources: null }],
@@ -360,6 +474,18 @@ describe('buildPlateV2', () => {
       expect(first).toEqual(second);
       expect(first.lines).toHaveLength(6);
       baseChangedPairs.add(`${first.baseHexagram.key}>${first.changedHexagram.key}`);
+      const changedNajia = GOLDEN_NAJIA_BY_KEY.get(first.changedHexagram.key);
+      const changedHexagram = GOLDEN_HEXAGRAM_BY_KEY.get(first.changedHexagram.key);
+      expect(changedNajia, `纳甲黄金表缺少变卦 ${first.changedHexagram.key}`).toBeDefined();
+      expect(changedHexagram, `卦象黄金表缺少变卦 ${first.changedHexagram.key}`).toBeDefined();
+      expect(first.lines.map(({ changed }) => changed.ganZhi)).toEqual(changedNajia?.lines);
+      expect(first.lines.map(({ position, changed }) => changed.role)).toEqual(
+        [1, 2, 3, 4, 5, 6].map((position) => (
+          position === changedHexagram?.shiLine ? '世'
+            : position === changedHexagram?.yingLine ? '应'
+              : null
+        )),
+      );
       first.lines.forEach((line) => {
         expect(line.base.yang !== line.changed.yang).toBe(line.moving);
         expect(line.transition === null).toBe(!line.moving);

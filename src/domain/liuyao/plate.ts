@@ -20,6 +20,14 @@ import {
 
 type TossTuple = PlateV2['rawTosses'];
 
+interface BuildPlateV2Input {
+  plateId: string;
+  sessionId: string;
+  castAt: string;
+  tossValues: TossTuple;
+  ruleContext: RuleContext;
+}
+
 const TRIGRAM_BY_KEY = deepFreeze(Object.fromEntries(
   WENWANG_NAJIA_V2_ARTIFACT.trigrams.map((trigram) => [trigram.key, trigram]),
 ) as Record<TrigramKey, TrigramRule>);
@@ -44,6 +52,19 @@ function normalizeTosses(tossValues: readonly number[]): TossTuple {
     throw new TypeError('投币值只能是 6、7、8、9');
   }
   return [...tossValues] as unknown as TossTuple;
+}
+
+function assertBuildInput(input: unknown): asserts input is BuildPlateV2Input {
+  if (input === null || typeof input !== 'object' || Array.isArray(input)) {
+    throw new TypeError('buildPlateV2 input 必须是对象');
+  }
+  const candidate = input as Partial<BuildPlateV2Input>;
+  for (const field of ['plateId', 'sessionId'] as const) {
+    const value = candidate[field];
+    if (typeof value !== 'string' || value.length === 0 || value !== value.trim()) {
+      throw new TypeError(`${field} 必须是无首尾空白的非空字符串`);
+    }
+  }
 }
 
 function relationOf(lineElement: Element, palaceElement: Element): SixRelation {
@@ -182,13 +203,8 @@ function buildPotentialHiddenSpirits(
   return byHostLine;
 }
 
-export function buildPlateV2(input: {
-  plateId: string;
-  sessionId: string;
-  castAt: string;
-  tossValues: TossTuple;
-  ruleContext: RuleContext;
-}): PlateV2 {
+export function buildPlateV2(input: BuildPlateV2Input): PlateV2 {
+  assertBuildInput(input);
   assertProjectEnabledRuleContext(input.ruleContext);
   const rawTosses = normalizeTosses(input.tossValues);
   const baseYang = rawTosses.map((value) => value === 7 || value === 9);

@@ -199,6 +199,16 @@ export const WENWANG_NAJIA_V2_CANONICAL_PAYLOAD = canonicalStringify(WENWANG_NAJ
 // 由审查脚本对上面的 UTF-8 canonical payload 独立复算；领域运行时不导入 node:crypto。
 export const WENWANG_NAJIA_V2_ARTIFACT_HASH = '241c0e38175fbfaa8ff04d9c8a65249ccd896ede0e292eb3c83d60f60993ffaa';
 
+const FINAL_REVIEW_INPUT_SOURCE_REFS = RULE_SOURCE_EVIDENCE_CAPSULES.map(({ ref }) => ref.id);
+const FINAL_REVIEW_CHECKED_CLAIMS = [
+  'hexagrams:64',
+  'najia-lines:384',
+  'review-assertions:25',
+  'qian-to-gou-full-changed-reinstall',
+  'qian-to-kun-dual-relations',
+  'hidden-spirit-candidates:56',
+] as const;
+
 export const WENWANG_NAJIA_V2_MANIFEST = deepFreeze({
   rulePackId: 'wenwang_najia_v2',
   version: '2.0.0',
@@ -213,6 +223,9 @@ export const WENWANG_NAJIA_V2_MANIFEST = deepFreeze({
       reviewedAt: '2026-07-12T08:00:00+08:00',
       artifactHash: WENWANG_NAJIA_V2_ARTIFACT_HASH,
       outcome: 'matched',
+      inputSourceRefs: [...FINAL_REVIEW_INPUT_SOURCE_REFS],
+      reportPath: 'docs/domain/reviews/wenwang-najia-v2-review-a.md',
+      checkedClaims: [...FINAL_REVIEW_CHECKED_CLAIMS],
     },
     {
       reviewerId: 'codex-wikisource-audit-b',
@@ -221,6 +234,9 @@ export const WENWANG_NAJIA_V2_MANIFEST = deepFreeze({
       reviewedAt: '2026-07-12T07:57:25.9273596+08:00',
       artifactHash: WENWANG_NAJIA_V2_ARTIFACT_HASH,
       outcome: 'matched',
+      inputSourceRefs: [...FINAL_REVIEW_INPUT_SOURCE_REFS],
+      reportPath: 'docs/domain/reviews/wenwang-najia-v2-review-b.md',
+      checkedClaims: [...FINAL_REVIEW_CHECKED_CLAIMS],
     },
   ],
   sourceRefs: RULE_SOURCE_EVIDENCE_CAPSULES.map(({ ref }) => ref.id),

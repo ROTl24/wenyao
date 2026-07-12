@@ -126,7 +126,7 @@ runtimeStatus = project-enabled
 reviews = [review-a, review-b]
 ```
 
-`assertProjectEnabledRulePack` 验证两次不同 reviewerId、两次不同 independentRunId、同一已编译 artifactHash、全部 `matched`、无 disputed、verificationLevel/runtimeStatus 与来源 ID 集合。`buildPlateV2` 实际调用 context 运行门，继续严格比对 schemaVersion、calendar/relation/growth/shenSha/useGod 全部 profile 字段，以及 7 个 `RuleSourceRef` 的 id、title、URL、locator、contentHash；空 sources 的 `BASE_RULE_CONTEXT`、缺失/重复/伪造 source、伪造历法 ID 或边界、伪造任一 profile 均拒绝，只有深冻结 `DEFAULT_RULE_CONTEXT` 通过。
+`assertProjectEnabledRulePack` 验证两次不同 reviewerId、两次不同 independentRunId、同一已编译 artifactHash、全部 `matched`、无 disputed、精确 verificationLevel/runtimeStatus 与来源 ID 集合；还要求带时区可解析的 ISO reviewedAt、无首尾空白的身份/run、合法 reviewerKind、非空且唯一的输入 source refs/reportPath/checkedClaims，并拒绝重复报告路径。`buildPlateV2` 实际调用 context 运行门，继续严格比对 schemaVersion、calendar/relation/growth/shenSha/useGod 全部 profile 字段，以及 7 个 `RuleSourceRef` 的 id、title、URL、locator、contentHash；空 sources 的 `BASE_RULE_CONTEXT`、缺失/重复/伪造 source、伪造历法 ID 或边界、伪造任一 profile 均拒绝，只有深冻结 `DEFAULT_RULE_CONTEXT` 通过。
 
 ## 7. 两次真实独立自动化审查
 
@@ -138,3 +138,8 @@ reviews = [review-a, review-b]
 | B | `codex-wikisource-audit-b` | `automated-agent` | `wenwang-final-b-20260712` | `2026-07-12T07:57:25.9273596+08:00` | `241c0e38175fbfaa8ff04d9c8a65249ccd896ede0e292eb3c83d60f60993ffaa` | `matched` | 空 |
 
 以上记录已经原样深冻结进 `WENWANG_NAJIA_V2_MANIFEST.reviews`。它们只证明两次独立自动化核表一致，不提升为 `human-reviewed`。
+
+每条 `RuleReviewRecord` 还绑定相同的 7 个 `inputSourceRefs` 与以下 checkedClaims：`hexagrams:64`、`najia-lines:384`、`review-assertions:25`、`qian-to-gou-full-changed-reinstall`、`qian-to-kun-dual-relations`、`hidden-spirit-candidates:56`。
+
+- A 原始输出：[wenwang-najia-v2-review-a.md](reviews/wenwang-najia-v2-review-a.md)。A 的 CText live 请求为 HTTP 403，使用固定 Wikisource 修订与既有第一审计交叉，未读取第二审计。
+- B 原始输出：[wenwang-najia-v2-review-b.md](reviews/wenwang-najia-v2-review-b.md)。B 被明确禁止读取 A，沿第二审计与固定修订独立核对。

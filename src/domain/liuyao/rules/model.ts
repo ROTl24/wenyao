@@ -18,6 +18,9 @@ export interface RuleReviewRecord {
   reviewedAt: string;
   artifactHash: string;
   outcome: 'matched' | 'disputed';
+  inputSourceRefs: readonly string[];
+  reportPath: string;
+  checkedClaims: readonly string[];
 }
 
 export interface RulePackManifest {

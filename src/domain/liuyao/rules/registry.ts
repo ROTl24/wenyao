@@ -9,9 +9,20 @@ import {
 
 const GATE_ERROR = '结构规则包未通过项目运行门';
 const CONTEXT_GATE_ERROR = '结构规则上下文未通过项目运行门';
+const ZONED_ISO_PATTERN = /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}(?:\.\d+)?(?:Z|[+-]\d{2}:\d{2})$/;
 
 function reject(): never {
   throw new Error(GATE_ERROR);
+}
+
+function isCanonicalNonEmpty(value: unknown): value is string {
+  return typeof value === 'string' && value.length > 0 && value === value.trim();
+}
+
+function isZonedIso(value: unknown): value is string {
+  return isCanonicalNonEmpty(value)
+    && ZONED_ISO_PATTERN.test(value)
+    && Number.isFinite(Date.parse(value));
 }
 
 export function assertProjectEnabledRulePack(manifest: RulePackManifest): void {
@@ -20,7 +31,8 @@ export function assertProjectEnabledRulePack(manifest: RulePackManifest): void {
     || manifest.version !== WENWANG_NAJIA_V2_MANIFEST.version
     || manifest.artifactHash !== WENWANG_NAJIA_V2_ARTIFACT_HASH
     || manifest.runtimeStatus !== 'project-enabled'
-    || manifest.verificationLevel === 'unverified'
+    || (manifest.verificationLevel !== 'independent-automated'
+      && manifest.verificationLevel !== 'human-reviewed')
     || manifest.reviews.length < 2
   ) reject();
 
@@ -34,18 +46,35 @@ export function assertProjectEnabledRulePack(manifest: RulePackManifest): void {
 
   const reviewerIds = new Set<string>();
   const runIds = new Set<string>();
+  const reportPaths = new Set<string>();
   for (const review of manifest.reviews) {
+    const inputSourceRefs = Array.isArray(review.inputSourceRefs) ? review.inputSourceRefs : [];
+    const checkedClaims = Array.isArray(review.checkedClaims) ? review.checkedClaims : [];
+    const inputSourceRefSet = new Set(inputSourceRefs);
+    const checkedClaimSet = new Set(checkedClaims);
     if (
       review.outcome !== 'matched'
       || review.artifactHash !== manifest.artifactHash
-      || review.reviewerId.trim() === ''
-      || review.independentRunId.trim() === ''
-      || review.reviewedAt.trim() === ''
+      || (review.reviewerKind !== 'automated-agent' && review.reviewerKind !== 'human')
+      || !isCanonicalNonEmpty(review.reviewerId)
+      || !isCanonicalNonEmpty(review.independentRunId)
+      || !isZonedIso(review.reviewedAt)
+      || !isCanonicalNonEmpty(review.reportPath)
       || reviewerIds.has(review.reviewerId)
       || runIds.has(review.independentRunId)
+      || reportPaths.has(review.reportPath)
+      || inputSourceRefs.length === 0
+      || inputSourceRefSet.size !== inputSourceRefs.length
+      || inputSourceRefs.some((sourceRef) => (
+        !isCanonicalNonEmpty(sourceRef) || !actualSourceRefs.has(sourceRef)
+      ))
+      || checkedClaims.length === 0
+      || checkedClaimSet.size !== checkedClaims.length
+      || checkedClaims.some((claim) => !isCanonicalNonEmpty(claim))
     ) reject();
     reviewerIds.add(review.reviewerId);
     runIds.add(review.independentRunId);
+    reportPaths.add(review.reportPath);
   }
 
   const requiredReviewerKind = manifest.verificationLevel === 'human-reviewed'
