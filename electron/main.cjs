@@ -302,21 +302,22 @@ app.whenReady().then(() => {
     const apiKey = getApiKey();
     const settings = store.getRawSettings();
     const plate = {
-      baseHexagram: { name: '乾为天', shortName: '乾', palace: '乾', palaceElement: '金', shiLine: 6, yingLine: 3 },
-      changedHexagram: { name: '天风姤', shortName: '姤', palace: '乾', palaceElement: '金', shiLine: 1, yingLine: 4 },
-      movingLines: [1], monthGanZhi: '乙未', monthBranch: '未', dayGanZhi: '丙戌', voidBranches: ['午', '未'],
+      baseHexagram: { name: '泽雷随', shortName: '随', palace: '震', palaceElement: '木', shiLine: 3, yingLine: 6 },
+      changedHexagram: { name: '泽雷随', shortName: '随', palace: '震', palaceElement: '木', shiLine: 3, yingLine: 6 },
+      movingLines: [], monthGanZhi: '乙未', monthBranch: '未', dayGanZhi: '戊子', voidBranches: ['午', '未'],
       lines: [
-        { index: 1, ganZhi: '甲子', branch: '子', element: '水', relation: '子孙', role: null, moving: true, changedGanZhi: '辛丑', changedBranch: '丑', changedElement: '土', changedRelation: '父母' },
-        { index: 2, ganZhi: '甲寅', branch: '寅', element: '木', relation: '妻财', role: null, moving: false, changedGanZhi: '辛亥', changedBranch: '亥', changedElement: '水', changedRelation: '子孙' },
-        { index: 3, ganZhi: '甲辰', branch: '辰', element: '土', relation: '父母', role: '应', moving: false, changedGanZhi: '辛酉', changedBranch: '酉', changedElement: '金', changedRelation: '兄弟' },
-        { index: 4, ganZhi: '壬午', branch: '午', element: '火', relation: '官鬼', role: null, moving: false, changedGanZhi: '壬午', changedBranch: '午', changedElement: '火', changedRelation: '官鬼' },
-        { index: 5, ganZhi: '壬申', branch: '申', element: '金', relation: '兄弟', role: null, moving: false, changedGanZhi: '壬申', changedBranch: '申', changedElement: '金', changedRelation: '兄弟' },
-        { index: 6, ganZhi: '壬戌', branch: '戌', element: '土', relation: '父母', role: '世', moving: false, changedGanZhi: '壬戌', changedBranch: '戌', changedElement: '土', changedRelation: '父母' },
+        { index: 1, ganZhi: '庚子', branch: '子', element: '水', relation: '父母', role: null, moving: false, void: false, monthBreak: false, dayClash: false },
+        { index: 2, ganZhi: '庚寅', branch: '寅', element: '木', relation: '兄弟', role: null, moving: false, void: false, monthBreak: false, dayClash: false },
+        { index: 3, ganZhi: '庚辰', branch: '辰', element: '土', relation: '妻财', role: '世', moving: false, void: false, monthBreak: false, dayClash: false },
+        { index: 4, ganZhi: '丁亥', branch: '亥', element: '水', relation: '父母', role: null, moving: false, void: false, monthBreak: false, dayClash: false },
+        { index: 5, ganZhi: '丁酉', branch: '酉', element: '金', relation: '官鬼', role: null, moving: false, void: false, monthBreak: false, dayClash: false },
+        { index: 6, ganZhi: '丁未', branch: '未', element: '土', relation: '妻财', role: '应', moving: false, void: true, monthBreak: false, dayClash: false },
       ],
+      fuShen: [{ lineIndex: 4, relation: '子孙', ganZhi: '庚午', branch: '午', element: '火', flyRelation: '父母', flyGanZhi: '丁亥', flyElement: '水', flyEffect: '飞克伏', status: '受制倾向', void: true, monthBreak: false, dayClash: true }],
     };
-    void searchCorpus({ query: '近期事业升迁是否有机会', domainTerms: ['事业', '功名', '官鬼', '世爻'], limit: 8 })
-      .then(async ({ evidence, diagnostics }) => analyzeCloud({ baseUrl: validateBaseUrl(settings.baseUrl), model: settings.model, apiKey, question: '近期事业升迁是否有机会？', category: 'career', plate, evidence, retrievalDiagnostics: diagnostics, signal: AbortSignal.timeout(180000) }))
-      .then((report) => { process.stdout.write(`${JSON.stringify({ mode: report.mode, claims: report.claims.length, pipeline: report.pipeline, summary: report.summary })}\n`); app.quit(); })
+    void searchCorpus({ query: '学业会好吗', domainTerms: ['学业', '父母', '官鬼', '用神两现'], limit: 8 })
+      .then(async ({ evidence, diagnostics }) => analyzeCloud({ baseUrl: validateBaseUrl(settings.baseUrl), model: settings.model, apiKey, question: '学业会好吗？', category: 'study', plate, evidence, retrievalDiagnostics: diagnostics, signal: AbortSignal.timeout(180000) }))
+      .then((report) => { process.stdout.write(`${JSON.stringify({ mode: report.mode, claims: report.claims.length, pipeline: report.pipeline, focus: report.focus, relations: report.relations })}\n`); app.quit(); })
       .catch((error) => { process.stderr.write(`${error.message}\n`); app.exit(1); });
     return;
   }
