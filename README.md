@@ -1,20 +1,8 @@
-<div align="center">
-  <img src="./docs/assets/wenyao-icon.png" width="132" alt="问爻项目图标：乾隆通宝、朱砂阳爻与阴爻" />
-  <h1>问爻 · WenYao</h1>
-  <p><strong>把六爻排盘、规则事实、古籍证据与 AI 解读放进同一条可复核链路。</strong></p>
-  <p>一款 Windows 优先的水墨六爻桌面应用。</p>
+# 问爻 · WenYao
 
-  <p>
-    <img alt="Windows" src="https://img.shields.io/badge/Windows-Desktop-1f6feb?style=flat-square&logo=windows11&logoColor=white" />
-    <img alt="Electron 43" src="https://img.shields.io/badge/Electron-43-47848f?style=flat-square&logo=electron&logoColor=white" />
-    <img alt="React 19" src="https://img.shields.io/badge/React-19-149eca?style=flat-square&logo=react&logoColor=white" />
-    <img alt="Three.js" src="https://img.shields.io/badge/Three.js-3D-111111?style=flat-square&logo=threedotjs&logoColor=white" />
-    <img alt="TypeScript 7" src="https://img.shields.io/badge/TypeScript-7-3178c6?style=flat-square&logo=typescript&logoColor=white" />
-    <img alt="Tests 738" src="https://img.shields.io/badge/tests-738%20passing-2da44e?style=flat-square" />
-  </p>
-</div>
+把六爻排盘、规则事实、古籍证据与 AI 解读放进同一条可复核链路。
 
-![问爻产品界面总览](./docs/design/liuyao-ui-reference.png)
+问爻是一款 Windows 优先的水墨六爻桌面应用。普通用户可以直接下载安装；开发者也可以从源码运行和构建。
 
 ## 问爻是什么
 
@@ -85,25 +73,45 @@
 
 问爻最终选择的是“某一条具体官鬼爻 / 父母爻 / 伏神 / 世应组合”，并记录取用理由，而不是把用户输入的类别原样塞进“用神”栏。
 
-## 快速开始
+## 下载安装（Windows x64）
 
-要求：Node.js 24+、npm 11+、Windows 10/11。
+普通用户不需要安装 Node.js、npm，也不需要下载源码。
+
+1. 下载 [WenYao-0.1.0-preview.1-Setup.exe](https://github.com/ROTl24/wenyao/releases/download/v0.1.0-preview.1/WenYao-0.1.0-preview.1-Setup.exe)。
+2. 双击安装包，按向导选择安装目录。
+3. 安装完成后，从桌面或开始菜单启动“问爻”。
+
+安装包适用于 Windows 10/11 x64，大小约 145 MB。其他版本和校验文件见 [GitHub Releases](https://github.com/ROTl24/wenyao/releases)。
+
+SHA-256：
+
+```text
+59938799F3A940002E8F2F1E07B4898A767832798B4F243834397819A4C5404B
+```
+
+当前预览版尚未进行 Windows 代码签名，SmartScreen 可能显示“Windows 已保护你的电脑”。请只从本项目 Releases 下载；确认 SHA-256 一致后，可选择“更多信息”→“仍要运行”。
+
+> 当前公开安装包是 `v0.1.0-preview.1` 预览版。`main` 分支可能包含尚未打入该安装包的后续改动，安装版功能以对应 Release 说明为准。
+
+## 源码开发
+
+环境要求：Node.js 24+、npm 11+、Windows 10/11。
 
 ```powershell
 git clone https://github.com/ROTl24/wenyao.git
 cd wenyao
-npm ci
-npm run dev
+npm.cmd ci
+npm.cmd run dev
 ```
 
 常用命令：
 
 ```powershell
-npm run typecheck       # TypeScript 全量检查
-npm run test:unit       # 单元与组件测试
-npm run test:electron   # Electron 服务与脚本测试
-npm run build:renderer  # 构建前端与领域层
-npm run build           # 构建 Windows NSIS 安装包
+npm.cmd run typecheck       # TypeScript 全量检查
+npm.cmd run test:unit       # 单元与组件测试
+npm.cmd run test:electron   # Electron 服务与脚本测试
+npm.cmd run build:renderer  # 构建前端与领域层
+npm.cmd run build           # 构建 Windows NSIS 安装包
 ```
 
 > 仓库不包含任何 API 密钥。没有配置云模型时，排盘、历史记录和确定性事实仍可使用；AI 解读会明确降级，不会伪装成已连接。
@@ -177,7 +185,8 @@ docs/quality/        动画关键帧和视觉验收材料
 - [x] 文王纳甲、本变卦、四柱旬空、十二长生与关系事实
 - [x] 具体用神候选、澄清流程与元神 / 忌神 / 仇神
 - [x] 古籍证据混合检索与事实约束解读
-- [ ] 可安装的公开 Release 与自动更新
+- [x] Windows x64 NSIS 公开预览安装包
+- [ ] Windows 代码签名与自动更新
 - [ ] 更多经过独立复核的规则 profile
 - [ ] 案例导出、打印与隐私脱敏分享
 
