@@ -21,6 +21,16 @@
 - 历史搜索、恢复和二次确认删除
 - Windows NSIS 安装包与免安装目录
 
+## 下载安装（Windows x64）
+
+普通用户无需安装 Node.js、npm 或下载源码：
+
+1. 打开 [GitHub Releases](https://github.com/ROTl24/wenyao/releases)，选择最新版本。
+2. 下载 `WenYao-*-Setup.exe`，双击后按向导选择安装目录。
+3. 安装器会创建桌面和开始菜单中的“问爻”快捷方式，完成后可直接启动。
+
+当前预览版尚未购买 Windows 代码签名证书，SmartScreen 可能显示“Windows 已保护你的电脑”。请只从本项目 Releases 下载，并先核对发布说明中的 SHA-256；确认一致后可选择“更多信息”→“仍要运行”。
+
 ## 本地开发
 
 ```powershell
