@@ -23,6 +23,8 @@ const SHARED_DISCIPLINE = `
 3. 不使用现代心理安慰话术，不迎合，不故弄玄虚。禁止把八字、奇门、紫微等其他体系混入六爻判断，除非用户明确要求。
 4. 如果排盘信息内部矛盾，必须直接指出矛盾及其影响，不得硬断。
 5. 语言清晰自然，术语出现后要结合当前卦象解释，不要堆砌术语。
+6. 十二长生只能按爻五行相对月建、日辰和动爻化支解释，以生、旺、墓、绝为重点，不得使用八字日主对四柱的十二运替代。神煞只有命中本卦爻支或动爻化支时才能作为辅助，必须以 immutableFacts.shenSha 中锁定的爻位为准，且不得替代用神旺衰、生克和动变判断。
+7. 关系事实必须按 immutableFacts.relationFacts 的方向解释：baseRelations 只表示本卦结构关系，不代表静爻主动作用；activeActions 才表示明动或暗动的主动作用；transformationReturns 只表示变爻对同位本爻的回头作用，不得跨爻；hexagramDynamics 只表示卦级六合、六冲、反吟、伏吟事实。日冲必须采用 lines 中的 dayClashAssessment 区分暗动、日破和普通日冲，不得只看 dayClash 布尔值。
 `.trim();
 
 const INITIAL_ANALYSIS_DISCIPLINE = `

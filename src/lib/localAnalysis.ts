@@ -1,7 +1,7 @@
 import type { EvidenceEntry } from './retrieval';
 import type { DivinationSession } from './session';
 import type { AnalysisReport } from './types';
-import type { DivinationPlate, SixRelation } from './divination';
+import type { DivinationPlate, PlateLine, SixRelation } from './divination';
 
 const ANALYSIS_SECTION_HEADINGS = [
   '1. 占问主题',
@@ -35,6 +35,13 @@ const focusByCategory: Record<string, LocalFocus> = {
   other: { guidance: '应先依具体问题确定用神，再看世应、日月与动变关系。', relations: [], includeAllLines: true },
 };
 
+function dayClashLabel(line: PlateLine): string {
+  if (!line.dayClash) return '';
+  if (line.dayClashAssessment.kind === 'hidden-movement') return '暗动';
+  if (line.dayClashAssessment.kind === 'day-break') return '日破';
+  return '日冲';
+}
+
 function localFocusBasis(plate: DivinationPlate, focus: LocalFocus) {
   const relatedRelations = new Set(focus.relations);
   const primaryVisible = focus.primaryRelation && plate.lines.some((line) => line.relation === focus.primaryRelation);
@@ -42,7 +49,7 @@ function localFocusBasis(plate: DivinationPlate, focus: LocalFocus) {
   const visibleFacts = plate.lines
     .filter((line) => focus.includeAllLines || relatedRelations.has(line.relation) || Boolean(line.role))
     .map((line) => {
-      const states = [line.role && `${line.role}爻`, line.moving && '动爻', line.void && '旬空', line.monthBreak && '月破', line.dayClash && '日冲'].filter(Boolean);
+      const states = [line.role && `${line.role}爻`, line.moving && '动爻', line.void && '旬空', line.monthBreak && '月破', dayClashLabel(line)].filter(Boolean);
       return `第${line.index}爻${line.relation}${line.ganZhi}${states.length ? `（${states.join('、')}）` : ''}`;
     });
   const hiddenFacts = plate.fuShen

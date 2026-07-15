@@ -28,6 +28,15 @@ export function MarkdownContent({ markdown, className = '' }: Props) {
                   if ((!evidenceAnchor && !plateAnchor) || !href) return;
                   const target = document.getElementById(href.slice(1));
                   if (target instanceof HTMLDetailsElement) target.open = true;
+                  if (target instanceof HTMLElement) {
+                    target.classList.remove('is-citation-target');
+                    void target.offsetWidth;
+                    target.classList.add('is-citation-target');
+                    target.focus({ preventScroll: true });
+                    target.addEventListener('animationend', () => {
+                      target.classList.remove('is-citation-target');
+                    }, { once: true });
+                  }
                   if (target && typeof target.scrollIntoView === 'function') {
                     const reducedMotion = typeof window.matchMedia === 'function'
                       && window.matchMedia('(prefers-reduced-motion: reduce)').matches;

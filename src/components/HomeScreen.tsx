@@ -1,16 +1,16 @@
-import { BookOpen, BriefcaseBusiness, Coins, Heart, MapPinned, MoreHorizontal, Search, Stethoscope } from 'lucide-react';
 import { isValidQuestion, QUESTION_LENGTH } from '../lib/question';
 import type { SessionCategory } from '../lib/session';
+import { SESSION_CATEGORY_LABELS } from '../lib/sessionCategories';
 
-const categories: Array<{ id: SessionCategory; label: string; Icon: typeof BriefcaseBusiness }> = [
-  { id: 'career', label: '事业工作', Icon: BriefcaseBusiness },
-  { id: 'relationship', label: '感情婚姻', Icon: Heart },
-  { id: 'wealth', label: '财运投资', Icon: Coins },
-  { id: 'study', label: '学业考试', Icon: BookOpen },
-  { id: 'health', label: '健康调养', Icon: Stethoscope },
-  { id: 'lost_item', label: '寻人寻物', Icon: Search },
-  { id: 'travel', label: '出行远近', Icon: MapPinned },
-  { id: 'other', label: '其他', Icon: MoreHorizontal },
+const categories: Array<{ id: SessionCategory; mark: string }> = [
+  { id: 'career', mark: '事' },
+  { id: 'relationship', mark: '情' },
+  { id: 'wealth', mark: '财' },
+  { id: 'study', mark: '学' },
+  { id: 'health', mark: '养' },
+  { id: 'lost_item', mark: '寻' },
+  { id: 'travel', mark: '行' },
+  { id: 'other', mark: '余' },
 ];
 
 interface Props {
@@ -43,9 +43,9 @@ export function HomeScreen({ question, category, onQuestionChange, onCategoryCha
           <span className="character-count">{question.length} / {QUESTION_LENGTH.max}</span>
         </div>
         <div className="category-field">
-          <div className="field-label">选择事项</div>
-          <div className="category-row">
-            {categories.map(({ id, label, Icon }) => (
+          <div className="field-label" id="category-label">选择事项</div>
+          <div className="category-row" role="group" aria-labelledby="category-label">
+            {categories.map(({ id, mark }) => (
               <button
                 type="button"
                 key={id}
@@ -53,8 +53,8 @@ export function HomeScreen({ question, category, onQuestionChange, onCategoryCha
                 onClick={() => onCategoryChange(id)}
                 aria-pressed={category === id}
               >
-                <Icon size={19} strokeWidth={1.6} />
-                <span>{label}</span>
+                <span className="category-button__mark" aria-hidden="true">{mark}</span>
+                <span className="category-button__label">{SESSION_CATEGORY_LABELS[id]}</span>
               </button>
             ))}
           </div>

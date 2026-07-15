@@ -66,4 +66,24 @@ describe('createBrowserLocalReport', () => {
     })).resolves.toBe(report.markdown);
     expect(report).not.toHaveProperty('claims');
   });
+
+  it('uses the classified dark-movement and day-break labels in browser preview facts', () => {
+    const sessionFor = (castAt: Date): DivinationSession => ({
+      id: castAt.toISOString(),
+      question: '测试日冲分类',
+      category: 'other',
+      castAt: castAt.toISOString(),
+      updatedAt: castAt.toISOString(),
+      status: 'complete',
+      tosses: [],
+      plate: buildPlate([7, 7, 7, 7, 7, 7], castAt),
+      messages: [],
+    });
+
+    const hiddenMovement = createBrowserLocalReport(sessionFor(new Date('2026-02-05T12:00:00+08:00')), []);
+    const dayBreak = createBrowserLocalReport(sessionFor(new Date('2026-02-13T12:00:00+08:00')), []);
+
+    expect(hiddenMovement.markdown).toMatch(/第3爻[^；。]+（[^）]*暗动[^）]*）/);
+    expect(dayBreak.markdown).toMatch(/第1爻[^；。]+（[^）]*日破[^）]*）/);
+  });
 });

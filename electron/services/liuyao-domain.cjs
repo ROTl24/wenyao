@@ -133,6 +133,7 @@ function visibleCandidate(line) {
     void: Boolean(line.void),
     monthBreak: Boolean(line.monthBreak),
     dayClash: Boolean(line.dayClash),
+    dayClashAssessment: line.dayClashAssessment,
   };
 }
 
@@ -149,6 +150,38 @@ function hiddenCandidate(item) {
     void: Boolean(item.void),
     monthBreak: Boolean(item.monthBreak),
     dayClash: Boolean(item.dayClash),
+    hiddenSpiritFacts: {
+      calendar: {
+        seasonalStrength: item.seasonalStrength,
+        dayToHiddenElementRelation: item.dayToHiddenElementRelation,
+        void: Boolean(item.void),
+        monthBreak: Boolean(item.monthBreak),
+        dayClash: Boolean(item.dayClash),
+        monthCombine: Boolean(item.monthCombine),
+        dayCombine: Boolean(item.dayCombine),
+      },
+      flying: {
+        ganZhi: item.flyGanZhi,
+        relation: item.flyRelation,
+        element: item.flyElement,
+        effect: item.flyEffect,
+        void: Boolean(item.flyVoid),
+        monthBreak: Boolean(item.flyMonthBreak),
+        dayClash: Boolean(item.flyDayClash),
+        monthCombine: Boolean(item.flyMonthCombine),
+        dayCombine: Boolean(item.flyDayCombine),
+      },
+      activeSourceActions: item.activeSourceActions.map((action) => ({
+        ...action,
+        effects: [...action.effects],
+      })),
+      assessment: {
+        activationFactors: [...(item.activationFactors || [])],
+        blockingFactors: [...(item.blockingFactors || [])],
+        cautionFactors: [...(item.cautionFactors || [])],
+        status: item.status,
+      },
+    },
   };
 }
 

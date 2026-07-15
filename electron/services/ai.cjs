@@ -37,7 +37,10 @@ function localUseGodBasis(professionalContext, plate) {
     const location = candidate.source === 'hidden'
       ? `${candidate.relation}${candidate.ganZhi}伏于第${candidate.lineIndex}爻`
       : `第${candidate.lineIndex}爻${candidate.relation}${candidate.ganZhi}${candidate.role ? `（${candidate.role}）` : ''}`;
-    const states = [candidate.moving && '动爻', candidate.void && '旬空', candidate.monthBreak && '月破', candidate.dayClash && '日冲'].filter(Boolean);
+    const classifiedDayClash = candidate.source === 'visible'
+      ? ({ 'hidden-movement': '暗动', 'day-break': '日破', 'ordinary-clash': '日冲' }[candidate.dayClashAssessment?.kind] || '')
+      : candidate.dayClash ? '日冲' : '';
+    const states = [candidate.moving && '动爻', candidate.void && '旬空', candidate.monthBreak && '月破', classifiedDayClash].filter(Boolean);
     return states.length ? `${location}，${states.join('、')}` : location;
   });
   if (missingPrimaryFact) facts.unshift(missingPrimaryFact);
@@ -64,7 +67,6 @@ function reasoningPlan(category, plate) {
     useGod: professionalContext.useGod,
     professionalChecks: {
       spiritRoleFacts: professionalContext.spiritRoleFacts,
-      requiredInteractionFactsByUseGod: professionalContext.requiredInteractionFactsByUseGod,
     },
     immutableFacts: {
       baseHexagram: plate.baseHexagram.name,
@@ -73,8 +75,10 @@ function reasoningPlan(category, plate) {
       monthGanZhi: plate.monthGanZhi,
       dayGanZhi: plate.dayGanZhi,
       voidBranches: plate.voidBranches,
+      shenSha: plate.shenSha,
       lines: plate.lines,
       fuShen: plate.fuShen,
+      relationFacts: plate.relationFacts,
       voidScopeRule: professionalContext.voidScopeRule,
       lineInteractions: professionalContext.lineInteractions,
     },

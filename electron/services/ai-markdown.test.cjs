@@ -20,6 +20,7 @@ const studyPlate = {
   dayGanZhi: '戊子',
   monthGanZhi: '乙未',
   voidBranches: ['午', '未'],
+  shenSha: [{ name: '驿马', basis: '日支', branches: ['寅'], baseLineIndexes: [2], changedLineIndexes: [] }],
   lines: [
     { index: 1, relation: '父母', ganZhi: '庚子', branch: '子', element: '水', role: '', moving: false, void: false, monthBreak: false, dayClash: false },
     { index: 2, relation: '兄弟', ganZhi: '庚寅', branch: '寅', element: '木', role: '', moving: false, void: false, monthBreak: false, dayClash: false },
@@ -28,7 +29,7 @@ const studyPlate = {
     { index: 5, relation: '官鬼', ganZhi: '丁酉', branch: '酉', element: '金', role: '', moving: false, void: false, monthBreak: false, dayClash: false },
     { index: 6, relation: '妻财', ganZhi: '丁未', branch: '未', element: '土', role: '应', moving: false, void: true, monthBreak: false, dayClash: false },
   ],
-  fuShen: [{ lineIndex: 4, relation: '子孙', ganZhi: '庚午', branch: '午', element: '火', flyRelation: '父母', flyGanZhi: '丁亥', void: true, monthBreak: false, dayClash: true }],
+  fuShen: [{ lineIndex: 4, relation: '子孙', ganZhi: '庚午', branch: '午', element: '火', flyRelation: '父母', flyGanZhi: '丁亥', void: true, monthBreak: false, dayClash: true, activeSourceActions: [] }],
 };
 
 const evidence = [{
@@ -141,6 +142,11 @@ test('initial analysis prompt requires the strict 11-section Markdown contract w
   assert.match(analysisPrompt, /\[排盘事实\]\(#plate-facts\)/);
   assert.match(analysisPrompt, /\[《书名》·位置\]\(#evidence-ID\)/);
   assert.match(analysisPrompt, /禁止把八字、奇门、紫微等其他体系混入六爻判断/);
+  assert.match(analysisPrompt, /十二长生只能按爻五行相对月建、日辰和动爻化支解释/);
+  assert.match(analysisPrompt, /神煞只有命中本卦爻支或动爻化支时才能作为辅助/);
+  assert.match(analysisPrompt, /baseRelations 只表示本卦结构关系/);
+  assert.match(analysisPrompt, /activeActions 才表示明动或暗动的主动作用/);
+  assert.match(analysisPrompt, /transformationReturns 只表示变爻对同位本爻的回头作用/);
   assert.doesNotMatch(analysisPrompt, /不要求固定章节|自行组织标题/);
 });
 
@@ -151,6 +157,7 @@ test('follow-up prompt requires a focused conversational answer instead of the i
   assert.match(followUpPrompt, /先直接回答/);
   assert.match(followUpPrompt, /只展开与本次追问直接相关/);
   assert.match(followUpPrompt, /不得重起卦/);
+  assert.match(followUpPrompt, /十二长生只能按爻五行相对月建、日辰和动爻化支解释/);
   assert.match(followUpPrompt, /\[排盘事实\]\(#plate-facts\)/);
   assert.match(followUpPrompt, /\[《书名》·位置\]\(#evidence-ID\)/);
   assert.doesNotMatch(followUpPrompt, /严格按以下 11 个章节和顺序输出/);
@@ -1655,6 +1662,33 @@ test('local report uses the strict 11-section Markdown contract', async () => {
   assert.equal(Object.hasOwn(report, 'claims'), false);
 });
 
+test('local report distinguishes dark movement and day break instead of flattening both to day clash', () => {
+  const classifiedPlate = structuredClone(studyPlate);
+  classifiedPlate.lines[0].dayClash = true;
+  classifiedPlate.lines[0].dayClashAssessment = {
+    kind: 'hidden-movement',
+    seasonalStrength: '旺',
+    dayToLineElementRelation: '同类',
+  };
+  classifiedPlate.lines[3].dayClash = true;
+  classifiedPlate.lines[3].dayClashAssessment = {
+    kind: 'day-break',
+    seasonalStrength: '休',
+    dayToLineElementRelation: '克',
+  };
+
+  const report = createLocalReport({
+    question: '学业会好吗？',
+    category: 'study',
+    plate: classifiedPlate,
+    evidence: [],
+    retrievalDiagnostics: { mode: 'lexical-fallback', warnings: [] },
+  });
+
+  assert.match(report.markdown, /第1爻父母庚子，暗动/);
+  assert.match(report.markdown, /第4爻父母丁亥，日破/);
+});
+
 test('strict report validation rejects missing sentence citations and missing sections', async () => {
   const missingCitation = strictMarkdown.replace(`${plateCitation}`, '');
   await assert.rejects(
@@ -1670,13 +1704,20 @@ test('strict report validation rejects missing sentence citations and missing se
 });
 
 test('reasoning plan still locks the plate facts supplied to the Markdown model', () => {
-  const plan = reasoningPlan('study', studyPlate);
+  const relationFacts = {
+    baseRelations: [{ id: 'base:1:2' }],
+    activeActions: [{ id: 'active:1>2' }],
+    transformationReturns: [{ id: 'return:1' }],
+    hexagramDynamics: { transition: 'clash-to-harmony' },
+  };
+  const plan = reasoningPlan('study', { ...studyPlate, relationFacts });
 
   assert.deepEqual(plan.useGod.candidates.map(({ lineIndex, ganZhi }) => ({ lineIndex, ganZhi })), [
     { lineIndex: 1, ganZhi: '庚子' },
     { lineIndex: 4, ganZhi: '丁亥' },
   ]);
-  assert.ok(plan.professionalChecks.requiredInteractionFactsByUseGod[0].checks.some((interaction) => (
-    interaction.factStatement === '庚辰土生丁酉金，辰酉六合'
-  )));
+  assert.equal(Object.hasOwn(plan.professionalChecks, 'requiredInteractionFactsByUseGod'), false);
+  assert.equal(Object.hasOwn(plan.professionalChecks, 'relationshipFacts'), false);
+  assert.deepEqual(plan.immutableFacts.shenSha, studyPlate.shenSha);
+  assert.strictEqual(plan.immutableFacts.relationFacts, relationFacts);
 });

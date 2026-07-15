@@ -9,7 +9,86 @@ export type FuShenElementEffect = '比和' | '飞生伏' | '飞克伏' | '伏生
 export type FuShenStatus = '受扶倾向' | '冲飞待出' | '受制倾向' | '待结合旺衰';
 export type PillarLabel = '年柱' | '月柱' | '日柱' | '时柱';
 export type TwelveStage = '长生' | '沐浴' | '冠带' | '临官' | '帝旺' | '衰' | '病' | '死' | '墓' | '绝' | '胎' | '养';
-export type ShenShaName = '驿马' | '桃花' | '日禄' | '贵人';
+export type ShenShaName = '驿马' | '桃花' | '日禄' | '天乙贵人';
+export type ShenShaBasis = '日干' | '日支';
+export type ElementRelation = '同类' | '生' | '克' | '被生' | '被克';
+export type SeasonalStrength = '旺' | '相' | '休' | '囚' | '死';
+export type DayClashKind = 'none' | 'hidden-movement' | 'day-break' | 'ordinary-clash';
+
+export interface DayClashAssessment {
+  kind: DayClashKind;
+  seasonalStrength: SeasonalStrength;
+  dayToLineElementRelation: ElementRelation;
+}
+
+export type SourceActivity = 'static' | 'explicit-moving' | 'hidden-moving';
+export type BranchRelation = '六合' | '六冲' | 'none';
+export type ActionEffect = '生' | '克' | '比和' | '合' | '冲';
+export type HexagramSixRelation = 'six-harmony' | 'six-clash' | 'none';
+export type HexagramTransition = 'clash-to-harmony' | 'harmony-to-clash' | 'clash-to-clash' | 'harmony-to-harmony' | 'none';
+
+export interface BaseRelationFact {
+  id: string;
+  leftLineIndex: number;
+  rightLineIndex: number;
+  leftActivity: SourceActivity;
+  rightActivity: SourceActivity;
+  elementRelation: ElementRelation;
+  branchRelation: BranchRelation;
+}
+
+export interface ActiveActionFact {
+  id: string;
+  sourceLineIndex: number;
+  sourceActivity: Exclude<SourceActivity, 'static'>;
+  targetKind: 'line' | 'hidden-spirit';
+  targetLineIndex: number;
+  targetGanZhi: string;
+  elementRelation: ElementRelation;
+  branchRelation: BranchRelation;
+  effects: ActionEffect[];
+}
+
+export interface FuShenActiveAction {
+  id: string;
+  sourceLineIndex: number;
+  sourceActivity: Exclude<SourceActivity, 'static'>;
+  target: 'hidden-spirit' | 'flying-spirit';
+  elementRelation: ElementRelation;
+  branchRelation: BranchRelation;
+  effects: ActionEffect[];
+}
+
+export interface TransformationReturnFact {
+  id: string;
+  lineIndex: number;
+  fromGanZhi: string;
+  toGanZhi: string;
+  elementRelation: ElementRelation;
+  branchRelation: BranchRelation;
+  effects: ActionEffect[];
+}
+
+export interface TrigramRefrainFacts {
+  guaFanYin: boolean;
+  yaoFanYin: boolean;
+  fuYin: boolean;
+}
+
+export interface HexagramDynamics {
+  baseSixRelation: HexagramSixRelation;
+  changedSixRelation: HexagramSixRelation;
+  transition: HexagramTransition;
+  inner: TrigramRefrainFacts;
+  outer: TrigramRefrainFacts;
+}
+
+export interface LiuYaoRelationFacts {
+  baseRelations: BaseRelationFact[];
+  activeActions: ActiveActionFact[];
+  transformationReturns: TransformationReturnFact[];
+  hexagramDynamics: HexagramDynamics;
+}
 
 export interface Toss {
   faces: [CoinFace, CoinFace, CoinFace];
@@ -45,12 +124,20 @@ export interface CalendarPillar {
   label: PillarLabel;
   ganZhi: string;
   voidBranches: [string, string];
-  twelveStage: TwelveStage;
+}
+
+export interface LineTwelveStages {
+  month: TwelveStage;
+  day: TwelveStage;
+  transformation: TwelveStage | null;
 }
 
 export interface ShenSha {
   name: ShenShaName;
+  basis: ShenShaBasis;
   branches: string[];
+  baseLineIndexes: number[];
+  changedLineIndexes: number[];
 }
 
 export interface FuShen {
@@ -62,6 +149,8 @@ export interface FuShen {
   branch: string;
   ganZhi: string;
   element: Element;
+  seasonalStrength: SeasonalStrength;
+  dayToHiddenElementRelation: ElementRelation;
   flyGanZhi: string;
   flyRelation: SixRelation;
   flyElement: Element;
@@ -76,8 +165,7 @@ export interface FuShen {
   flyDayClash: boolean;
   flyMonthCombine: boolean;
   flyDayCombine: boolean;
-  supportingMovingLines: number[];
-  clashingMovingLines: number[];
+  activeSourceActions: FuShenActiveAction[];
   activationFactors: string[];
   blockingFactors: string[];
   cautionFactors: string[];
@@ -99,6 +187,7 @@ export interface PlateLine extends Toss {
   void: boolean;
   monthBreak: boolean;
   dayClash: boolean;
+  dayClashAssessment: DayClashAssessment;
   monthCombine: boolean;
   dayCombine: boolean;
   changedVoid: boolean;
@@ -109,6 +198,7 @@ export interface PlateLine extends Toss {
   role: LineRole;
   changedRole: LineRole;
   beast: string;
+  twelveStages: LineTwelveStages;
 }
 
 export interface DivinationPlate {
@@ -127,6 +217,7 @@ export interface DivinationPlate {
   movingLines: number[];
   lines: PlateLine[];
   fuShen: FuShen[];
+  relationFacts: LiuYaoRelationFacts;
 }
 
 const TRIGRAMS: Record<TrigramKey, Trigram> = {
@@ -168,6 +259,9 @@ const PALACE_SEQUENCES: Record<TrigramKey, string[]> = {
 
 const GENERATIONS = ['本宫', '一世', '二世', '三世', '四世', '五世', '游魂', '归魂'];
 const SHI_YING: Array<[number, number]> = [[6, 3], [1, 4], [2, 5], [3, 6], [4, 1], [5, 2], [4, 1], [3, 6]];
+const FAN_YIN_TRIGRAM: Record<TrigramKey, TrigramKey> = {
+  乾: '巽', 巽: '乾', 坎: '离', 离: '坎', 震: '兑', 兑: '震', 坤: '艮', 艮: '坤',
+};
 
 const INNER_BRANCHES: Record<TrigramKey, [string, string, string]> = {
   乾: ['子', '寅', '辰'], 兑: ['巳', '卯', '丑'], 离: ['卯', '丑', '亥'], 震: ['子', '寅', '辰'],
@@ -202,6 +296,8 @@ const BEASTS = ['青龙', '朱雀', '勾陈', '腾蛇', '白虎', '玄武'];
 const BEAST_START: Record<string, number> = { 甲: 0, 乙: 0, 丙: 1, 丁: 1, 戊: 2, 己: 3, 庚: 4, 辛: 4, 壬: 5, 癸: 5 };
 const STEMS = '甲乙丙丁戊己庚辛壬癸'.split('');
 const BRANCHES = '子丑寅卯辰巳午未申酉戌亥'.split('');
+const TWELVE_STAGES: TwelveStage[] = ['长生', '沐浴', '冠带', '临官', '帝旺', '衰', '病', '死', '墓', '绝', '胎', '养'];
+const TWELVE_STAGE_START_BRANCH: Record<Element, string> = { 木: '亥', 火: '寅', 土: '申', 金: '巳', 水: '申' };
 const TRAVEL_HORSE: Record<string, string> = { 申: '寅', 子: '寅', 辰: '寅', 寅: '申', 午: '申', 戌: '申', 巳: '亥', 酉: '亥', 丑: '亥', 亥: '巳', 卯: '巳', 未: '巳' };
 const PEACH_BLOSSOM: Record<string, string> = { 申: '酉', 子: '酉', 辰: '酉', 寅: '卯', 午: '卯', 戌: '卯', 巳: '午', 酉: '午', 丑: '午', 亥: '子', 卯: '子', 未: '子' };
 const DAY_LU: Record<string, string> = { 甲: '寅', 乙: '卯', 丙: '巳', 丁: '午', 戊: '巳', 己: '午', 庚: '申', 辛: '酉', 壬: '亥', 癸: '子' };
@@ -294,14 +390,196 @@ function relationOf(lineElement: Element, palaceElement: Element): SixRelation {
   return '妻财';
 }
 
-type ElementRelation = '同类' | '生' | '克' | '被生' | '被克';
-
 function elementRelation(from: Element, to: Element): ElementRelation {
   if (from === to) return '同类';
   if (GENERATES[from] === to) return '生';
   if (CONTROLS[from] === to) return '克';
   if (GENERATES[to] === from) return '被生';
   return '被克';
+}
+
+function seasonalStrength(lineElement: Element, monthElement: Element): SeasonalStrength {
+  if (lineElement === monthElement) return '旺';
+  if (GENERATES[monthElement] === lineElement) return '相';
+  if (GENERATES[lineElement] === monthElement) return '休';
+  if (CONTROLS[lineElement] === monthElement) return '囚';
+  return '死';
+}
+
+function assessDayClash(
+  lineElement: Element,
+  monthBranch: string,
+  dayGanZhi: string,
+  moving: boolean,
+  dayClash: boolean,
+  monthBreak: boolean,
+): DayClashAssessment {
+  const strength = seasonalStrength(lineElement, BRANCH_ELEMENTS[monthBranch]);
+  const dayRelation = elementRelation(BRANCH_ELEMENTS[dayGanZhi[1]], lineElement);
+  if (!dayClash) return { kind: 'none', seasonalStrength: strength, dayToLineElementRelation: dayRelation };
+  if (moving) {
+    return { kind: 'ordinary-clash', seasonalStrength: strength, dayToLineElementRelation: dayRelation };
+  }
+  const seasonallyStrong = strength === '旺' || strength === '相';
+  const daySupported = dayRelation === '生' || dayRelation === '同类';
+  if (monthBreak && daySupported) {
+    return { kind: 'ordinary-clash', seasonalStrength: strength, dayToLineElementRelation: dayRelation };
+  }
+  // 暗动既可由月令旺相成立，也可由日辰把休囚静爻扶起；月破时保留冲事实，不直接判暗动。
+  return {
+    kind: seasonallyStrong || daySupported ? 'hidden-movement' : 'day-break',
+    seasonalStrength: strength,
+    dayToLineElementRelation: dayRelation,
+  };
+}
+
+function sourceActivity(line: PlateLine): SourceActivity {
+  if (line.moving) return 'explicit-moving';
+  return line.dayClashAssessment.kind === 'hidden-movement' ? 'hidden-moving' : 'static';
+}
+
+function branchRelation(left: string, right: string): BranchRelation {
+  if (COMBINE_BRANCH[left] === right) return '六合';
+  if (OPPOSITE_BRANCH[left] === right) return '六冲';
+  return 'none';
+}
+
+function activeEffects(elementFact: ElementRelation, branchFact: BranchRelation): ActionEffect[] {
+  const effects: ActionEffect[] = [];
+  if (elementFact === '生') effects.push('生');
+  if (elementFact === '克') effects.push('克');
+  if (elementFact === '同类') effects.push('比和');
+  if (branchFact === '六合') effects.push('合');
+  if (branchFact === '六冲') effects.push('冲');
+  return effects;
+}
+
+function sixRelationFor(branches: readonly string[]): HexagramSixRelation {
+  const correspondingPairs = [[0, 3], [1, 4], [2, 5]] as const;
+  if (correspondingPairs.every(([left, right]) => branchRelation(branches[left], branches[right]) === '六合')) {
+    return 'six-harmony';
+  }
+  if (correspondingPairs.every(([left, right]) => branchRelation(branches[left], branches[right]) === '六冲')) {
+    return 'six-clash';
+  }
+  return 'none';
+}
+
+function hexagramTransition(base: HexagramSixRelation, changed: HexagramSixRelation, hasMovingLines: boolean): HexagramTransition {
+  if (!hasMovingLines) return 'none';
+  if (base === 'six-clash' && changed === 'six-harmony') return 'clash-to-harmony';
+  if (base === 'six-harmony' && changed === 'six-clash') return 'harmony-to-clash';
+  if (base === 'six-clash' && changed === 'six-clash') return 'clash-to-clash';
+  if (base === 'six-harmony' && changed === 'six-harmony') return 'harmony-to-harmony';
+  return 'none';
+}
+
+function trigramRefrainFacts(
+  baseTrigram: TrigramKey,
+  changedTrigram: TrigramKey,
+  lines: readonly PlateLine[],
+): TrigramRefrainFacts {
+  // 伏吟/反吟是动变关系；静卦本、之卦相同不能据此自动标成伏吟。
+  const changed = lines.some((line) => line.moving);
+  return {
+    guaFanYin: changed && FAN_YIN_TRIGRAM[baseTrigram] === changedTrigram,
+    yaoFanYin: changed && lines.every((line) => branchRelation(line.branch, line.changedBranch) === '六冲'),
+    fuYin: changed && lines.every((line) => line.branch === line.changedBranch),
+  };
+}
+
+function buildRelationFacts(
+  baseHexagram: Hexagram,
+  changedHexagram: Hexagram,
+  lines: readonly PlateLine[],
+  fuShen: readonly FuShen[],
+): LiuYaoRelationFacts {
+  const baseRelations: BaseRelationFact[] = [];
+  for (let leftIndex = 0; leftIndex < lines.length; leftIndex += 1) {
+    for (let rightIndex = leftIndex + 1; rightIndex < lines.length; rightIndex += 1) {
+      const left = lines[leftIndex];
+      const right = lines[rightIndex];
+      baseRelations.push({
+        id: `base:${left.index}:${right.index}`,
+        leftLineIndex: left.index,
+        rightLineIndex: right.index,
+        leftActivity: sourceActivity(left),
+        rightActivity: sourceActivity(right),
+        elementRelation: elementRelation(left.element, right.element),
+        branchRelation: branchRelation(left.branch, right.branch),
+      });
+    }
+  }
+
+  const activeActions: ActiveActionFact[] = [];
+  for (const source of lines.filter((line) => sourceActivity(line) !== 'static')) {
+    const activity = sourceActivity(source) as Exclude<SourceActivity, 'static'>;
+    for (const target of lines.filter((line) => line.index !== source.index)) {
+      const elementFact = elementRelation(source.element, target.element);
+      const branchFact = branchRelation(source.branch, target.branch);
+      const effects = activeEffects(elementFact, branchFact);
+      if (effects.length === 0) continue;
+      activeActions.push({
+        id: `active:${source.index}>${target.index}`,
+        sourceLineIndex: source.index,
+        sourceActivity: activity,
+        targetKind: 'line',
+        targetLineIndex: target.index,
+        targetGanZhi: target.ganZhi,
+        elementRelation: elementFact,
+        branchRelation: branchFact,
+        effects,
+      });
+    }
+    for (const hidden of fuShen) {
+      const hiddenAction = hidden.activeSourceActions.find((action) => (
+        action.sourceLineIndex === source.index && action.target === 'hidden-spirit'
+      ));
+      if (!hiddenAction) continue;
+      activeActions.push({
+        id: hiddenAction.id,
+        sourceLineIndex: source.index,
+        sourceActivity: activity,
+        targetKind: 'hidden-spirit',
+        targetLineIndex: hidden.lineIndex,
+        targetGanZhi: hidden.ganZhi,
+        elementRelation: hiddenAction.elementRelation,
+        branchRelation: hiddenAction.branchRelation,
+        effects: hiddenAction.effects,
+      });
+    }
+  }
+
+  // 变爻只回头作用于自己的本位动爻，不建立跨爻作用边。
+  const transformationReturns = lines.filter((line) => line.moving).map((line): TransformationReturnFact => {
+    const elementFact = elementRelation(line.changedElement, line.element);
+    const branchFact = branchRelation(line.changedBranch, line.branch);
+    return {
+      id: `return:${line.index}`,
+      lineIndex: line.index,
+      fromGanZhi: line.changedGanZhi,
+      toGanZhi: line.ganZhi,
+      elementRelation: elementFact,
+      branchRelation: branchFact,
+      effects: activeEffects(elementFact, branchFact),
+    };
+  });
+
+  const baseSixRelation = sixRelationFor(lines.map((line) => line.branch));
+  const changedSixRelation = sixRelationFor(lines.map((line) => line.changedBranch));
+  const hasMovingLines = lines.some((line) => line.moving);
+  return {
+    baseRelations,
+    activeActions,
+    transformationReturns,
+    hexagramDynamics: {
+      baseSixRelation,
+      changedSixRelation,
+      transition: hexagramTransition(baseSixRelation, changedSixRelation, hasMovingLines),
+      inner: trigramRefrainFacts(baseHexagram.lower.key, changedHexagram.lower.key, lines.slice(0, 3)),
+      outer: trigramRefrainFacts(baseHexagram.upper.key, changedHexagram.upper.key, lines.slice(3, 6)),
+    },
+  };
 }
 
 function fuShenEffect(flyElement: Element, hiddenElement: Element): FuShenElementEffect {
@@ -343,22 +621,35 @@ function nakJiaFields(baseHexagram: Hexagram, changedHexagram: Hexagram, zeroInd
 
 export function upgradePlate(plate: DivinationPlate): DivinationPlate {
   const calendar = calendarFields(new Date(plate.castAt));
+  const dayBranch = calendar.dayGanZhi[1];
   const lines = plate.lines.map((line, zeroIndex) => {
     const index = zeroIndex + 1;
     const nakJia = nakJiaFields(plate.baseHexagram, plate.changedHexagram, zeroIndex);
     return {
       ...line,
       ...nakJia,
-      ...lineCalendarFields(nakJia.branch, nakJia.changedBranch, calendar.monthBranch, calendar.dayGanZhi, calendar.voidBranches),
+      ...lineCalendarFields(
+        nakJia.branch,
+        nakJia.changedBranch,
+        calendar.monthBranch,
+        calendar.dayGanZhi,
+        calendar.voidBranches,
+        nakJia.element,
+        line.moving,
+      ),
       role: roleAt(plate.baseHexagram, index),
       changedRole: roleAt(plate.changedHexagram, index),
+      twelveStages: lineTwelveStages(nakJia.element, nakJia.changedBranch, calendar.monthBranch, dayBranch, line.moving),
     };
   });
+  const fuShen = buildFuShen(plate.baseHexagram, lines, calendar);
   return {
     ...plate,
     ...calendar,
     lines,
-    fuShen: buildFuShen(plate.baseHexagram, lines, calendar),
+    shenSha: commonShenSha(calendar.dayGanZhi, lines),
+    fuShen,
+    relationFacts: buildRelationFacts(plate.baseHexagram, plate.changedHexagram, lines, fuShen),
   };
 }
 
@@ -379,11 +670,20 @@ export function branchCalendarEffects(branch: string, monthBranch: string, dayGa
   };
 }
 
-function lineCalendarFields(branch: string, changedBranch: string, monthBranch: string, dayGanZhi: string, emptyBranches: readonly string[]) {
+function lineCalendarFields(
+  branch: string,
+  changedBranch: string,
+  monthBranch: string,
+  dayGanZhi: string,
+  emptyBranches: readonly string[],
+  element: Element,
+  moving: boolean,
+) {
   const base = branchCalendarEffects(branch, monthBranch, dayGanZhi, emptyBranches);
   const changed = branchCalendarEffects(changedBranch, monthBranch, dayGanZhi, emptyBranches);
   return {
     ...base,
+    dayClashAssessment: assessDayClash(element, monthBranch, dayGanZhi, moving, base.dayClash, base.monthBreak),
     changedVoid: changed.void,
     changedMonthBreak: changed.monthBreak,
     changedDayClash: changed.dayClash,
@@ -411,35 +711,69 @@ function buildFuShen(
     const flyEffect = fuShenEffect(flyLine.element, hiddenFields.element);
     const monthFactors = calendarElementFactors(monthElement, hiddenFields.element, '月建');
     const dayFactors = calendarElementFactors(dayElement, hiddenFields.element, '日辰');
-    const supportingMovingLines = lines
-      .filter((line) => line.moving && ['生', '同类'].includes(elementRelation(line.element, hiddenFields.element)))
-      .map((line) => line.index);
-    const clashingMovingLines = lines
-      .filter((line) => line.moving && (OPPOSITE_BRANCH[line.branch] === flyLine.branch || elementRelation(line.element, flyLine.element) === '克'))
-      .map((line) => line.index);
+    const activeSourceActions = lines.flatMap((source): FuShenActiveAction[] => {
+      const activity = sourceActivity(source);
+      if (activity === 'static') return [];
+      const targets = [
+        { id: `active:${source.index}>hidden:${zeroIndex + 1}`, target: 'hidden-spirit' as const, element: hiddenFields.element, branch: hiddenFields.branch },
+        ...(source.index === flyLine.index
+          ? []
+          : [{ id: `active:${source.index}>flying:${zeroIndex + 1}`, target: 'flying-spirit' as const, element: flyLine.element, branch: flyLine.branch }]),
+      ];
+      return targets.flatMap((target): FuShenActiveAction[] => {
+        const elementFact = elementRelation(source.element, target.element);
+        const branchFact = branchRelation(source.branch, target.branch);
+        const effects = activeEffects(elementFact, branchFact);
+        if (effects.length === 0) return [];
+        return [{
+          id: target.id,
+          sourceLineIndex: source.index,
+          sourceActivity: activity,
+          target: target.target,
+          elementRelation: elementFact,
+          branchRelation: branchFact,
+          effects,
+        }];
+      });
+    });
+    const actionSourceLabel = (action: FuShenActiveAction) => (
+      `${action.sourceActivity === 'hidden-moving' ? '暗动爻' : '动爻'}${action.sourceLineIndex}`
+    );
+    const supportingHiddenActions = activeSourceActions.filter((action) => (
+      action.target === 'hidden-spirit' && action.effects.some((effect) => effect === '生' || effect === '比和')
+    ));
+    const blockingHiddenActions = activeSourceActions.filter((action) => (
+      action.target === 'hidden-spirit' && action.effects.includes('克')
+    ));
+    const releasingFlyingActions = activeSourceActions.filter((action) => (
+      action.target === 'flying-spirit' && action.effects.some((effect) => effect === '克' || effect === '冲')
+    ));
     const activationFactors = [
       ...monthFactors.support,
       ...dayFactors.support,
       ...(flyEffect === '飞生伏' || flyEffect === '比和' ? [`${flyEffect}`] : []),
-      ...supportingMovingLines.map((index) => `动爻${index}生扶伏神`),
+      ...supportingHiddenActions.map((action) => `${actionSourceLabel(action)}${action.effects.includes('生') ? '生扶' : '比和扶持'}伏神`),
       ...(flyLine.void ? ['飞神旬空'] : []),
       ...(flyLine.monthBreak ? ['飞神月破'] : []),
       ...(flyLine.dayClash ? ['日辰冲飞神'] : []),
-      ...clashingMovingLines.map((index) => `动爻${index}冲克飞神`),
+      ...releasingFlyingActions.map((action) => `${actionSourceLabel(action)}${action.effects.filter((effect) => effect === '克' || effect === '冲').join('、')}飞神`),
     ];
     const blockingFactors = [
       ...(flyEffect === '飞克伏' ? ['飞神克伏神'] : []),
       ...monthFactors.blocking,
       ...dayFactors.blocking,
+      ...blockingHiddenActions.map((action) => `${actionSourceLabel(action)}克伏神`),
     ];
     const cautionFactors = [
       ...(hiddenCalendar.void ? ['伏神旬空'] : []),
       ...(hiddenCalendar.monthBreak ? ['伏神月破'] : []),
       ...(hiddenCalendar.dayClash ? ['日辰冲伏神'] : []),
-      ...(flyLine.moving ? ['飞神发动，需结合变爻'] : []),
+      ...(sourceActivity(flyLine) === 'explicit-moving' ? ['飞神发动，需结合变爻'] : []),
+      ...(sourceActivity(flyLine) === 'hidden-moving' ? ['飞神暗动，需结合飞伏作用'] : []),
       '旺相休囚、墓绝需结合完整月令规则',
     ];
-    const status: FuShenStatus = activationFactors.some((factor) => factor.includes('冲飞') || factor.includes('旬空') || factor.includes('月破'))
+    const flyingSpiritReleased = flyLine.void || flyLine.monthBreak || flyLine.dayClash || releasingFlyingActions.length > 0;
+    const status: FuShenStatus = flyingSpiritReleased
       ? '冲飞待出'
       : blockingFactors.length > 0
         ? '受制倾向'
@@ -456,6 +790,8 @@ function buildFuShen(
       branch: hiddenFields.branch,
       ganZhi: hiddenFields.ganZhi,
       element: hiddenFields.element,
+      seasonalStrength: seasonalStrength(hiddenFields.element, monthElement),
+      dayToHiddenElementRelation: elementRelation(dayElement, hiddenFields.element),
       flyGanZhi: flyLine.ganZhi,
       flyRelation: flyLine.relation,
       flyElement: flyLine.element,
@@ -466,8 +802,7 @@ function buildFuShen(
       flyDayClash: flyLine.dayClash,
       flyMonthCombine: flyLine.monthCombine,
       flyDayCombine: flyLine.dayCombine,
-      supportingMovingLines,
-      clashingMovingLines,
+      activeSourceActions,
       activationFactors,
       blockingFactors,
       cautionFactors,
@@ -484,29 +819,56 @@ function voidBranches(dayGanZhi: string): [string, string] {
   return [BRANCHES[voidStart], BRANCHES[(voidStart + 1) % 12]];
 }
 
-function commonShenSha(dayGanZhi: string): ShenSha[] {
+export function twelveStageFor(element: Element, branch: string): TwelveStage {
+  const branchIndex = BRANCHES.indexOf(branch);
+  if (branchIndex < 0) throw new Error(`无法计算十二长生：未知地支“${branch}”`);
+  const startIndex = BRANCHES.indexOf(TWELVE_STAGE_START_BRANCH[element]);
+  return TWELVE_STAGES[(branchIndex - startIndex + BRANCHES.length) % BRANCHES.length];
+}
+
+function lineTwelveStages(
+  element: Element,
+  changedBranch: string,
+  monthBranch: string,
+  dayBranch: string,
+  moving: boolean,
+): LineTwelveStages {
+  return {
+    month: twelveStageFor(element, monthBranch),
+    day: twelveStageFor(element, dayBranch),
+    transformation: moving ? twelveStageFor(element, changedBranch) : null,
+  };
+}
+
+function commonShenSha(dayGanZhi: string, lines: PlateLine[]): ShenSha[] {
   const dayStem = dayGanZhi[0];
   const dayBranch = dayGanZhi[1];
-  return [
-    { name: '驿马', branches: [TRAVEL_HORSE[dayBranch]] },
-    { name: '桃花', branches: [PEACH_BLOSSOM[dayBranch]] },
-    { name: '日禄', branches: [DAY_LU[dayStem]] },
-    { name: '贵人', branches: [...NOBLE_PEOPLE[dayStem]] },
+  const definitions: Array<Pick<ShenSha, 'name' | 'basis' | 'branches'>> = [
+    { name: '驿马', basis: '日支', branches: [TRAVEL_HORSE[dayBranch]] },
+    { name: '桃花', basis: '日支', branches: [PEACH_BLOSSOM[dayBranch]] },
+    { name: '日禄', basis: '日干', branches: [DAY_LU[dayStem]] },
+    { name: '天乙贵人', basis: '日干', branches: [...NOBLE_PEOPLE[dayStem]] },
   ];
+  return definitions.map((item) => ({
+    ...item,
+    baseLineIndexes: lines.filter((line) => item.branches.includes(line.branch)).map((line) => line.index),
+    changedLineIndexes: lines
+      .filter((line) => line.moving && item.branches.includes(line.changedBranch))
+      .map((line) => line.index),
+  }));
 }
 
 function calendarFields(castAt: Date) {
   const lunar = Solar.fromDate(castAt).getLunar();
-  const eightChar = lunar.getEightChar();
   const yearGanZhi = lunar.getYearInGanZhiExact();
   const monthGanZhi = lunar.getMonthInGanZhiExact();
   const dayGanZhi = lunar.getDayInGanZhiExact();
   const timeGanZhi = lunar.getTimeInGanZhi();
   const pillars: CalendarPillar[] = [
-    { label: '年柱', ganZhi: yearGanZhi, voidBranches: voidBranches(yearGanZhi), twelveStage: eightChar.getYearDiShi() as TwelveStage },
-    { label: '月柱', ganZhi: monthGanZhi, voidBranches: voidBranches(monthGanZhi), twelveStage: eightChar.getMonthDiShi() as TwelveStage },
-    { label: '日柱', ganZhi: dayGanZhi, voidBranches: voidBranches(dayGanZhi), twelveStage: eightChar.getDayDiShi() as TwelveStage },
-    { label: '时柱', ganZhi: timeGanZhi, voidBranches: voidBranches(timeGanZhi), twelveStage: eightChar.getTimeDiShi() as TwelveStage },
+    { label: '年柱', ganZhi: yearGanZhi, voidBranches: voidBranches(yearGanZhi) },
+    { label: '月柱', ganZhi: monthGanZhi, voidBranches: voidBranches(monthGanZhi) },
+    { label: '日柱', ganZhi: dayGanZhi, voidBranches: voidBranches(dayGanZhi) },
+    { label: '时柱', ganZhi: timeGanZhi, voidBranches: voidBranches(timeGanZhi) },
   ];
   return {
     yearGanZhi,
@@ -516,7 +878,6 @@ function calendarFields(castAt: Date) {
     monthBranch: lunar.getMonthZhiExact(),
     voidBranches: pillars[2].voidBranches,
     pillars,
-    shenSha: commonShenSha(dayGanZhi),
   };
 }
 
@@ -538,6 +899,7 @@ export function buildPlate(values: readonly LineValue[], castAt: Date): Divinati
   const lunar = Solar.fromDate(castAt).getLunar();
   const calendar = calendarFields(castAt);
   const { dayGanZhi, monthBranch, voidBranches: emptyBranches } = calendar;
+  const dayBranch = dayGanZhi[1];
   const beastStart = BEAST_START[lunar.getDayGanExact()] ?? 0;
   const lines: PlateLine[] = tosses.map((toss, zeroIndex) => {
     const index = zeroIndex + 1;
@@ -546,13 +908,23 @@ export function buildPlate(values: readonly LineValue[], castAt: Date): Divinati
       ...toss,
       index,
       ...nakJia,
-      ...lineCalendarFields(nakJia.branch, nakJia.changedBranch, monthBranch, dayGanZhi, emptyBranches),
+      ...lineCalendarFields(
+        nakJia.branch,
+        nakJia.changedBranch,
+        monthBranch,
+        dayGanZhi,
+        emptyBranches,
+        nakJia.element,
+        toss.moving,
+      ),
       role: roleAt(baseHexagram, index),
       changedRole: roleAt(changedHexagram, index),
       beast: BEASTS[(beastStart + zeroIndex) % 6],
+      twelveStages: lineTwelveStages(nakJia.element, nakJia.changedBranch, monthBranch, dayBranch, toss.moving),
     };
   });
   const fuShen = buildFuShen(baseHexagram, lines, calendar);
+  const shenSha = commonShenSha(dayGanZhi, lines);
 
   return {
     id: crypto.randomUUID(),
@@ -562,7 +934,9 @@ export function buildPlate(values: readonly LineValue[], castAt: Date): Divinati
     changedHexagram,
     movingLines: lines.filter((line) => line.moving).map((line) => line.index),
     lines,
+    shenSha,
     fuShen,
+    relationFacts: buildRelationFacts(baseHexagram, changedHexagram, lines, fuShen),
   };
 }
 
