@@ -1,4 +1,5 @@
 import { BookOpen, BriefcaseBusiness, Coins, Heart, MapPinned, MoreHorizontal, Search, Stethoscope } from 'lucide-react';
+import { isValidQuestion, QUESTION_LENGTH } from '../lib/question';
 import type { SessionCategory } from '../lib/session';
 
 const categories: Array<{ id: SessionCategory; label: string; Icon: typeof BriefcaseBusiness }> = [
@@ -21,7 +22,7 @@ interface Props {
 }
 
 export function HomeScreen({ question, category, onQuestionChange, onCategoryChange, onStart }: Props) {
-  const valid = question.trim().length >= 10 && question.trim().length <= 500 && Boolean(category);
+  const valid = isValidQuestion(question) && Boolean(category);
   return (
     <main className="home-screen">
       <div className="mountain-wash mountain-wash--left" />
@@ -37,9 +38,9 @@ export function HomeScreen({ question, category, onQuestionChange, onCategoryCha
             value={question}
             onChange={(event) => onQuestionChange(event.target.value)}
             placeholder="请写下一个具体、单一的问题，例如：未来三个月，我现在推进的项目能否顺利落地？"
-            maxLength={500}
+            maxLength={QUESTION_LENGTH.max}
           />
-          <span className="character-count">{question.length} / 500</span>
+          <span className="character-count">{question.length} / {QUESTION_LENGTH.max}</span>
         </div>
         <div className="category-field">
           <div className="field-label">选择事项</div>

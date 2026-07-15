@@ -21,26 +21,34 @@ test('JsonStore persists, orders and deletes sessions atomically', () => {
 test('JsonStore never exposes an encrypted secret through public settings', () => {
   const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'wenyao-store-'));
   const store = new JsonStore(path.join(dir, 'app-data.json'));
-  store.saveSettings({ baseUrl: 'https://api.example.com/v1', model: 'model-a', embeddingModel: 'embed-a', rerankModel: 'rank-a', rerankUrl: 'https://rank.example/reranks', encryptedApiKey: 'ciphertext' });
+  store.saveSettings({ alibabaBaseUrl: 'https://api.example.com/v1', alibabaModel: 'model-a', embeddingModel: 'embed-a', embeddingDimensions: 1024, rerankModel: 'rank-a', rerankUrl: '', deepseekBaseUrl: 'https://api.deepseek.com', deepseekModel: 'deepseek-v4-pro', encryptedAlibabaApiKey: 'ciphertext', encryptedDeepSeekApiKey: 'ciphertext-2' });
   assert.deepEqual(store.getPublicSettings(), {
-    baseUrl: 'https://api.example.com/v1',
-    model: 'model-a',
+    alibabaBaseUrl: 'https://api.example.com/v1',
+    alibabaModel: 'model-a',
     embeddingModel: 'embed-a',
+    embeddingDimensions: 1024,
     rerankModel: 'rank-a',
-    rerankUrl: 'https://rank.example/reranks',
-    hasApiKey: true,
+    rerankUrl: '',
+    deepseekBaseUrl: 'https://api.deepseek.com',
+    deepseekModel: 'deepseek-v4-pro',
+    hasAlibabaApiKey: true,
+    hasDeepSeekApiKey: true,
   });
 });
 
-test('JsonStore defaults to the Alibaba high-quality model stack', () => {
+test('JsonStore defaults to the Alibaba retrieval and DeepSeek analysis stacks', () => {
   const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'wenyao-store-'));
   const store = new JsonStore(path.join(dir, 'app-data.json'));
   assert.deepEqual(store.getPublicSettings(), {
-    baseUrl: 'https://dashscope.aliyuncs.com/compatible-mode/v1',
-    model: 'qwen3.7-plus',
+    alibabaBaseUrl: 'https://dashscope.aliyuncs.com/compatible-mode/v1',
+    alibabaModel: 'qwen3.7-plus',
     embeddingModel: 'text-embedding-v4',
+    embeddingDimensions: 1024,
     rerankModel: 'qwen3-rerank',
     rerankUrl: '',
-    hasApiKey: false,
+    deepseekBaseUrl: 'https://api.deepseek.com',
+    deepseekModel: 'deepseek-v4-pro',
+    hasAlibabaApiKey: false,
+    hasDeepSeekApiKey: false,
   });
 });

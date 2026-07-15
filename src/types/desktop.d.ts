@@ -2,7 +2,18 @@ import type { EvidenceEntry, RetrievalDiagnostics } from '../lib/retrieval';
 import type { DivinationSession } from '../lib/session';
 import type { AnalysisReport } from '../lib/types';
 
-interface PublicSettings { baseUrl: string; model: string; embeddingModel: string; rerankModel: string; rerankUrl: string; hasApiKey: boolean }
+interface PublicSettings {
+  alibabaBaseUrl: string;
+  alibabaModel: string;
+  embeddingModel: string;
+  embeddingDimensions: number;
+  rerankModel: string;
+  rerankUrl: string;
+  deepseekBaseUrl: string;
+  deepseekModel: string;
+  hasAlibabaApiKey: boolean;
+  hasDeepSeekApiKey: boolean;
+}
 interface DesktopError { code: string; message: string; dataSafe: boolean; nextAction: string }
 interface CorpusStatus { count: number; bookCount: number; originalCount: number; summaryCount: number; ruleCount: number; caseCount: number; doctrineCount: number; vectorReady: boolean; vectorModel: string; ready: boolean }
 
@@ -15,7 +26,7 @@ export interface DesktopApi {
   };
   settings: {
     get(): Promise<PublicSettings>;
-    save(payload: { baseUrl: string; model: string; embeddingModel: string; rerankModel: string; rerankUrl: string; apiKey?: string }): Promise<PublicSettings>;
+    save(payload: { alibabaBaseUrl: string; alibabaModel: string; embeddingModel: string; embeddingDimensions: number; rerankModel: string; rerankUrl: string; deepseekBaseUrl: string; deepseekModel: string; alibabaApiKey?: string; deepseekApiKey?: string }): Promise<PublicSettings>;
     clearKey(): Promise<PublicSettings>;
     test(): Promise<{ ok: boolean; message?: string; error?: DesktopError }>;
   };
@@ -29,7 +40,7 @@ export interface DesktopApi {
   };
   ai: {
     analyze(payload: { question: string; category: string; plate: DivinationSession['plate']; evidence: EvidenceEntry[]; retrievalDiagnostics?: RetrievalDiagnostics }): Promise<{ ok: boolean; report?: AnalysisReport; error?: DesktopError }>;
-    followUp(payload: { question: string; session: DivinationSession; evidence: EvidenceEntry[] }): Promise<{ ok: boolean; answer?: { content: string; evidenceIds: string[] }; error?: DesktopError }>;
+    followUp(payload: { question: string; session: DivinationSession; evidence: EvidenceEntry[] }): Promise<{ ok: boolean; answer?: { content: string }; error?: DesktopError }>;
   };
   platform: string;
 }

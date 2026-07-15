@@ -5,6 +5,11 @@ export type LineValue = 6 | 7 | 8 | 9;
 export type Element = '木' | '火' | '土' | '金' | '水';
 export type SixRelation = '父母' | '兄弟' | '子孙' | '妻财' | '官鬼';
 export type LineRole = '世' | '应' | null;
+export type FuShenElementEffect = '比和' | '飞生伏' | '飞克伏' | '伏生飞' | '伏克飞';
+export type FuShenStatus = '受扶倾向' | '冲飞待出' | '受制倾向' | '待结合旺衰';
+export type PillarLabel = '年柱' | '月柱' | '日柱' | '时柱';
+export type TwelveStage = '长生' | '沐浴' | '冠带' | '临官' | '帝旺' | '衰' | '病' | '死' | '墓' | '绝' | '胎' | '养';
+export type ShenShaName = '驿马' | '桃花' | '日禄' | '贵人';
 
 export interface Toss {
   faces: [CoinFace, CoinFace, CoinFace];
@@ -36,6 +41,49 @@ export interface Hexagram {
   yingLine: number;
 }
 
+export interface CalendarPillar {
+  label: PillarLabel;
+  ganZhi: string;
+  voidBranches: [string, string];
+  twelveStage: TwelveStage;
+}
+
+export interface ShenSha {
+  name: ShenShaName;
+  branches: string[];
+}
+
+export interface FuShen {
+  lineIndex: number;
+  sourcePalace: TrigramKey;
+  sourceHexagram: string;
+  relation: SixRelation;
+  stem: string;
+  branch: string;
+  ganZhi: string;
+  element: Element;
+  flyGanZhi: string;
+  flyRelation: SixRelation;
+  flyElement: Element;
+  flyEffect: FuShenElementEffect;
+  void: boolean;
+  monthBreak: boolean;
+  dayClash: boolean;
+  monthCombine: boolean;
+  dayCombine: boolean;
+  flyVoid: boolean;
+  flyMonthBreak: boolean;
+  flyDayClash: boolean;
+  flyMonthCombine: boolean;
+  flyDayCombine: boolean;
+  supportingMovingLines: number[];
+  clashingMovingLines: number[];
+  activationFactors: string[];
+  blockingFactors: string[];
+  cautionFactors: string[];
+  status: FuShenStatus;
+}
+
 export interface PlateLine extends Toss {
   index: number;
   stem: string;
@@ -59,20 +107,26 @@ export interface PlateLine extends Toss {
   changedMonthCombine: boolean;
   changedDayCombine: boolean;
   role: LineRole;
+  changedRole: LineRole;
   beast: string;
 }
 
 export interface DivinationPlate {
   id: string;
   castAt: string;
+  yearGanZhi: string;
   dayGanZhi: string;
   monthGanZhi: string;
+  timeGanZhi: string;
   monthBranch: string;
   voidBranches: [string, string];
+  pillars: CalendarPillar[];
+  shenSha: ShenSha[];
   baseHexagram: Hexagram;
   changedHexagram: Hexagram;
   movingLines: number[];
   lines: PlateLine[];
+  fuShen: FuShen[];
 }
 
 const TRIGRAMS: Record<TrigramKey, Trigram> = {
@@ -128,9 +182,17 @@ const OUTER_BRANCHES: Record<TrigramKey, [string, string, string]> = {
 const INNER_STEM: Record<TrigramKey, string> = { 乾: '甲', 坤: '乙', 震: '庚', 巽: '辛', 坎: '戊', 离: '己', 艮: '丙', 兑: '丁' };
 const OUTER_STEM: Record<TrigramKey, string> = { 乾: '壬', 坤: '癸', 震: '庚', 巽: '辛', 坎: '戊', 离: '己', 艮: '丙', 兑: '丁' };
 
+const STEM_ELEMENTS: Record<string, Element> = {
+  甲: '木', 乙: '木', 丙: '火', 丁: '火', 戊: '土', 己: '土', 庚: '金', 辛: '金', 壬: '水', 癸: '水',
+};
 const BRANCH_ELEMENTS: Record<string, Element> = {
   子: '水', 亥: '水', 寅: '木', 卯: '木', 巳: '火', 午: '火', 申: '金', 酉: '金', 辰: '土', 戌: '土', 丑: '土', 未: '土',
 };
+
+export function elementOfStemBranch(symbol: string): Element | undefined {
+  return STEM_ELEMENTS[symbol] ?? BRANCH_ELEMENTS[symbol];
+}
+
 const OPPOSITE_BRANCH: Record<string, string> = { 子: '午', 午: '子', 丑: '未', 未: '丑', 寅: '申', 申: '寅', 卯: '酉', 酉: '卯', 辰: '戌', 戌: '辰', 巳: '亥', 亥: '巳' };
 const COMBINE_BRANCH: Record<string, string> = { 子: '丑', 丑: '子', 寅: '亥', 亥: '寅', 卯: '戌', 戌: '卯', 辰: '酉', 酉: '辰', 巳: '申', 申: '巳', 午: '未', 未: '午' };
 
@@ -140,6 +202,16 @@ const BEASTS = ['青龙', '朱雀', '勾陈', '腾蛇', '白虎', '玄武'];
 const BEAST_START: Record<string, number> = { 甲: 0, 乙: 0, 丙: 1, 丁: 1, 戊: 2, 己: 3, 庚: 4, 辛: 4, 壬: 5, 癸: 5 };
 const STEMS = '甲乙丙丁戊己庚辛壬癸'.split('');
 const BRANCHES = '子丑寅卯辰巳午未申酉戌亥'.split('');
+const TRAVEL_HORSE: Record<string, string> = { 申: '寅', 子: '寅', 辰: '寅', 寅: '申', 午: '申', 戌: '申', 巳: '亥', 酉: '亥', 丑: '亥', 亥: '巳', 卯: '巳', 未: '巳' };
+const PEACH_BLOSSOM: Record<string, string> = { 申: '酉', 子: '酉', 辰: '酉', 寅: '卯', 午: '卯', 戌: '卯', 巳: '午', 酉: '午', 丑: '午', 亥: '子', 卯: '子', 未: '子' };
+const DAY_LU: Record<string, string> = { 甲: '寅', 乙: '卯', 丙: '巳', 丁: '午', 戊: '巳', 己: '午', 庚: '申', 辛: '酉', 壬: '亥', 癸: '子' };
+const NOBLE_PEOPLE: Record<string, string[]> = {
+  甲: ['丑', '未'], 戊: ['丑', '未'], 庚: ['丑', '未'],
+  乙: ['子', '申'], 己: ['子', '申'],
+  丙: ['酉', '亥'], 丁: ['酉', '亥'],
+  辛: ['寅', '午'],
+  壬: ['卯', '巳'], 癸: ['卯', '巳'],
+};
 
 function shortHexagramName(fullName: string): string {
   if (fullName.includes('为')) return fullName[0];
@@ -181,6 +253,18 @@ export function getHexagram(lines: readonly boolean[]): Hexagram {
   };
 }
 
+function trigramLines(key: TrigramKey): [boolean, boolean, boolean] {
+  const entry = Object.entries(TRIGRAM_BY_BITS).find(([, trigramKey]) => trigramKey === key);
+  if (!entry) throw new Error(`无法映射三爻：${key}`);
+  const code = Number(entry[0]);
+  return [Boolean(code & 1), Boolean(code & 2), Boolean(code & 4)];
+}
+
+function getPalaceHexagram(palace: TrigramKey): Hexagram {
+  const lines = trigramLines(palace);
+  return getHexagram([...lines, ...lines]);
+}
+
 export function createToss(faces: readonly CoinFace[]): Toss {
   if (faces.length !== 3) throw new Error('每一爻必须使用三枚铜钱');
   const normalized = [...faces] as [CoinFace, CoinFace, CoinFace];
@@ -210,6 +294,35 @@ function relationOf(lineElement: Element, palaceElement: Element): SixRelation {
   return '妻财';
 }
 
+type ElementRelation = '同类' | '生' | '克' | '被生' | '被克';
+
+function elementRelation(from: Element, to: Element): ElementRelation {
+  if (from === to) return '同类';
+  if (GENERATES[from] === to) return '生';
+  if (CONTROLS[from] === to) return '克';
+  if (GENERATES[to] === from) return '被生';
+  return '被克';
+}
+
+function fuShenEffect(flyElement: Element, hiddenElement: Element): FuShenElementEffect {
+  switch (elementRelation(flyElement, hiddenElement)) {
+    case '同类': return '比和';
+    case '生': return '飞生伏';
+    case '克': return '飞克伏';
+    case '被生': return '伏生飞';
+    case '被克': return '伏克飞';
+  }
+}
+
+function calendarElementFactors(source: Element | undefined, target: Element, label: string) {
+  if (!source) return { support: [] as string[], blocking: [] as string[] };
+  const relation = elementRelation(source, target);
+  if (relation === '生') return { support: [`${label}生扶伏神`], blocking: [] };
+  if (relation === '同类') return { support: [`${label}与伏神比和`], blocking: [] };
+  if (relation === '克') return { support: [], blocking: [`${label}克伏神`] };
+  return { support: [], blocking: [] };
+}
+
 function nakJiaFields(baseHexagram: Hexagram, changedHexagram: Hexagram, zeroIndex: number) {
   const inner = zeroIndex < 3;
   const trigramIndex = zeroIndex % 3;
@@ -229,13 +342,30 @@ function nakJiaFields(baseHexagram: Hexagram, changedHexagram: Hexagram, zeroInd
 }
 
 export function upgradePlate(plate: DivinationPlate): DivinationPlate {
+  const calendar = calendarFields(new Date(plate.castAt));
+  const lines = plate.lines.map((line, zeroIndex) => {
+    const index = zeroIndex + 1;
+    const nakJia = nakJiaFields(plate.baseHexagram, plate.changedHexagram, zeroIndex);
+    return {
+      ...line,
+      ...nakJia,
+      ...lineCalendarFields(nakJia.branch, nakJia.changedBranch, calendar.monthBranch, calendar.dayGanZhi, calendar.voidBranches),
+      role: roleAt(plate.baseHexagram, index),
+      changedRole: roleAt(plate.changedHexagram, index),
+    };
+  });
   return {
     ...plate,
-    lines: plate.lines.map((line, zeroIndex) => {
-      const nakJia = nakJiaFields(plate.baseHexagram, plate.changedHexagram, zeroIndex);
-      return { ...line, ...nakJia, ...lineCalendarFields(nakJia.branch, nakJia.changedBranch, plate.monthBranch, plate.dayGanZhi, plate.voidBranches) };
-    }),
+    ...calendar,
+    lines,
+    fuShen: buildFuShen(plate.baseHexagram, lines, calendar),
   };
+}
+
+function roleAt(hexagram: Hexagram, lineIndex: number): LineRole {
+  if (lineIndex === hexagram.shiLine) return '世';
+  if (lineIndex === hexagram.yingLine) return '应';
+  return null;
 }
 
 export function branchCalendarEffects(branch: string, monthBranch: string, dayGanZhi: string, emptyBranches: readonly string[]) {
@@ -262,12 +392,132 @@ function lineCalendarFields(branch: string, changedBranch: string, monthBranch: 
   };
 }
 
+function buildFuShen(
+  baseHexagram: Hexagram,
+  lines: readonly PlateLine[],
+  calendar: { monthBranch: string; dayGanZhi: string; voidBranches: readonly string[] },
+): FuShen[] {
+  const palaceHexagram = getPalaceHexagram(baseHexagram.palace);
+  const visibleRelations = new Set(lines.map((line) => line.relation));
+  const monthElement = BRANCH_ELEMENTS[calendar.monthBranch];
+  const dayElement = BRANCH_ELEMENTS[calendar.dayGanZhi[1]];
+
+  return Array.from({ length: 6 }, (_, zeroIndex) => {
+    const hiddenFields = nakJiaFields(palaceHexagram, palaceHexagram, zeroIndex);
+    const flyLine = lines[zeroIndex];
+    if (visibleRelations.has(hiddenFields.relation) || !flyLine) return null;
+
+    const hiddenCalendar = branchCalendarEffects(hiddenFields.branch, calendar.monthBranch, calendar.dayGanZhi, calendar.voidBranches);
+    const flyEffect = fuShenEffect(flyLine.element, hiddenFields.element);
+    const monthFactors = calendarElementFactors(monthElement, hiddenFields.element, '月建');
+    const dayFactors = calendarElementFactors(dayElement, hiddenFields.element, '日辰');
+    const supportingMovingLines = lines
+      .filter((line) => line.moving && ['生', '同类'].includes(elementRelation(line.element, hiddenFields.element)))
+      .map((line) => line.index);
+    const clashingMovingLines = lines
+      .filter((line) => line.moving && (OPPOSITE_BRANCH[line.branch] === flyLine.branch || elementRelation(line.element, flyLine.element) === '克'))
+      .map((line) => line.index);
+    const activationFactors = [
+      ...monthFactors.support,
+      ...dayFactors.support,
+      ...(flyEffect === '飞生伏' || flyEffect === '比和' ? [`${flyEffect}`] : []),
+      ...supportingMovingLines.map((index) => `动爻${index}生扶伏神`),
+      ...(flyLine.void ? ['飞神旬空'] : []),
+      ...(flyLine.monthBreak ? ['飞神月破'] : []),
+      ...(flyLine.dayClash ? ['日辰冲飞神'] : []),
+      ...clashingMovingLines.map((index) => `动爻${index}冲克飞神`),
+    ];
+    const blockingFactors = [
+      ...(flyEffect === '飞克伏' ? ['飞神克伏神'] : []),
+      ...monthFactors.blocking,
+      ...dayFactors.blocking,
+    ];
+    const cautionFactors = [
+      ...(hiddenCalendar.void ? ['伏神旬空'] : []),
+      ...(hiddenCalendar.monthBreak ? ['伏神月破'] : []),
+      ...(hiddenCalendar.dayClash ? ['日辰冲伏神'] : []),
+      ...(flyLine.moving ? ['飞神发动，需结合变爻'] : []),
+      '旺相休囚、墓绝需结合完整月令规则',
+    ];
+    const status: FuShenStatus = activationFactors.some((factor) => factor.includes('冲飞') || factor.includes('旬空') || factor.includes('月破'))
+      ? '冲飞待出'
+      : blockingFactors.length > 0
+        ? '受制倾向'
+        : activationFactors.length > 0
+          ? '受扶倾向'
+          : '待结合旺衰';
+
+    return {
+      lineIndex: zeroIndex + 1,
+      sourcePalace: baseHexagram.palace,
+      sourceHexagram: palaceHexagram.name,
+      relation: hiddenFields.relation,
+      stem: hiddenFields.stem,
+      branch: hiddenFields.branch,
+      ganZhi: hiddenFields.ganZhi,
+      element: hiddenFields.element,
+      flyGanZhi: flyLine.ganZhi,
+      flyRelation: flyLine.relation,
+      flyElement: flyLine.element,
+      flyEffect,
+      ...hiddenCalendar,
+      flyVoid: flyLine.void,
+      flyMonthBreak: flyLine.monthBreak,
+      flyDayClash: flyLine.dayClash,
+      flyMonthCombine: flyLine.monthCombine,
+      flyDayCombine: flyLine.dayCombine,
+      supportingMovingLines,
+      clashingMovingLines,
+      activationFactors,
+      blockingFactors,
+      cautionFactors,
+      status,
+    } satisfies FuShen;
+  }).filter((item): item is FuShen => item !== null);
+}
+
 function voidBranches(dayGanZhi: string): [string, string] {
   const stemIndex = STEMS.indexOf(dayGanZhi[0]);
   const branchIndex = BRANCHES.indexOf(dayGanZhi[1]);
   const jiaStartBranch = (branchIndex - stemIndex + 12) % 12;
   const voidStart = (jiaStartBranch + 10) % 12;
   return [BRANCHES[voidStart], BRANCHES[(voidStart + 1) % 12]];
+}
+
+function commonShenSha(dayGanZhi: string): ShenSha[] {
+  const dayStem = dayGanZhi[0];
+  const dayBranch = dayGanZhi[1];
+  return [
+    { name: '驿马', branches: [TRAVEL_HORSE[dayBranch]] },
+    { name: '桃花', branches: [PEACH_BLOSSOM[dayBranch]] },
+    { name: '日禄', branches: [DAY_LU[dayStem]] },
+    { name: '贵人', branches: [...NOBLE_PEOPLE[dayStem]] },
+  ];
+}
+
+function calendarFields(castAt: Date) {
+  const lunar = Solar.fromDate(castAt).getLunar();
+  const eightChar = lunar.getEightChar();
+  const yearGanZhi = lunar.getYearInGanZhiExact();
+  const monthGanZhi = lunar.getMonthInGanZhiExact();
+  const dayGanZhi = lunar.getDayInGanZhiExact();
+  const timeGanZhi = lunar.getTimeInGanZhi();
+  const pillars: CalendarPillar[] = [
+    { label: '年柱', ganZhi: yearGanZhi, voidBranches: voidBranches(yearGanZhi), twelveStage: eightChar.getYearDiShi() as TwelveStage },
+    { label: '月柱', ganZhi: monthGanZhi, voidBranches: voidBranches(monthGanZhi), twelveStage: eightChar.getMonthDiShi() as TwelveStage },
+    { label: '日柱', ganZhi: dayGanZhi, voidBranches: voidBranches(dayGanZhi), twelveStage: eightChar.getDayDiShi() as TwelveStage },
+    { label: '时柱', ganZhi: timeGanZhi, voidBranches: voidBranches(timeGanZhi), twelveStage: eightChar.getTimeDiShi() as TwelveStage },
+  ];
+  return {
+    yearGanZhi,
+    monthGanZhi,
+    dayGanZhi,
+    timeGanZhi,
+    monthBranch: lunar.getMonthZhiExact(),
+    voidBranches: pillars[2].voidBranches,
+    pillars,
+    shenSha: commonShenSha(dayGanZhi),
+  };
 }
 
 export function buildPlate(values: readonly LineValue[], castAt: Date): DivinationPlate {
@@ -286,36 +536,33 @@ export function buildPlate(values: readonly LineValue[], castAt: Date): Divinati
   const baseHexagram = getHexagram(baseBits);
   const changedHexagram = getHexagram(changedBits);
   const lunar = Solar.fromDate(castAt).getLunar();
-  const dayGanZhi = lunar.getDayInGanZhiExact();
-  const monthGanZhi = lunar.getMonthInGanZhiExact();
-  const monthBranch = lunar.getMonthZhiExact();
-  const emptyBranches = voidBranches(dayGanZhi);
+  const calendar = calendarFields(castAt);
+  const { dayGanZhi, monthBranch, voidBranches: emptyBranches } = calendar;
   const beastStart = BEAST_START[lunar.getDayGanExact()] ?? 0;
   const lines: PlateLine[] = tosses.map((toss, zeroIndex) => {
     const index = zeroIndex + 1;
-    const role: LineRole = index === baseHexagram.shiLine ? '世' : index === baseHexagram.yingLine ? '应' : null;
     const nakJia = nakJiaFields(baseHexagram, changedHexagram, zeroIndex);
     return {
       ...toss,
       index,
       ...nakJia,
       ...lineCalendarFields(nakJia.branch, nakJia.changedBranch, monthBranch, dayGanZhi, emptyBranches),
-      role,
+      role: roleAt(baseHexagram, index),
+      changedRole: roleAt(changedHexagram, index),
       beast: BEASTS[(beastStart + zeroIndex) % 6],
     };
   });
+  const fuShen = buildFuShen(baseHexagram, lines, calendar);
 
   return {
     id: crypto.randomUUID(),
     castAt: castAt.toISOString(),
-    dayGanZhi,
-    monthGanZhi,
-    monthBranch,
-    voidBranches: emptyBranches,
+    ...calendar,
     baseHexagram,
     changedHexagram,
     movingLines: lines.filter((line) => line.moving).map((line) => line.index),
     lines,
+    fuShen,
   };
 }
 

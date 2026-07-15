@@ -1,5 +1,7 @@
 const fs = require('node:fs');
 const path = require('node:path');
+const alibabaConfig = require('../../config/alibaba.json');
+const deepseekConfig = require('../../config/deepseek.json');
 
 const DEFAULT_STATE = Object.freeze({ sessions: [], settings: {} });
 
@@ -66,26 +68,57 @@ class JsonStore {
   }
 
   getRawSettings() {
+    const {
+      alibabaBaseUrl = alibabaConfig.baseUrl,
+      alibabaModel = alibabaConfig.model,
+      embeddingModel = alibabaConfig.embeddingModel,
+      embeddingDimensions = alibabaConfig.embeddingDimensions,
+      rerankModel = alibabaConfig.rerankModel,
+      rerankUrl = alibabaConfig.rerankUrl,
+      deepseekBaseUrl = deepseekConfig.baseUrl,
+      deepseekModel = deepseekConfig.model,
+      encryptedAlibabaApiKey = '',
+      encryptedDeepSeekApiKey = '',
+    } = this.state.settings;
     return {
-      baseUrl: 'https://dashscope.aliyuncs.com/compatible-mode/v1',
-      model: 'qwen3.7-plus',
-      embeddingModel: 'text-embedding-v4',
-      rerankModel: 'qwen3-rerank',
-      rerankUrl: '',
-      ...structuredClone(this.state.settings),
+      alibabaBaseUrl,
+      alibabaModel,
+      embeddingModel,
+      embeddingDimensions,
+      rerankModel,
+      rerankUrl,
+      deepseekBaseUrl,
+      deepseekModel,
+      encryptedAlibabaApiKey,
+      encryptedDeepSeekApiKey,
     };
   }
 
   getPublicSettings() {
     const {
-      baseUrl = 'https://dashscope.aliyuncs.com/compatible-mode/v1',
-      model = 'qwen3.7-plus',
-      embeddingModel = 'text-embedding-v4',
-      rerankModel = 'qwen3-rerank',
-      rerankUrl = '',
-      encryptedApiKey = '',
+      alibabaBaseUrl = alibabaConfig.baseUrl,
+      alibabaModel = alibabaConfig.model,
+      embeddingModel = alibabaConfig.embeddingModel,
+      embeddingDimensions = alibabaConfig.embeddingDimensions,
+      rerankModel = alibabaConfig.rerankModel,
+      rerankUrl = alibabaConfig.rerankUrl,
+      deepseekBaseUrl = deepseekConfig.baseUrl,
+      deepseekModel = deepseekConfig.model,
+      encryptedAlibabaApiKey = '',
+      encryptedDeepSeekApiKey = '',
     } = this.state.settings;
-    return { baseUrl, model, embeddingModel, rerankModel, rerankUrl, hasApiKey: Boolean(encryptedApiKey) };
+    return {
+      alibabaBaseUrl,
+      alibabaModel,
+      embeddingModel,
+      embeddingDimensions,
+      rerankModel,
+      rerankUrl,
+      deepseekBaseUrl,
+      deepseekModel,
+      hasAlibabaApiKey: Boolean(encryptedAlibabaApiKey),
+      hasDeepSeekApiKey: Boolean(encryptedDeepSeekApiKey),
+    };
   }
 }
 

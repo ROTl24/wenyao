@@ -1,4 +1,11 @@
 declare module 'lunar-javascript' {
+  export class EightChar {
+    getYearDiShi(): string;
+    getMonthDiShi(): string;
+    getDayDiShi(): string;
+    getTimeDiShi(): string;
+  }
+
   export class Lunar {
     getDayInGanZhiExact(): string;
     getDayGanExact(): string;
@@ -6,6 +13,8 @@ declare module 'lunar-javascript' {
     getMonthInGanZhiExact(): string;
     getMonthZhiExact(): string;
     getYearInGanZhiExact(): string;
+    getTimeInGanZhi(): string;
+    getEightChar(): EightChar;
   }
 
   export class Solar {

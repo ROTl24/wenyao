@@ -1,4 +1,6 @@
 import corpus from '../../resources/corpus.json';
+import alibabaConfig from '../../config/alibaba.json';
+import deepseekConfig from '../../config/deepseek.json';
 import type { DesktopApi } from '../types/desktop';
 import type { DivinationSession } from './session';
 import { searchEvidence } from './retrieval';
@@ -27,9 +29,9 @@ const browserFallback: DesktopApi = {
     },
   },
   settings: {
-    async get() { return { baseUrl: 'https://dashscope.aliyuncs.com/compatible-mode/v1', model: 'qwen3.7-plus', embeddingModel: 'text-embedding-v4', rerankModel: 'qwen3-rerank', rerankUrl: '', hasApiKey: false }; },
-    async save(payload) { return { baseUrl: payload.baseUrl, model: payload.model, embeddingModel: payload.embeddingModel, rerankModel: payload.rerankModel, rerankUrl: payload.rerankUrl, hasApiKey: false }; },
-    async clearKey() { return { baseUrl: 'https://dashscope.aliyuncs.com/compatible-mode/v1', model: 'qwen3.7-plus', embeddingModel: 'text-embedding-v4', rerankModel: 'qwen3-rerank', rerankUrl: '', hasApiKey: false }; },
+    async get() { return { alibabaBaseUrl: alibabaConfig.baseUrl, alibabaModel: alibabaConfig.model, embeddingModel: alibabaConfig.embeddingModel, embeddingDimensions: alibabaConfig.embeddingDimensions, rerankModel: alibabaConfig.rerankModel, rerankUrl: alibabaConfig.rerankUrl, deepseekBaseUrl: deepseekConfig.baseUrl, deepseekModel: deepseekConfig.model, hasAlibabaApiKey: false, hasDeepSeekApiKey: false }; },
+    async save(payload) { return { alibabaBaseUrl: payload.alibabaBaseUrl, alibabaModel: payload.alibabaModel, embeddingModel: payload.embeddingModel, embeddingDimensions: payload.embeddingDimensions, rerankModel: payload.rerankModel, rerankUrl: payload.rerankUrl, deepseekBaseUrl: payload.deepseekBaseUrl, deepseekModel: payload.deepseekModel, hasAlibabaApiKey: false, hasDeepSeekApiKey: false }; },
+    async clearKey() { return { alibabaBaseUrl: alibabaConfig.baseUrl, alibabaModel: alibabaConfig.model, embeddingModel: alibabaConfig.embeddingModel, embeddingDimensions: alibabaConfig.embeddingDimensions, rerankModel: alibabaConfig.rerankModel, rerankUrl: alibabaConfig.rerankUrl, deepseekBaseUrl: deepseekConfig.baseUrl, deepseekModel: deepseekConfig.model, hasAlibabaApiKey: false, hasDeepSeekApiKey: false }; },
     async test() { return { ok: false, error: { code: 'DESKTOP_ONLY', message: '请在桌面应用中测试 AI 连接。', dataSafe: true, nextAction: '启动 Electron 桌面窗口。' } }; },
   },
   corpus: {

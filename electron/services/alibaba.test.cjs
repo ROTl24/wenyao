@@ -2,11 +2,10 @@ const assert = require('node:assert/strict');
 const test = require('node:test');
 const { createAlibabaClient } = require('./alibaba.cjs');
 
-test('Alibaba embedding uses the OpenAI-compatible endpoint and preserves response order', async () => {
+test('Alibaba embedding uses the official compatible endpoint and preserves response order', async () => {
   let request;
   const client = createAlibabaClient({
     apiKey: 'secret',
-    baseUrl: 'https://dashscope.aliyuncs.com/compatible-mode/v1',
     fetchImpl: async (url, options) => {
       request = { url, options };
       return { ok: true, json: async () => ({ data: [{ index: 1, embedding: [0, 1] }, { index: 0, embedding: [1, 0] }] }) };
@@ -18,14 +17,21 @@ test('Alibaba embedding uses the OpenAI-compatible endpoint and preserves respon
   assert.deepEqual(vectors, [[1, 0], [0, 1]]);
 });
 
-test('Alibaba reranker uses the dedicated compatible rerank endpoint', async () => {
+test('Alibaba reranker uses the configured official workspace endpoint', async () => {
   let body;
   const client = createAlibabaClient({
-    apiKey: 'secret', baseUrl: 'https://dashscope.aliyuncs.com/compatible-mode/v1', rerankUrl: 'https://workspace.example/compatible-api/v1/reranks',
+    apiKey: 'secret',
+    baseUrl: 'https://dashscope.aliyuncs.com/compatible-mode/v1',
+    rerankUrl: 'https://workspace.example/compatible-api/v1/reranks',
     fetchImpl: async (_url, options) => { body = JSON.parse(options.body); return { ok: true, json: async () => ({ results: [{ index: 1, relevance_score: 0.9 }] }) }; },
   });
   const ranked = await client.rerank('事业', ['甲', '乙'], { model: 'qwen3-rerank', topN: 1 });
   assert.equal(body.query, '事业');
   assert.equal(body.instruct.includes('divination'), true);
   assert.deepEqual(ranked, [{ index: 1, score: 0.9 }]);
+});
+
+test('Alibaba reranker reports missing workspace endpoint explicitly', async () => {
+  const client = createAlibabaClient({ apiKey: 'secret' });
+  await assert.rejects(() => client.rerank('事业', ['甲']), /业务空间 API 地址/);
 });

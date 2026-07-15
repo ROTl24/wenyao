@@ -20,8 +20,8 @@ export interface PreparedToss extends Toss {
 export interface ChatMessage {
   id: string;
   role: 'user' | 'assistant';
+  kind?: 'markdown-answer' | 'system-notice';
   content: string;
-  evidenceIds?: string[];
   createdAt: string;
 }
 

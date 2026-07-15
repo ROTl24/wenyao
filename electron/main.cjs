@@ -1,15 +1,23 @@
-const { app, BrowserWindow, ipcMain, safeStorage } = require('electron');
+const { app, BrowserWindow, ipcMain, safeStorage, shell } = require('electron');
 const fs = require('node:fs');
 const path = require('node:path');
 const crypto = require('node:crypto');
+const { pathToFileURL } = require('node:url');
 const { JsonStore } = require('./services/store.cjs');
 const { analyzeCloud, createLocalReport, followUpCloud } = require('./services/ai.cjs');
 const { createAlibabaClient } = require('./services/alibaba.cjs');
+const { createDeepSeekClient } = require('./services/deepseek.cjs');
 const { LocalVectorIndex } = require('./services/vector-index.cjs');
 const { hybridSearch } = require('./services/retrieval.cjs');
+const alibabaConfig = require('../config/alibaba.json');
+const deepseekConfig = require('../config/deepseek.json');
 
-const oneTimeSetupKey = process.argv.includes('--configure-api-key-env') ? String(process.env.WENYAO_SETUP_KEY || '') : '';
-delete process.env.WENYAO_SETUP_KEY;
+const oneTimeSetupKeys = process.argv.includes('--configure-api-keys-env') ? {
+  alibaba: String(process.env.WENYAO_ALIBABA_KEY || ''),
+  deepseek: String(process.env.WENYAO_DEEPSEEK_KEY || ''),
+} : null;
+delete process.env.WENYAO_ALIBABA_KEY;
+delete process.env.WENYAO_DEEPSEEK_KEY;
 
 let mainWindow;
 let store;
@@ -62,21 +70,23 @@ function loadVectorIndex(model) {
 
 async function buildVectorIndex({ apiKey, onProgress = () => {} }) {
   const settings = store.getRawSettings();
-  const client = createAlibabaClient({ apiKey, baseUrl: validateBaseUrl(settings.baseUrl) });
+  const client = createAlibabaClient({ apiKey, baseUrl: validateBaseUrl(settings.alibabaBaseUrl) });
   const vectors = [];
   for (let offset = 0; offset < corpus.length; offset += 10) {
     const batch = corpus.slice(offset, offset + 10).map((entry) => `${entry.title}\n${entry.text}`);
-    vectors.push(...await client.embed(batch, { model: settings.embeddingModel, dimensions: 1024, signal: AbortSignal.timeout(60000) }));
+    vectors.push(...await client.embed(batch, { model: settings.embeddingModel, dimensions: settings.embeddingDimensions, signal: AbortSignal.timeout(60000) }));
     onProgress(Math.min(corpus.length, offset + batch.length), corpus.length);
   }
   const base = app.isPackaged ? path.join(app.getPath('userData'), 'corpus-vectors') : path.join(app.getAppPath(), 'resources', 'corpus-vectors');
   const index = new LocalVectorIndex(base);
   index.write({ model: settings.embeddingModel, corpusHash, ids: corpus.map((entry) => entry.id), vectors });
   vectorIndex = index;
-  return { count: corpus.length, model: settings.embeddingModel, dimensions: 1024 };
+  return { count: corpus.length, model: settings.embeddingModel, dimensions: vectors[0]?.length || settings.embeddingDimensions };
 }
 
 function createWindow() {
+  const packagedEntryPath = path.join(app.getAppPath(), 'dist', 'index.html');
+  const trustedEntryUrl = app.isPackaged ? pathToFileURL(packagedEntryPath).href : 'http://127.0.0.1:5173/';
   mainWindow = new BrowserWindow({
     width: 1480,
     height: 920,
@@ -96,9 +106,24 @@ function createWindow() {
     },
   });
   mainWindow.setMenuBarVisibility(false);
-  mainWindow.webContents.setWindowOpenHandler(() => ({ action: 'deny' }));
+  mainWindow.webContents.setWindowOpenHandler(({ url }) => {
+    if (/^https?:\/\//i.test(url)) {
+      void shell.openExternal(url).catch((error) => console.error('无法打开外部链接', error));
+    }
+    return { action: 'deny' };
+  });
+  mainWindow.webContents.on('will-navigate', (event, url) => {
+    try {
+      const target = new URL(url);
+      const trusted = new URL(trustedEntryUrl);
+      if (target.origin === trusted.origin && target.pathname === trusted.pathname) return;
+    } catch {
+      // Invalid or non-standard URLs must never replace the application document.
+    }
+    event.preventDefault();
+  });
   mainWindow.once('ready-to-show', () => mainWindow.show());
-  if (app.isPackaged) mainWindow.loadFile(path.join(app.getAppPath(), 'dist', 'index.html'));
+  if (app.isPackaged) mainWindow.loadFile(packagedEntryPath);
   else mainWindow.loadURL('http://127.0.0.1:5173');
 }
 
@@ -112,8 +137,9 @@ function structuredError(error, fallbackCode = 'UNEXPECTED_ERROR') {
   };
 }
 
-function getApiKey() {
-  const encrypted = store.getRawSettings().encryptedApiKey;
+function getApiKey(provider) {
+  const settings = store.getRawSettings();
+  const encrypted = provider === 'alibaba' ? settings.encryptedAlibabaApiKey : settings.encryptedDeepSeekApiKey;
   if (!encrypted || !safeStorage.isEncryptionAvailable()) return '';
   try { return safeStorage.decryptString(Buffer.from(encrypted, 'base64')); }
   catch { return ''; }
@@ -126,42 +152,37 @@ function validateBaseUrl(value) {
   return url.toString().replace(/\/$/, '');
 }
 
-async function verifyModelStack(apiKey) {
+async function verifyModelStack() {
   const settings = store.getRawSettings();
-  const baseUrl = validateBaseUrl(settings.baseUrl);
-  const client = createAlibabaClient({ apiKey, baseUrl, rerankUrl: settings.rerankUrl });
-  const [vector] = await client.embed(['六爻模型连接测试'], { model: settings.embeddingModel, dimensions: 1024, signal: AbortSignal.timeout(30000) });
-  const response = await fetch(`${baseUrl}/chat/completions`, {
-    method: 'POST',
-    headers: { 'content-type': 'application/json', authorization: `Bearer ${apiKey}` },
-    body: JSON.stringify({ model: settings.model, enable_thinking: false, max_tokens: 16, messages: [{ role: 'user', content: '只回复：连接成功' }] }),
-    signal: AbortSignal.timeout(60000),
-  });
-  if (!response.ok) {
-    const error = new Error(response.status === 401 || response.status === 403 ? '阿里云百炼密钥无效或没有解卦模型权限。' : `解卦模型连接失败（${response.status}）`);
-    error.status = response.status;
-    throw error;
-  }
-  const body = await response.json();
-  if (!body?.choices?.[0]?.message?.content) throw new Error('解卦模型没有返回有效内容。');
+  const alibabaApiKey = getApiKey('alibaba');
+  const deepseekApiKey = getApiKey('deepseek');
+  if (!alibabaApiKey) throw new Error('尚未配置阿里云 API 密钥。');
+  if (!deepseekApiKey) throw new Error('尚未配置 DeepSeek API 密钥。');
+
+  const alibaba = createAlibabaClient({ apiKey: alibabaApiKey, baseUrl: validateBaseUrl(settings.alibabaBaseUrl), rerankUrl: settings.rerankUrl });
+  const deepseek = createDeepSeekClient({ apiKey: deepseekApiKey, baseUrl: validateBaseUrl(settings.deepseekBaseUrl) });
+  const [vector] = await alibaba.embed(['六爻模型连接测试'], { model: settings.embeddingModel, dimensions: settings.embeddingDimensions, signal: AbortSignal.timeout(30000) });
+  await alibaba.chat({ model: settings.alibabaModel, messages: [{ role: 'user', content: '只回复：连接成功' }], signal: AbortSignal.timeout(60000) });
+  const deepseekResponse = await deepseek.chat({ model: settings.deepseekModel, messages: [{ role: 'system', content: '只输出合法 JSON。' }, { role: 'user', content: '输出 {"ok":true}' }], thinkingType: 'disabled', signal: AbortSignal.timeout(60000) });
+  JSON.parse(deepseekResponse.content);
   let rerankReady = false;
   if (settings.rerankUrl) {
-    const ranked = await client.rerank('事业', ['官鬼为事业用神', '妻财为求财用神'], { model: settings.rerankModel, topN: 1, signal: AbortSignal.timeout(30000) });
+    const ranked = await alibaba.rerank('事业', ['官鬼为事业用神', '妻财为求财用神'], { model: settings.rerankModel, topN: 1, signal: AbortSignal.timeout(30000) });
     rerankReady = ranked.length > 0;
   }
-  return { chatReady: true, embeddingReady: vector.length === 1024, rerankReady, rerankConfigured: Boolean(settings.rerankUrl) };
+  return { alibabaChatReady: true, deepseekChatReady: true, embeddingReady: vector.length === settings.embeddingDimensions, rerankReady, rerankConfigured: Boolean(settings.rerankUrl) };
 }
 
 async function searchCorpus(payload) {
   const settings = store.getRawSettings();
-  const apiKey = getApiKey();
-  const client = apiKey ? createAlibabaClient({ apiKey, baseUrl: validateBaseUrl(settings.baseUrl), rerankUrl: settings.rerankUrl }) : null;
+  const apiKey = getApiKey('alibaba');
+  const client = apiKey ? createAlibabaClient({ apiKey, baseUrl: validateBaseUrl(settings.alibabaBaseUrl), rerankUrl: settings.rerankUrl }) : null;
   return hybridSearch({
     corpus,
     query: String(payload.query || ''),
     domainTerms: Array.isArray(payload.domainTerms) ? payload.domainTerms : [],
     limit: Math.min(12, Math.max(1, Number(payload.limit) || 8)),
-    vectorSearch: client && vectorIndex?.vectors ? async (query) => vectorIndex.search((await client.embed([query], { model: settings.embeddingModel, dimensions: 1024, signal: AbortSignal.timeout(30000) }))[0], 40) : undefined,
+    vectorSearch: client && vectorIndex?.vectors ? async (query) => vectorIndex.search((await client.embed([query], { model: settings.embeddingModel, dimensions: settings.embeddingDimensions, signal: AbortSignal.timeout(30000) }))[0], 40) : undefined,
     rerank: client && settings.rerankUrl ? async (query, documents) => client.rerank(query, documents, { model: settings.rerankModel, topN: 12, signal: AbortSignal.timeout(60000) }) : undefined,
   });
 }
@@ -174,31 +195,34 @@ function registerIpc() {
 
   ipcMain.handle('settings:get', () => store.getPublicSettings());
   ipcMain.handle('settings:save', (_event, payload) => {
-    const baseUrl = validateBaseUrl(payload.baseUrl || 'https://dashscope.aliyuncs.com/compatible-mode/v1');
-    const rerankUrl = payload.rerankUrl ? validateBaseUrl(payload.rerankUrl) : '';
     const next = {
-      baseUrl,
-      model: String(payload.model || 'qwen3.7-plus').trim(),
-      embeddingModel: String(payload.embeddingModel || 'text-embedding-v4').trim(),
-      rerankModel: String(payload.rerankModel || 'qwen3-rerank').trim(),
-      rerankUrl,
+      alibabaBaseUrl: validateBaseUrl(payload.alibabaBaseUrl || alibabaConfig.baseUrl),
+      alibabaModel: String(payload.alibabaModel || alibabaConfig.model).trim(),
+      embeddingModel: String(payload.embeddingModel || alibabaConfig.embeddingModel).trim(),
+      embeddingDimensions: Number(payload.embeddingDimensions) || alibabaConfig.embeddingDimensions,
+      rerankModel: String(payload.rerankModel || alibabaConfig.rerankModel).trim(),
+      rerankUrl: payload.rerankUrl ? validateBaseUrl(payload.rerankUrl) : '',
+      deepseekBaseUrl: validateBaseUrl(payload.deepseekBaseUrl || deepseekConfig.baseUrl),
+      deepseekModel: String(payload.deepseekModel || deepseekConfig.model).trim(),
     };
-    if (typeof payload.apiKey === 'string' && payload.apiKey.trim()) {
+    if (typeof payload.alibabaApiKey === 'string' && payload.alibabaApiKey.trim()) {
       if (!safeStorage.isEncryptionAvailable()) throw structuredError(new Error('当前 Windows 环境无法启用 DPAPI 密钥保护。'), 'SECRET_STORAGE_UNAVAILABLE');
-      next.encryptedApiKey = safeStorage.encryptString(payload.apiKey.trim()).toString('base64');
+      next.encryptedAlibabaApiKey = safeStorage.encryptString(payload.alibabaApiKey.trim()).toString('base64');
+    }
+    if (typeof payload.deepseekApiKey === 'string' && payload.deepseekApiKey.trim()) {
+      if (!safeStorage.isEncryptionAvailable()) throw structuredError(new Error('当前 Windows 环境无法启用 DPAPI 密钥保护。'), 'SECRET_STORAGE_UNAVAILABLE');
+      next.encryptedDeepSeekApiKey = safeStorage.encryptString(payload.deepseekApiKey.trim()).toString('base64');
     }
     const saved = store.saveSettings(next);
     vectorIndex = loadVectorIndex(next.embeddingModel);
     return saved;
   });
-  ipcMain.handle('settings:clear-key', () => store.saveSettings({ encryptedApiKey: '' }));
+  ipcMain.handle('settings:clear-key', () => store.saveSettings({ encryptedAlibabaApiKey: '', encryptedDeepSeekApiKey: '' }));
   ipcMain.handle('settings:test', async () => {
     try {
-      const settings = store.getRawSettings();
-      const apiKey = getApiKey();
-      if (!apiKey || !settings.model) throw new Error('请先填写模型名称并保存 API 密钥。');
-      const result = await verifyModelStack(apiKey);
-      return { ok: true, message: result.rerankConfigured ? '解卦、向量与重排模型均连接成功。' : '解卦与向量模型连接成功；重排需补充百炼业务空间 API 地址。' };
+      const result = await verifyModelStack();
+      const rerankMessage = result.rerankConfigured ? '，重排也已连接' : '；未配置阿里云业务空间重排地址，当前使用融合排序';
+      return { ok: true, message: `阿里云千问向量与聊天、DeepSeek 解读均连接成功${rerankMessage}。` };
     } catch (error) { return { ok: false, error: structuredError(error, 'AI_CONNECTION_FAILED') }; }
   });
 
@@ -219,8 +243,8 @@ function registerIpc() {
     if (vectorBuildPromise) return { ok: false, error: structuredError(new Error('向量索引正在构建，请勿重复提交。'), 'VECTOR_INDEX_IN_PROGRESS') };
     let buildTask = null;
     try {
-      const apiKey = getApiKey();
-      if (!apiKey) throw new Error('请先保存阿里云百炼 API 密钥。');
+      const apiKey = getApiKey('alibaba');
+      if (!apiKey) throw new Error('请先保存阿里云 API 密钥。');
       buildTask = buildVectorIndex({ apiKey, onProgress: (done, total) => event.sender.send('corpus:index-progress', { done, total }) });
       vectorBuildPromise = buildTask;
       const result = await buildTask;
@@ -236,9 +260,9 @@ function registerIpc() {
     const evidence = (payload.evidence || []).filter((item) => allowed.has(item.id));
     try {
       const settings = store.getRawSettings();
-      const apiKey = getApiKey();
-      if (!apiKey || !settings.model) return { ok: true, report: createLocalReport({ ...payload, evidence }) };
-      const report = await analyzeCloud({ ...payload, evidence, baseUrl: validateBaseUrl(settings.baseUrl), model: settings.model, apiKey, signal: AbortSignal.timeout(180000) });
+      const apiKey = getApiKey('deepseek');
+      if (!apiKey || !settings.deepseekModel) return { ok: true, report: createLocalReport({ ...payload, evidence }) };
+      const report = await analyzeCloud({ ...payload, evidence, baseUrl: validateBaseUrl(settings.deepseekBaseUrl), model: settings.deepseekModel, apiKey, provider: 'deepseek', signal: AbortSignal.timeout(180000) });
       return { ok: true, report };
     } catch (error) { return { ok: false, error: structuredError(error, 'AI_ANALYSIS_FAILED') }; }
   });
@@ -248,11 +272,11 @@ function registerIpc() {
     const evidence = (payload.evidence || []).filter((item) => allowed.has(item.id));
     try {
       const settings = store.getRawSettings();
-      const apiKey = getApiKey();
-      if (!apiKey || !settings.model) {
-        return { ok: true, answer: { content: '当前未配置云端 AI。排盘和历史已安全保存；配置模型后可继续围绕同一卦象追问。', evidenceIds: evidence.slice(0, 2).map((item) => item.id) } };
+      const apiKey = getApiKey('deepseek');
+      if (!apiKey || !settings.deepseekModel) {
+        return { ok: true, answer: { content: '当前未配置云端 AI。排盘和历史已安全保存；配置模型后可继续围绕同一卦象追问。' } };
       }
-      const answer = await followUpCloud({ ...payload, evidence, baseUrl: validateBaseUrl(settings.baseUrl), model: settings.model, apiKey, signal: AbortSignal.timeout(180000) });
+      const answer = await followUpCloud({ ...payload, evidence, baseUrl: validateBaseUrl(settings.deepseekBaseUrl), model: settings.deepseekModel, apiKey, provider: 'deepseek', signal: AbortSignal.timeout(180000) });
       return { ok: true, answer };
     } catch (error) { return { ok: false, error: structuredError(error, 'AI_FOLLOW_UP_FAILED') }; }
   });
@@ -263,29 +287,46 @@ app.whenReady().then(() => {
   corpus = loadCorpus();
   corpusHash = hashCorpus(corpus);
   vectorIndex = loadVectorIndex(store.getRawSettings().embeddingModel);
-  if (process.argv.includes('--configure-api-key-env')) {
+  if (process.argv.includes('--configure-api-keys-env')) {
     try {
-      if (!oneTimeSetupKey) throw new Error('未收到 API 密钥');
+      if (!oneTimeSetupKeys || (!oneTimeSetupKeys.alibaba && !oneTimeSetupKeys.deepseek)) throw new Error('未收到 API 密钥');
       if (!safeStorage.isEncryptionAvailable()) throw new Error('当前 Windows 环境无法启用 DPAPI 密钥保护');
-      store.saveSettings({ encryptedApiKey: safeStorage.encryptString(oneTimeSetupKey).toString('base64') });
-      process.stdout.write('API 密钥已由 Windows DPAPI 加密保存。\n');
+      const settings = {
+        alibabaBaseUrl: alibabaConfig.baseUrl,
+        alibabaModel: alibabaConfig.model,
+        embeddingModel: alibabaConfig.embeddingModel,
+        embeddingDimensions: alibabaConfig.embeddingDimensions,
+        rerankModel: alibabaConfig.rerankModel,
+        rerankUrl: alibabaConfig.rerankUrl,
+        deepseekBaseUrl: deepseekConfig.baseUrl,
+        deepseekModel: deepseekConfig.model,
+      };
+      const configuredProviders = [];
+      if (oneTimeSetupKeys.alibaba) {
+        settings.encryptedAlibabaApiKey = safeStorage.encryptString(oneTimeSetupKeys.alibaba).toString('base64');
+        configuredProviders.push('阿里云');
+      }
+      if (oneTimeSetupKeys.deepseek) {
+        settings.encryptedDeepSeekApiKey = safeStorage.encryptString(oneTimeSetupKeys.deepseek).toString('base64');
+        configuredProviders.push('DeepSeek');
+      }
+      store.saveSettings(settings);
+      process.stdout.write(`${configuredProviders.join('、')} API 密钥已由 Windows DPAPI 加密保存。\n`);
       app.quit();
     } catch (error) { process.stderr.write(`${error.message}\n`); app.exit(1); }
     return;
   }
   if (process.argv.includes('--build-vector-index')) {
-    const apiKey = getApiKey();
-    if (!apiKey) { process.stderr.write('尚未配置 API 密钥。\n'); app.exit(1); return; }
+    const apiKey = getApiKey('alibaba');
+    if (!apiKey) { process.stderr.write('尚未配置阿里云 API 密钥。\n'); app.exit(1); return; }
     void buildVectorIndex({ apiKey, onProgress: (done, total) => process.stdout.write(`向量索引 ${done}/${total}\n`) })
       .then(() => { process.stdout.write('向量索引构建完成。\n'); app.quit(); })
       .catch((error) => { process.stderr.write(`${error.message}\n`); app.exit(1); });
     return;
   }
   if (process.argv.includes('--verify-model-stack')) {
-    const apiKey = getApiKey();
-    if (!apiKey) { process.stderr.write('尚未配置 API 密钥。\n'); app.exit(1); return; }
-    void verifyModelStack(apiKey)
-      .then((result) => { process.stdout.write(`${JSON.stringify(result)}\n`); app.quit(); })
+    void verifyModelStack()
+      .then((result) => { process.stdout.write(`${JSON.stringify(result)}\n`); if (result.alibabaChatReady && result.deepseekChatReady && result.embeddingReady) app.quit(); else app.exit(1); })
       .catch((error) => { process.stderr.write(`${error.message}\n`); app.exit(1); });
     return;
   }
@@ -299,7 +340,7 @@ app.whenReady().then(() => {
     return;
   }
   if (process.argv.includes('--verify-analysis')) {
-    const apiKey = getApiKey();
+    const apiKey = getApiKey('deepseek');
     const settings = store.getRawSettings();
     const plate = {
       baseHexagram: { name: '泽雷随', shortName: '随', palace: '震', palaceElement: '木', shiLine: 3, yingLine: 6 },
@@ -316,8 +357,42 @@ app.whenReady().then(() => {
       fuShen: [{ lineIndex: 4, relation: '子孙', ganZhi: '庚午', branch: '午', element: '火', flyRelation: '父母', flyGanZhi: '丁亥', flyElement: '水', flyEffect: '飞克伏', status: '受制倾向', void: true, monthBreak: false, dayClash: true }],
     };
     void searchCorpus({ query: '学业会好吗', domainTerms: ['学业', '父母', '官鬼', '用神两现'], limit: 8 })
-      .then(async ({ evidence, diagnostics }) => analyzeCloud({ baseUrl: validateBaseUrl(settings.baseUrl), model: settings.model, apiKey, question: '学业会好吗？', category: 'study', plate, evidence, retrievalDiagnostics: diagnostics, signal: AbortSignal.timeout(180000) }))
-      .then((report) => { process.stdout.write(`${JSON.stringify({ mode: report.mode, claims: report.claims.length, pipeline: report.pipeline, focus: report.focus, relations: report.relations })}\n`); app.quit(); })
+      .then(async ({ evidence, diagnostics }) => {
+        const report = await analyzeCloud({ baseUrl: validateBaseUrl(settings.deepseekBaseUrl), model: settings.deepseekModel, apiKey, provider: 'deepseek', question: '学业会好吗？', category: 'study', plate, evidence, retrievalDiagnostics: diagnostics, signal: AbortSignal.timeout(180000) });
+        const answer = await followUpCloud({
+          baseUrl: validateBaseUrl(settings.deepseekBaseUrl),
+          model: settings.deepseekModel,
+          apiKey,
+          provider: 'deepseek',
+          question: '应期能否判断？',
+          session: { question: '学业会好吗？', category: 'study', plate, analysis: report, messages: [] },
+          evidence,
+          signal: AbortSignal.timeout(180000),
+        });
+        return { report, answer };
+      })
+      .then(({ report, answer }) => {
+        const basisCount = (report.markdown.match(/\*\*依据：\*\*/g) || []).length;
+        const followUpBasisCount = (answer.content.match(/\*\*依据：\*\*/g) || []).length;
+        const result = {
+          mode: report.mode,
+          markdownLength: report.markdown.length,
+          hasMarkdownHeading: /^#{1,6}\s+/m.test(report.markdown),
+          basisCount,
+          hasJsonEnvelope: /^\s*\{/.test(report.markdown),
+          followUpMarkdownLength: answer.content.length,
+          followUpBasisCount,
+          followUpHasJsonEnvelope: /^\s*\{/.test(answer.content),
+          pipeline: report.pipeline,
+        };
+        process.stdout.write(`${JSON.stringify(result)}\n`);
+        if (result.markdownLength > 0
+          && basisCount > 0
+          && !result.hasJsonEnvelope
+          && result.followUpMarkdownLength > 0
+          && followUpBasisCount > 0
+          && !result.followUpHasJsonEnvelope) app.quit(); else app.exit(1);
+      })
       .catch((error) => { process.stderr.write(`${error.message}\n`); app.exit(1); });
     return;
   }

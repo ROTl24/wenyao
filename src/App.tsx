@@ -8,6 +8,7 @@ import { SettingsPanel } from './components/SettingsPanel';
 import { desktop } from './lib/desktop';
 import { randomToss, upgradePlate } from './lib/divination';
 import { createBrowserLocalReport } from './lib/localAnalysis';
+import { isValidQuestion } from './lib/question';
 import type { EvidenceEntry, RetrievalDiagnostics } from './lib/retrieval';
 import {
   confirmCurrentToss,
@@ -20,6 +21,7 @@ import {
 } from './lib/session';
 
 type Screen = 'home' | 'casting' | 'result';
+type AnalysisSaveStatus = 'idle' | 'saving' | 'saved' | 'error';
 
 const categoryTerms: Record<SessionCategory, string[]> = {
   career: ['事业', '功名', '官禄', '仕宦', '求名', '官鬼', '世爻', '父母'],
@@ -49,6 +51,8 @@ export function App() {
   const [settingsOpen, setSettingsOpen] = useState(false);
   const [analyzing, setAnalyzing] = useState(false);
   const [analysisError, setAnalysisError] = useState('');
+  const [analysisSaveStatus, setAnalysisSaveStatus] = useState<AnalysisSaveStatus>('idle');
+  const [analysisSaveError, setAnalysisSaveError] = useState('');
   const [chatting, setChatting] = useState(false);
 
   useEffect(() => {
@@ -57,13 +61,30 @@ export function App() {
     });
   }, []);
 
+  const commitSession = async (next: DivinationSession) => {
+    const saved = await desktop.sessions.save(next);
+    setSession(saved);
+    setHistory((current) => [saved, ...current.filter((item) => item.id !== saved.id)]);
+    return saved;
+  };
+
   const persist = async (next: DivinationSession) => {
     setSession(next);
+    try { await commitSession(next); }
+    catch (error) { console.error('Failed to persist session', error); }
+  };
+
+  const persistAnalysis = async (next: DivinationSession) => {
+    setSession(next);
+    setAnalysisSaveStatus('saving');
+    setAnalysisSaveError('');
     try {
-      const saved = await desktop.sessions.save(next);
-      setHistory((current) => [saved, ...current.filter((item) => item.id !== saved.id)]);
+      await commitSession(next);
+      setAnalysisSaveStatus('saved');
     } catch (error) {
-      console.error('Failed to persist session', error);
+      console.error('Failed to persist analysis', error);
+      setAnalysisSaveStatus('error');
+      setAnalysisSaveError(error instanceof Error ? error.message : '写入历史记录失败。');
     }
   };
 
@@ -83,15 +104,17 @@ export function App() {
     if (!target.plate) return;
     setAnalyzing(true);
     setAnalysisError('');
+    setAnalysisSaveStatus('idle');
+    setAnalysisSaveError('');
     try {
       const found = await evidenceFor(target);
       setEvidence(found.evidence);
       setRetrievalDiagnostics(found.diagnostics);
       const result = await desktop.ai.analyze({ question: target.question, category: target.category, plate: target.plate, evidence: found.evidence, retrievalDiagnostics: found.diagnostics || undefined });
       if (result.ok && result.report) {
-        await persist(withAnalysis(target, result.report));
+        await persistAnalysis(withAnalysis(target, result.report));
       } else if (desktop.platform === 'browser') {
-        await persist(withAnalysis(target, createBrowserLocalReport(target, found.evidence)));
+        await persistAnalysis(withAnalysis(target, createBrowserLocalReport(target, found.evidence)));
       } else {
         setAnalysisError(`${result.error?.message || 'AI 分析失败'} ${result.error?.nextAction || ''}`.trim());
       }
@@ -101,7 +124,9 @@ export function App() {
   };
 
   const start = () => {
-    if (!category || question.trim().length < 10) return;
+    if (!category || !isValidQuestion(question)) return;
+    setAnalysisSaveStatus('idle');
+    setAnalysisSaveError('');
     const next = prepareNext(createSession(question, category));
     void persist(next);
     setScreen('casting');
@@ -125,12 +150,13 @@ export function App() {
     setQuestion(next.question);
     setCategory(next.category);
     setHistoryOpen(false);
+    setAnalysisSaveStatus(next.analysis ? 'saved' : 'idle');
+    setAnalysisSaveError('');
     if (next.status === 'complete') {
       const found = await evidenceFor(next);
       setEvidence(found.evidence);
       setRetrievalDiagnostics(found.diagnostics);
       setScreen('result');
-      if (!next.analysis) void runAnalysis(next);
     } else {
       setScreen('casting');
       void persist(next);
@@ -151,11 +177,15 @@ export function App() {
     const result = await desktop.ai.followUp({ question: followQuestion, session: next, evidence });
     const answer = result.ok && result.answer ? result.answer : {
       content: desktop.platform === 'browser' ? '浏览器预览不会发送 AI 请求；桌面应用会沿用本次排盘和古籍证据继续回答。' : `${result.error?.message || '追问失败'} ${result.error?.nextAction || ''}`,
-      evidenceIds: [],
     };
-    next = withMessage(next, { id: crypto.randomUUID(), role: 'assistant', content: answer.content, evidenceIds: answer.evidenceIds, createdAt: new Date().toISOString() });
+    next = withMessage(next, { id: crypto.randomUUID(), role: 'assistant', kind: result.ok && result.answer ? 'markdown-answer' : 'system-notice', content: answer.content, createdAt: new Date().toISOString() });
     await persist(next);
     setChatting(false);
+  };
+
+  const retryAnalysisSave = async () => {
+    if (!session?.analysis) return;
+    await persistAnalysis(session);
   };
 
   const appTitle = useMemo(() => screen === 'home' ? '问爻' : screen === 'casting' ? '六爻起卦' : '排盘与解读', [screen]);
@@ -170,7 +200,7 @@ export function App() {
       </header>
       {screen === 'home' && <HomeScreen question={question} category={category} onQuestionChange={setQuestion} onCategoryChange={setCategory} onStart={start} />}
       {screen === 'casting' && session?.currentToss && <RitualScreen session={session} onConfirm={confirm} />}
-      {screen === 'result' && session?.plate && <ResultScreen session={session} evidence={evidence} retrievalDiagnostics={retrievalDiagnostics} analyzing={analyzing} analysisError={analysisError} chatting={chatting} onAnalyze={() => void runAnalysis(session)} onFollowUp={followUp} onBack={() => { setSession(null); setQuestion(''); setCategory(null); setScreen('home'); }} />}
+      {screen === 'result' && session?.plate && <ResultScreen session={session} evidence={evidence} retrievalDiagnostics={retrievalDiagnostics} analyzing={analyzing} analysisError={analysisError} analysisSaveStatus={analysisSaveStatus} analysisSaveError={analysisSaveError} chatting={chatting} onAnalyze={() => void runAnalysis(session)} onRetryAnalysisSave={() => void retryAnalysisSave()} onFollowUp={followUp} onBack={() => { setSession(null); setQuestion(''); setCategory(null); setAnalysisSaveStatus('idle'); setAnalysisSaveError(''); setScreen('home'); }} />}
       {historyOpen && <HistoryPanel sessions={history} onClose={() => setHistoryOpen(false)} onOpen={(saved) => void openSession(saved)} onDelete={(id) => void deleteSession(id)} />}
       {settingsOpen && <SettingsPanel onClose={() => setSettingsOpen(false)} />}
     </div>
