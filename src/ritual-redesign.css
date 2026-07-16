@@ -1,0 +1,801 @@
+/* 合并后的实体铜钱仪式层：覆盖旧版手影摇卦布局，不影响结果页与设置页样式。 */
+.category-row {
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+  gap: 0 18px;
+  border-top: 1px solid rgba(43, 44, 39, 0.22);
+}
+
+.category-button {
+  position: relative;
+  min-width: 0;
+  min-height: 58px;
+  padding: 0 12px;
+  border: 0;
+  border-bottom: 1px solid rgba(43, 44, 39, 0.22);
+  background: transparent;
+  display: grid;
+  grid-template-columns: 30px minmax(0, 1fr);
+  align-items: center;
+  gap: 10px;
+  text-align: left;
+  transition: color 0.2s ease, background-color 0.2s ease, transform 0.2s cubic-bezier(0.16, 1, 0.3, 1);
+}
+
+.category-button::before {
+  content: "";
+  position: absolute;
+  top: 11px;
+  bottom: 11px;
+  left: 0;
+  width: 2px;
+  background: var(--cinnabar);
+  opacity: 0;
+  transform: scaleY(0.35);
+  transition: opacity 0.2s ease, transform 0.22s cubic-bezier(0.16, 1, 0.3, 1);
+}
+
+.category-button:hover {
+  background: rgba(246, 242, 232, 0.56);
+  transform: translateX(2px);
+}
+
+.category-button:active {
+  transform: scale(0.985);
+}
+
+.category-button--selected {
+  color: var(--cinnabar);
+  border-color: rgba(43, 44, 39, 0.22);
+  background: rgba(247, 239, 226, 0.62);
+  box-shadow: none;
+}
+
+.category-button--selected::before {
+  opacity: 1;
+  transform: scaleY(1);
+}
+
+.category-button__mark {
+  width: 25px;
+  height: 25px;
+  border: 1px solid rgba(140, 113, 70, 0.46);
+  color: #745f3d;
+  display: grid;
+  place-items: center;
+  font: 12px/1 var(--serif);
+  transform: rotate(-2deg);
+  transition: border-color 0.2s ease, color 0.2s ease, opacity 0.2s ease;
+  opacity: 0.7;
+}
+
+.category-button__label {
+  font: 15px/1.35 var(--serif);
+  letter-spacing: 0.08em;
+}
+
+.category-button--selected .category-button__mark {
+  border-color: currentColor;
+  color: currentColor;
+  opacity: 1;
+}
+
+.ritual-screen {
+  isolation: isolate;
+  grid-template-columns: minmax(170px, 0.62fr) minmax(430px, 1.75fr) minmax(150px, 0.52fr);
+  grid-template-rows: minmax(0, 1fr) auto;
+  gap: 18px clamp(18px, 2.6vw, 42px);
+  padding: clamp(28px, 4vh, 48px) clamp(24px, 4vw, 62px) 28px;
+  color: var(--ink);
+  text-align: left;
+}
+
+.ritual-screen::before {
+  content: "";
+  position: absolute;
+  z-index: -2;
+  width: 78vw;
+  height: 118vh;
+  left: 35%;
+  top: -22vh;
+  border-radius: 49% 51% 44% 56%;
+  background: radial-gradient(ellipse at 50% 48%, rgba(246, 241, 229, 0.82) 0 27%, rgba(85, 91, 82, 0.055) 45%, rgba(42, 45, 40, 0.12) 52%, transparent 68%);
+  opacity: 0.78;
+  transform: rotate(-7deg);
+  pointer-events: none;
+}
+
+.ritual-screen::after {
+  content: "";
+  position: absolute;
+  z-index: -1;
+  width: 230px;
+  height: 230px;
+  right: -74px;
+  bottom: -82px;
+  border: 1px solid rgba(146, 36, 30, 0.13);
+  border-radius: 50%;
+  box-shadow: inset 0 0 0 24px rgba(146, 36, 30, 0.025), inset 0 0 0 25px rgba(146, 36, 30, 0.1);
+  pointer-events: none;
+}
+
+.ritual-intro {
+  align-self: start;
+  padding-top: clamp(28px, 9vh, 92px);
+}
+
+.ritual-order {
+  display: flex;
+  align-items: center;
+  gap: 11px;
+  width: min(150px, 100%);
+  color: var(--cinnabar);
+  font: 12px/1 "Microsoft YaHei", sans-serif;
+  letter-spacing: 0.1em;
+}
+
+.ritual-order span {
+  font-variant-numeric: tabular-nums;
+}
+
+.ritual-order i {
+  flex: 1;
+  height: 1px;
+  background: currentColor;
+  transform-origin: left;
+}
+
+.ritual-intro h1 {
+  max-width: 5em;
+  margin: 18px 0 16px;
+  font: 600 clamp(40px, 4.4vw, 68px)/1.08 var(--serif);
+  letter-spacing: 0.12em;
+  text-wrap: balance;
+}
+
+.ritual-intro p {
+  max-width: 19em;
+  margin: 0;
+  color: #686a64;
+  font: 14px/1.9 var(--serif);
+  letter-spacing: 0.04em;
+}
+
+.ritual-stage {
+  position: relative;
+  inset: auto;
+  align-self: stretch;
+  width: auto;
+  height: auto;
+  min-width: 0;
+  min-height: 430px;
+  overflow: hidden;
+  border: 1px solid rgba(77, 72, 61, 0.08);
+  border-radius: 49% 51% 45% 55% / 54% 48% 52% 46%;
+  background: radial-gradient(ellipse at 50% 60%, rgba(246, 241, 230, 0.7), rgba(229, 222, 207, 0.18) 52%, transparent 73%);
+  color: inherit;
+}
+
+.ritual-stage-vignette {
+  position: absolute;
+  inset: 4% 1% 2%;
+  z-index: 1;
+  overflow: hidden;
+  border-radius: inherit;
+  pointer-events: none;
+}
+
+.ritual-halo {
+  position: absolute;
+  left: 50%;
+  top: 58%;
+  border-radius: 50%;
+  opacity: 0;
+  transform: translate(-50%, -50%) scale(0.82);
+  transition: opacity 0.56s ease, transform 0.72s cubic-bezier(0.16, 1, 0.3, 1);
+  will-change: transform, opacity;
+}
+
+.ritual-halo--ink {
+  width: 78%;
+  aspect-ratio: 1.65;
+  background: radial-gradient(ellipse at center, rgba(45, 52, 47, 0.15), rgba(66, 74, 67, 0.045) 50%, transparent 73%);
+  filter: blur(15px);
+}
+
+.ritual-halo--cinnabar {
+  width: 42%;
+  aspect-ratio: 2.1;
+  left: 64%;
+  top: 68%;
+  background: radial-gradient(ellipse at center, rgba(146, 36, 30, 0.16), rgba(146, 36, 30, 0.025) 55%, transparent 76%);
+  filter: blur(17px);
+}
+
+.ritual-stage-ring {
+  position: absolute;
+  left: 50%;
+  top: 61%;
+  width: min(73%, 520px);
+  aspect-ratio: 1.72;
+  border: 1px solid rgba(120, 100, 69, 0.14);
+  border-radius: 50%;
+  opacity: 0.34;
+  transform: translate(-50%, -50%) scale(0.94);
+  transition: opacity 0.7s ease, transform 0.9s cubic-bezier(0.77, 0, 0.175, 1);
+}
+
+.ritual-stage-caption {
+  position: absolute;
+  z-index: 5;
+  right: 18px;
+  bottom: 12px;
+  padding-left: 24px;
+  color: #5f615b;
+  font: 12px/1 "Microsoft YaHei", sans-serif;
+  letter-spacing: 0.14em;
+  opacity: 0.86;
+}
+
+.ritual-stage-caption::before {
+  content: "";
+  position: absolute;
+  left: 0;
+  top: 50%;
+  width: 16px;
+  height: 1px;
+  background: currentColor;
+  transform: scaleX(0.65);
+  transform-origin: right;
+  transition: transform 0.35s ease;
+}
+
+.ritual-screen--gathering .ritual-halo--ink {
+  animation: ritual-plate-breathe 2.8s cubic-bezier(0.45, 0, 0.55, 1) infinite;
+}
+
+.ritual-screen--casting .ritual-halo--ink,
+.ritual-screen--settling .ritual-halo--ink {
+  opacity: 0.42;
+  transform: translate(-50%, -50%) scale(1.04);
+}
+
+.ritual-screen--settling .ritual-halo--cinnabar {
+  opacity: 0.2;
+  transform: translate(-50%, -50%) scale(1);
+}
+
+.ritual-screen--revealed .ritual-halo--ink {
+  opacity: 0.22;
+  transform: translate(-50%, -50%) scale(0.9);
+}
+
+.ritual-screen--revealed .ritual-halo--cinnabar {
+  opacity: 0.3;
+  transform: translate(-50%, -50%) scale(1.08);
+}
+
+.ritual-screen--revealed .ritual-stage-ring {
+  opacity: 0.72;
+  transform: translate(-50%, -50%) scale(0.84);
+}
+
+.ritual-screen--revealed .ritual-stage-caption::before {
+  transform: scaleX(1);
+}
+
+@keyframes ritual-plate-breathe {
+  0%, 100% {
+    opacity: 0.16;
+    transform: translate(-50%, -50%) scale(0.84);
+  }
+
+  50% {
+    opacity: 0.3;
+    transform: translate(-50%, -50%) scale(0.94);
+  }
+}
+
+.casting-progress {
+  position: static;
+  left: auto;
+  bottom: auto;
+  z-index: auto;
+  align-self: center;
+  min-width: 0;
+  display: block;
+  color: #5d5f59;
+}
+
+.casting-progress header {
+  display: flex;
+  align-items: flex-end;
+  justify-content: space-between;
+  gap: 10px;
+  padding-bottom: 14px;
+  border-bottom: 1px solid rgba(38, 39, 35, 0.22);
+}
+
+.casting-progress header > span {
+  font: 13px/1 var(--serif);
+  letter-spacing: 0.12em;
+}
+
+.casting-progress header strong {
+  color: var(--cinnabar);
+  font: 28px/1 var(--serif);
+  font-variant-numeric: tabular-nums;
+}
+
+.casting-progress header small {
+  margin-left: 3px;
+  color: #62645e;
+  font: 12px/1 "Microsoft YaHei", sans-serif;
+}
+
+.casting-lines {
+  display: flex;
+  flex-direction: column;
+  gap: clamp(10px, 1.7vh, 16px);
+  padding-top: 20px;
+}
+
+.casting-line {
+  display: grid;
+  grid-template-columns: 18px minmax(58px, 1fr) minmax(32px, auto);
+  align-items: center;
+  gap: 9px;
+  min-height: 14px;
+  color: #777971;
+}
+
+.casting-line-index {
+  font: 12px/1 var(--serif);
+}
+
+.casting-line-symbol {
+  display: flex;
+  align-items: center;
+  gap: 14%;
+  height: 5px;
+  color: #2f322e;
+  opacity: 0.14;
+  transform: scaleX(0.84);
+  transform-origin: right;
+  transition: color 0.3s ease, opacity 0.3s ease, transform 0.45s cubic-bezier(0.16, 1, 0.3, 1);
+}
+
+.casting-line-symbol i {
+  height: 100%;
+  background: currentColor;
+}
+
+.casting-line--yang .casting-line-symbol i:first-child {
+  width: 100%;
+}
+
+.casting-line--yang .casting-line-symbol i:last-child {
+  display: none;
+}
+
+.casting-line--yin .casting-line-symbol i {
+  flex: 1;
+}
+
+.casting-line--empty .casting-line-symbol i {
+  flex: 1;
+  height: 1px;
+  background: repeating-linear-gradient(90deg, currentColor 0 3px, transparent 3px 7px);
+}
+
+.casting-line-state {
+  color: #62645e;
+  font: 12px/1 "Microsoft YaHei", sans-serif;
+  text-align: right;
+  white-space: nowrap;
+}
+
+.casting-line--yang .casting-line-symbol,
+.casting-line--yin .casting-line-symbol {
+  opacity: 0.86;
+  transform: scaleX(1);
+}
+
+.casting-line--moving .casting-line-symbol,
+.casting-line--moving .casting-line-state,
+.casting-line--current {
+  color: var(--cinnabar);
+}
+
+.casting-line--current .casting-line-symbol {
+  color: var(--cinnabar);
+  opacity: 0.68;
+}
+
+.ritual-outcome {
+  grid-column: 2;
+  display: grid;
+  grid-template-columns: auto 82px minmax(120px, 1fr) auto auto;
+  align-items: center;
+  gap: 14px;
+  min-width: 0;
+  min-height: 76px;
+  padding: 12px 0 0;
+  border-top: 1px solid rgba(38, 39, 35, 0.2);
+}
+
+.ritual-phase-name {
+  color: var(--cinnabar);
+  font: 12px/1 var(--serif);
+  letter-spacing: 0.14em;
+  white-space: nowrap;
+}
+
+.ritual-line-mark {
+  display: flex;
+  align-items: center;
+  gap: 13px;
+  width: 82px;
+  height: 8px;
+  color: var(--cinnabar);
+  opacity: 0.16;
+  transform: scaleX(0.6);
+  transform-origin: left;
+  transition: opacity 0.5s ease, transform 0.62s cubic-bezier(0.16, 1, 0.3, 1);
+}
+
+.ritual-line-mark i {
+  height: 100%;
+  background: currentColor;
+}
+
+.ritual-line-mark--yang i:first-child {
+  width: 100%;
+}
+
+.ritual-line-mark--yang i:last-child {
+  display: none;
+}
+
+.ritual-line-mark--yin i {
+  flex: 1;
+}
+
+.ritual-screen--revealed .ritual-line-mark {
+  opacity: 1;
+  transform: scaleX(1);
+}
+
+.ritual-outcome-copy {
+  min-width: 0;
+}
+
+.ritual-outcome-copy strong,
+.ritual-outcome-copy span {
+  display: block;
+}
+
+.ritual-outcome-copy strong {
+  color: #2d2f2b;
+  font: 21px/1.25 var(--serif);
+  letter-spacing: 0.08em;
+}
+
+.ritual-outcome-copy span {
+  margin-top: 4px;
+  color: #62645e;
+  font-size: 12px;
+  letter-spacing: 0.08em;
+}
+
+.ritual-outcome .coin-accessible-results {
+  position: static;
+  z-index: auto;
+  left: auto;
+  bottom: auto;
+  transform: none;
+  display: flex;
+  gap: 6px;
+  opacity: 0.38;
+  transition: opacity 0.4s ease;
+}
+
+.ritual-screen--revealed .coin-accessible-results {
+  opacity: 1;
+}
+
+.ritual-outcome .coin-accessible-results span {
+  width: 27px;
+  height: 27px;
+  border-color: rgba(54, 44, 29, 0.28);
+  color: #4e4c45;
+  background: rgba(236, 229, 212, 0.44);
+  font: 12px/1 var(--serif);
+}
+
+.ritual-confirm {
+  min-width: 124px;
+  height: 43px;
+  border: 1px solid var(--cinnabar);
+  background: var(--cinnabar);
+  color: #f4ead8;
+  font: 15px/1 var(--serif);
+  letter-spacing: 0.12em;
+  cursor: pointer;
+  transition: transform 0.2s cubic-bezier(0.16, 1, 0.3, 1), background-color 0.2s ease, opacity 0.2s ease;
+}
+
+.ritual-confirm:hover:not(:disabled) {
+  background: #a42b23;
+  transform: translateY(-1px);
+}
+
+.ritual-confirm:active:not(:disabled) {
+  transform: scale(0.98);
+}
+
+.ritual-confirm:disabled {
+  border-color: rgba(38, 39, 35, 0.18);
+  background: transparent;
+  color: #777971;
+  opacity: 0.62;
+  cursor: wait;
+}
+
+@media (max-width: 980px) {
+  .ritual-screen {
+    grid-template-columns: minmax(140px, 0.48fr) minmax(390px, 1.55fr) minmax(126px, 0.42fr);
+    column-gap: 18px;
+    padding-right: 24px;
+    padding-left: 24px;
+  }
+
+  .ritual-intro h1 {
+    font-size: clamp(36px, 5vw, 52px);
+  }
+
+  .casting-line {
+    grid-template-columns: 14px minmax(52px, 1fr);
+  }
+
+  .casting-line-state {
+    display: none;
+  }
+
+  .ritual-outcome {
+    grid-template-columns: auto 72px minmax(110px, 1fr) auto;
+    gap: 11px;
+  }
+
+  .ritual-line-mark {
+    width: 72px;
+  }
+
+  .coin-accessible-results {
+    display: none;
+  }
+}
+
+@media (max-width: 760px) {
+  .category-row {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+    column-gap: 12px;
+  }
+
+  .ritual-screen {
+    grid-template-columns: minmax(0, 1fr) 120px;
+    grid-template-rows: auto minmax(400px, 1fr) auto;
+    gap: 14px 16px;
+    padding: 22px 20px 24px;
+    overflow-y: auto;
+  }
+
+  .ritual-screen::before {
+    width: 118vw;
+    left: 2%;
+  }
+
+  .ritual-intro {
+    grid-column: 1 / -1;
+    display: grid;
+    grid-template-columns: auto minmax(0, 1fr);
+    align-items: end;
+    gap: 6px 18px;
+    padding-top: 0;
+  }
+
+  .ritual-order {
+    grid-column: 1;
+    grid-row: 1 / 3;
+    width: 58px;
+    align-self: stretch;
+    flex-direction: column;
+  }
+
+  .ritual-order i {
+    width: 1px;
+    height: auto;
+  }
+
+  .ritual-intro h1 {
+    margin: 0;
+    font-size: 38px;
+  }
+
+  .ritual-intro p {
+    max-width: none;
+    font-size: 13px;
+    line-height: 1.65;
+  }
+
+  .ritual-stage {
+    grid-column: 1;
+    grid-row: 2;
+    min-height: 400px;
+  }
+
+  .casting-progress {
+    grid-column: 2;
+    grid-row: 2;
+  }
+
+  .ritual-outcome {
+    grid-column: 1 / -1;
+    grid-template-columns: auto 72px minmax(110px, 1fr) auto;
+  }
+}
+
+@media (max-width: 620px) {
+  .home-screen {
+    align-items: start;
+    padding: 28px 16px 42px;
+  }
+
+  .question-composition {
+    width: 100%;
+  }
+
+  .brand-seal {
+    top: -4px;
+    right: 8px;
+  }
+
+  .question-composition h1 {
+    font-size: 48px;
+  }
+
+  .home-lead {
+    margin: 17px auto 24px;
+    font-size: 15px;
+  }
+
+  .question-field textarea {
+    height: 126px;
+    padding-right: 16px;
+    padding-left: 16px;
+    font-size: 16px;
+  }
+
+  .category-row {
+    column-gap: 9px;
+  }
+
+  .category-button {
+    min-height: 56px;
+    padding: 0 8px;
+    grid-template-columns: 26px minmax(0, 1fr);
+    gap: 7px;
+  }
+
+  .category-button__mark {
+    width: 23px;
+    height: 23px;
+  }
+
+  .category-button__label {
+    font-size: 14px;
+  }
+
+  .primary-ink-button {
+    width: 100%;
+    margin-top: 26px;
+  }
+
+  .ritual-screen {
+    grid-template-columns: 1fr;
+    grid-template-rows: auto minmax(370px, 54vh) auto auto;
+    gap: 12px;
+    padding: 18px 16px 24px;
+  }
+
+  .ritual-intro {
+    grid-column: 1;
+  }
+
+  .ritual-intro h1 {
+    font-size: 34px;
+  }
+
+  .ritual-intro p {
+    font-size: 12px;
+  }
+
+  .ritual-stage {
+    grid-column: 1;
+    grid-row: 2;
+    min-height: 370px;
+  }
+
+  .ritual-stage-vignette {
+    inset: 2% -7% 0;
+  }
+
+  .ritual-stage-caption {
+    right: 8px;
+  }
+
+  .casting-progress {
+    grid-column: 1;
+    grid-row: 3;
+  }
+
+  .casting-progress header {
+    padding-bottom: 9px;
+  }
+
+  .casting-progress header strong {
+    font-size: 22px;
+  }
+
+  .casting-lines {
+    display: grid;
+    grid-template-columns: repeat(6, minmax(0, 1fr));
+    gap: 7px;
+    padding-top: 11px;
+  }
+
+  .casting-line {
+    grid-template-columns: 1fr;
+    justify-items: center;
+    gap: 6px;
+  }
+
+  .casting-line-index {
+    grid-row: 2;
+  }
+
+  .casting-line-symbol {
+    grid-row: 1;
+    width: 100%;
+    transform-origin: center;
+  }
+
+  .ritual-outcome {
+    grid-column: 1;
+    grid-row: 4;
+    grid-template-columns: auto 66px minmax(0, 1fr);
+    gap: 10px;
+    padding-top: 14px;
+  }
+
+  .ritual-line-mark {
+    width: 66px;
+  }
+
+  .ritual-outcome-copy strong {
+    font-size: 18px;
+  }
+
+  .ritual-confirm {
+    grid-column: 1 / -1;
+    width: 100%;
+    margin-top: 2px;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .ritual-line-mark,
+  .coin-accessible-results,
+  .ritual-outcome-copy {
+    transition: opacity 0.2s ease, color 0.2s ease !important;
+  }
+}

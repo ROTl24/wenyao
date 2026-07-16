@@ -30,7 +30,7 @@ describe('问爻桌面体验', () => {
   it('opens history and settings from the desktop chrome', async () => {
     render(<App />);
     fireEvent.click(screen.getByRole('button', { name: '历史记录' }));
-    expect(await screen.findByRole('heading', { name: '历史记录' })).toBeVisible();
+    expect(await screen.findByRole('heading', { name: '问爻占簿' })).toBeVisible();
     fireEvent.click(screen.getByRole('button', { name: '关闭历史记录' }));
     fireEvent.click(screen.getByRole('button', { name: 'AI 设置' }));
     expect(await screen.findByRole('heading', { name: 'AI 与知识库' })).toBeVisible();
