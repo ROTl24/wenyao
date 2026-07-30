@@ -4,12 +4,31 @@ import deepseekConfig from '../../config/deepseek.json';
 import type { DesktopApi } from '../types/desktop';
 import type { DivinationSession } from './session';
 import { searchEvidence } from './retrieval';
+import {
+  normalizeStoredSession,
+  sanitizeRendererSession,
+  validateSessionForSave,
+} from './sessionValidation';
 
 const STORAGE_KEY = 'wenyao-browser-sessions';
 
+function storedBrowserSessions(): unknown[] {
+  try {
+    const parsed = JSON.parse(localStorage.getItem(STORAGE_KEY) || '[]') as unknown;
+    return Array.isArray(parsed) ? parsed : [];
+  } catch {
+    return [];
+  }
+}
+
 function browserSessions(): DivinationSession[] {
-  try { return JSON.parse(localStorage.getItem(STORAGE_KEY) || '[]') as DivinationSession[]; }
-  catch { return []; }
+  return storedBrowserSessions().map(normalizeStoredSession);
+}
+
+function storedSessionId(value: unknown): unknown {
+  return value && typeof value === 'object' && !Array.isArray(value)
+    ? (value as Record<string, unknown>).id
+    : undefined;
 }
 
 const browserFallback: DesktopApi = {
@@ -17,14 +36,23 @@ const browserFallback: DesktopApi = {
     async list() { return browserSessions().sort((a, b) => b.updatedAt.localeCompare(a.updatedAt)); },
     async get(id) { return browserSessions().find((item) => item.id === id) || null; },
     async save(session) {
-      const sessions = browserSessions();
-      const index = sessions.findIndex((item) => item.id === session.id);
-      if (index >= 0) sessions[index] = session; else sessions.push(session);
+      const sessions = storedBrowserSessions();
+      const canonicalSession = sanitizeRendererSession(session);
+      const canonicalId = storedSessionId(canonicalSession);
+      const index = sessions.findIndex((item) => storedSessionId(item) === canonicalId);
+      const safeSession = validateSessionForSave(
+        canonicalSession,
+        index >= 0 ? sessions[index] : null,
+      );
+      if (index >= 0) sessions[index] = safeSession; else sessions.push(safeSession);
       localStorage.setItem(STORAGE_KEY, JSON.stringify(sessions));
-      return session;
+      return structuredClone(safeSession);
     },
     async delete(id) {
-      localStorage.setItem(STORAGE_KEY, JSON.stringify(browserSessions().filter((item) => item.id !== id)));
+      localStorage.setItem(
+        STORAGE_KEY,
+        JSON.stringify(storedBrowserSessions().filter((item) => storedSessionId(item) !== id)),
+      );
       return true;
     },
   },

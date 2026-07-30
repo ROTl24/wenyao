@@ -4,6 +4,7 @@ const path = require('node:path');
 const crypto = require('node:crypto');
 const { pathToFileURL } = require('node:url');
 const { JsonStore } = require('./services/store.cjs');
+const { sanitizeRendererSession } = require('./services/ipc-payload.cjs');
 const { analyzeCloud, createLocalReport, followUpCloud } = require('./services/ai.cjs');
 const { createAlibabaClient } = require('./services/alibaba.cjs');
 const { createDeepSeekClient } = require('./services/deepseek.cjs');
@@ -190,7 +191,7 @@ async function searchCorpus(payload) {
 function registerIpc() {
   ipcMain.handle('sessions:list', () => store.listSessions());
   ipcMain.handle('sessions:get', (_event, id) => store.getSession(id));
-  ipcMain.handle('sessions:save', (_event, session) => store.saveSession(session));
+  ipcMain.handle('sessions:save', (_event, session) => store.saveSession(sanitizeRendererSession(session)));
   ipcMain.handle('sessions:delete', (_event, id) => store.deleteSession(id));
 
   ipcMain.handle('settings:get', () => store.getPublicSettings());

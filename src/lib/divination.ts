@@ -1,4 +1,5 @@
 import { Solar } from 'lunar-javascript';
+import { shanghaiDateTimeParts } from './shanghaiTime';
 
 export type CoinFace = 'text' | 'reverse';
 export type LineValue = 6 | 7 | 8 | 9;
@@ -376,6 +377,17 @@ export function createToss(faces: readonly CoinFace[]): Toss {
   return { faces: normalized, value, ...map[value] };
 }
 
+const CANONICAL_FACES_BY_VALUE: Record<LineValue, readonly [CoinFace, CoinFace, CoinFace]> = {
+  6: ['text', 'text', 'text'],
+  7: ['text', 'text', 'reverse'],
+  8: ['text', 'reverse', 'reverse'],
+  9: ['reverse', 'reverse', 'reverse'],
+};
+
+export function createTossFromValue(value: LineValue): Toss {
+  return createToss(CANONICAL_FACES_BY_VALUE[value]);
+}
+
 export function randomToss(): Toss {
   const bytes = new Uint8Array(3);
   crypto.getRandomValues(bytes);
@@ -619,6 +631,11 @@ function nakJiaFields(baseHexagram: Hexagram, changedHexagram: Hexagram, zeroInd
   };
 }
 
+function beastFor(dayGanZhi: string, zeroIndex: number): string {
+  const beastStart = BEAST_START[dayGanZhi[0]] ?? 0;
+  return BEASTS[(beastStart + zeroIndex) % BEASTS.length];
+}
+
 export function upgradePlate(plate: DivinationPlate): DivinationPlate {
   const calendar = calendarFields(new Date(plate.castAt));
   const dayBranch = calendar.dayGanZhi[1];
@@ -639,6 +656,7 @@ export function upgradePlate(plate: DivinationPlate): DivinationPlate {
       ),
       role: roleAt(plate.baseHexagram, index),
       changedRole: roleAt(plate.changedHexagram, index),
+      beast: beastFor(calendar.dayGanZhi, zeroIndex),
       twelveStages: lineTwelveStages(nakJia.element, nakJia.changedBranch, calendar.monthBranch, dayBranch, line.moving),
     };
   });
@@ -858,8 +876,30 @@ function commonShenSha(dayGanZhi: string, lines: PlateLine[]): ShenSha[] {
   }));
 }
 
+function shanghaiSolar(castAt: Date) {
+  const parts = shanghaiDateTimeParts(castAt);
+  const solarFactory = Solar as unknown as {
+    fromYmdHms(
+      year: number,
+      month: number,
+      day: number,
+      hour: number,
+      minute: number,
+      second: number,
+    ): ReturnType<typeof Solar.fromDate>;
+  };
+  return solarFactory.fromYmdHms(
+    parts.year,
+    parts.month,
+    parts.day,
+    parts.hour,
+    parts.minute,
+    parts.second,
+  );
+}
+
 function calendarFields(castAt: Date) {
-  const lunar = Solar.fromDate(castAt).getLunar();
+  const lunar = shanghaiSolar(castAt).getLunar();
   const yearGanZhi = lunar.getYearInGanZhiExact();
   const monthGanZhi = lunar.getMonthInGanZhiExact();
   const dayGanZhi = lunar.getDayInGanZhiExact();
@@ -883,24 +923,14 @@ function calendarFields(castAt: Date) {
 
 export function buildPlate(values: readonly LineValue[], castAt: Date): DivinationPlate {
   if (values.length !== 6) throw new Error('排盘需要六次已确认爻值');
-  const tosses = values.map((value) => {
-    const faces: Record<LineValue, CoinFace[]> = {
-      6: ['text', 'text', 'text'],
-      7: ['text', 'text', 'reverse'],
-      8: ['text', 'reverse', 'reverse'],
-      9: ['reverse', 'reverse', 'reverse'],
-    };
-    return createToss(faces[value]);
-  });
+  const tosses = values.map(createTossFromValue);
   const baseBits = tosses.map((toss) => toss.baseYang);
   const changedBits = tosses.map((toss) => toss.changedYang);
   const baseHexagram = getHexagram(baseBits);
   const changedHexagram = getHexagram(changedBits);
-  const lunar = Solar.fromDate(castAt).getLunar();
   const calendar = calendarFields(castAt);
   const { dayGanZhi, monthBranch, voidBranches: emptyBranches } = calendar;
   const dayBranch = dayGanZhi[1];
-  const beastStart = BEAST_START[lunar.getDayGanExact()] ?? 0;
   const lines: PlateLine[] = tosses.map((toss, zeroIndex) => {
     const index = zeroIndex + 1;
     const nakJia = nakJiaFields(baseHexagram, changedHexagram, zeroIndex);
@@ -919,7 +949,7 @@ export function buildPlate(values: readonly LineValue[], castAt: Date): Divinati
       ),
       role: roleAt(baseHexagram, index),
       changedRole: roleAt(changedHexagram, index),
-      beast: BEASTS[(beastStart + zeroIndex) % 6],
+      beast: beastFor(dayGanZhi, zeroIndex),
       twelveStages: lineTwelveStages(nakJia.element, nakJia.changedBranch, monthBranch, dayBranch, toss.moving),
     };
   });

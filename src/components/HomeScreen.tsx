@@ -1,5 +1,5 @@
 import { isValidQuestion, QUESTION_LENGTH } from '../lib/question';
-import type { SessionCategory } from '../lib/session';
+import { CASTING_METHOD_LABELS, type CastingMethod, type SessionCategory } from '../lib/session';
 import { SESSION_CATEGORY_LABELS } from '../lib/sessionCategories';
 
 const categories: Array<{ id: SessionCategory; mark: string }> = [
@@ -16,13 +16,32 @@ const categories: Array<{ id: SessionCategory; mark: string }> = [
 interface Props {
   question: string;
   category: SessionCategory | null;
+  castingMethod: CastingMethod | null;
+  physicalTimeInput: string;
+  physicalTimeError: string;
   onQuestionChange(value: string): void;
   onCategoryChange(value: SessionCategory): void;
+  onCastingMethodChange(value: CastingMethod): void;
+  onPhysicalTimeChange(value: string): void;
   onStart(): void;
 }
 
-export function HomeScreen({ question, category, onQuestionChange, onCategoryChange, onStart }: Props) {
-  const valid = isValidQuestion(question) && Boolean(category);
+export function HomeScreen({
+  question,
+  category,
+  castingMethod,
+  physicalTimeInput,
+  physicalTimeError,
+  onQuestionChange,
+  onCategoryChange,
+  onCastingMethodChange,
+  onPhysicalTimeChange,
+  onStart,
+}: Props) {
+  const valid = isValidQuestion(question)
+    && Boolean(category)
+    && Boolean(castingMethod)
+    && (castingMethod !== 'physical' || !physicalTimeError);
   return (
     <main className="home-screen">
       <div className="mountain-wash mountain-wash--left" />
@@ -59,6 +78,40 @@ export function HomeScreen({ question, category, onQuestionChange, onCategoryCha
             ))}
           </div>
         </div>
+        <div className="casting-method-field">
+          <div className="field-label" id="casting-method-label">选择起卦方式</div>
+          <div className="casting-method-row" role="group" aria-labelledby="casting-method-label">
+            {(['digital', 'physical'] as const).map((method) => (
+              <button
+                type="button"
+                key={method}
+                className={castingMethod === method
+                  ? 'casting-method-button casting-method-button--selected'
+                  : 'casting-method-button'}
+                aria-pressed={castingMethod === method}
+                onClick={() => onCastingMethodChange(method)}
+              >
+                <strong>{CASTING_METHOD_LABELS[method]}</strong>
+                <span>{method === 'digital' ? '应用内完成六轮 3D 模拟投掷' : '摇实体铜钱后逐爻录入钱象'}</span>
+              </button>
+            ))}
+          </div>
+        </div>
+        {castingMethod === 'physical' && (
+          <div className="physical-time-field">
+            <label htmlFor="physical-cast-time">起卦时间（北京时间）</label>
+            <input
+              id="physical-cast-time"
+              type="datetime-local"
+              value={physicalTimeInput}
+              onChange={(event) => onPhysicalTimeChange(event.target.value)}
+              aria-invalid={Boolean(physicalTimeError)}
+              aria-describedby={physicalTimeError ? 'physical-cast-time-error' : 'physical-cast-time-note'}
+            />
+            <span id="physical-cast-time-note">默认当前时间，可修改到实际摇卦时刻</span>
+            {physicalTimeError && <p id="physical-cast-time-error" role="alert">{physicalTimeError}</p>}
+          </div>
+        )}
         <button className="primary-ink-button" type="button" disabled={!valid} onClick={onStart}>开始起卦</button>
         <p className="ritual-note">静心片刻，专注于一件事</p>
       </section>

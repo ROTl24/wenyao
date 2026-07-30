@@ -1,7 +1,8 @@
 import { Search, Trash2, X } from 'lucide-react';
 import { useMemo, useState } from 'react';
-import type { DivinationSession } from '../lib/session';
+import { CASTING_METHOD_LABELS, type DivinationSession } from '../lib/session';
 import { SESSION_CATEGORY_LABELS } from '../lib/sessionCategories';
+import { formatShanghaiDate } from '../lib/shanghaiTime';
 import { HexagramLines } from './HexagramLines';
 
 interface Props { sessions: DivinationSession[]; onClose(): void; onOpen(session: DivinationSession): void; onDelete(id: string): void }
@@ -14,6 +15,7 @@ export function HistoryPanel({ sessions, onClose, onOpen, onDelete }: Props) {
     return sessions.filter((session) => [
       session.question,
       SESSION_CATEGORY_LABELS[session.category],
+      CASTING_METHOD_LABELS[session.castingMethod],
       session.plate?.baseHexagram.name,
       session.plate?.baseHexagram.shortName,
       session.plate?.changedHexagram.name,
@@ -29,9 +31,13 @@ export function HistoryPanel({ sessions, onClose, onOpen, onDelete }: Props) {
           {visible.length ? visible.map((session) => (
             <article className="history-row" key={session.id}>
               <button className="history-main" type="button" onClick={() => onOpen(session)}>
-                <span className="history-date">{new Date(session.castAt).toLocaleDateString('zh-CN')}</span>
+                <span className="history-date">{formatShanghaiDate(new Date(session.castAt))}</span>
                 <span className="history-copy">
-                  <span className="history-category">{SESSION_CATEGORY_LABELS[session.category]}</span>
+                  <span className="history-category">
+                    <span>{SESSION_CATEGORY_LABELS[session.category]}</span>
+                    <i aria-hidden="true">·</i>
+                    <span>{CASTING_METHOD_LABELS[session.castingMethod]}</span>
+                  </span>
                   <strong>{session.question}</strong>
                   <small>{session.status === 'complete' ? `${session.plate?.baseHexagram.name} → ${session.plate?.changedHexagram.name}` : `起卦中 · 已定 ${session.tosses.length} 爻`}</small>
                 </span>

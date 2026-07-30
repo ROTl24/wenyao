@@ -3,6 +3,7 @@ import {
   buildPlate,
   branchCalendarEffects,
   createToss,
+  createTossFromValue,
   elementOfStemBranch,
   getHexagram,
   twelveStageFor,
@@ -19,6 +20,7 @@ describe('乾隆铜钱约定', () => {
     [['reverse', 'reverse', 'reverse'], 9, '老阳'],
   ] as const)('maps %j to %s', (faces, value, label) => {
     expect(createToss(faces as readonly CoinFace[])).toMatchObject({ value, label });
+    expect(createTossFromValue(value)).toMatchObject({ faces, value, label });
   });
 });
 
@@ -180,6 +182,12 @@ describe('排盘不变量', () => {
       { label: '日柱', ganZhi: '丙戌', voidBranches: ['午', '未'] },
       { label: '时柱', ganZhi: '甲午', voidBranches: ['辰', '巳'] },
     ]);
+    const sameBeijingInstant = buildPlate(
+      [6, 7, 8, 9, 7, 8],
+      new Date('2026-07-11T04:00:00.000Z'),
+    );
+    expect(sameBeijingInstant.pillars).toEqual(plate.pillars);
+    expect(sameBeijingInstant.castAt).toBe('2026-07-11T04:00:00.000Z');
   });
 
   it('derives 六爻 twelve stages from each line element against month, day and moving transformation branches', () => {
@@ -225,6 +233,7 @@ describe('排盘不变量', () => {
     for (const line of stalePlate.lines as Array<Record<string, unknown>>) {
       delete line.twelveStages;
       delete line.dayClashAssessment;
+      line.beast = '旧六神';
     }
     stalePlate.shenSha = [{ name: '驿马', branches: ['申'] }];
     delete stalePlate.relationFacts;
@@ -233,6 +242,8 @@ describe('排盘不变量', () => {
 
     expect(upgraded.pillars.every((pillar) => !('twelveStage' in pillar))).toBe(true);
     expect(upgraded.lines[0].twelveStages).toEqual({ month: '墓', day: '养', transformation: '病' });
+    expect(upgraded.lines.map((line) => line.beast)).toEqual(plate.lines.map((line) => line.beast));
+    expect(upgraded.lines.every((line) => line.beast !== '旧六神')).toBe(true);
     expect(upgraded.shenSha[0]).toEqual({
       name: '驿马',
       basis: '日支',

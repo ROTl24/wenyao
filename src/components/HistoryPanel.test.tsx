@@ -11,6 +11,7 @@ const completeSession: DivinationSession = {
   id: 'complete-session',
   question: '项目能否顺利落地',
   category: 'career',
+  castingMethod: 'physical',
   castAt: castAt.toISOString(),
   updatedAt: castAt.toISOString(),
   status: 'complete',
@@ -23,6 +24,7 @@ const castingSession: DivinationSession = {
   id: 'casting-session',
   question: '关系是否适合继续推进',
   category: 'relationship',
+  castingMethod: 'digital',
   castAt: new Date('2026-07-15T08:00:00.000Z').toISOString(),
   updatedAt: new Date('2026-07-15T08:00:00.000Z').toISOString(),
   status: 'casting',
@@ -50,12 +52,22 @@ describe('HistoryPanel 占簿目录', () => {
     expect(screen.getByRole('textbox', { name: '搜索占簿' })).toBeVisible();
     expect(screen.getByText('事业工作')).toBeVisible();
     expect(screen.getByText('感情婚姻')).toBeVisible();
+    expect(screen.getByText('在线起卦')).toBeVisible();
+    expect(screen.getByText('线下起卦')).toBeVisible();
     expect(screen.getByText('起卦中 · 已定 0 爻')).toBeVisible();
     expect(container.querySelector('.history-glyph .hexagram-lines--compact')).toBeInTheDocument();
 
     fireEvent.change(screen.getByRole('textbox', { name: '搜索占簿' }), { target: { value: '感情' } });
     expect(screen.queryByText('项目能否顺利落地')).not.toBeInTheDocument();
     expect(screen.getByText('关系是否适合继续推进')).toBeVisible();
+
+    fireEvent.change(screen.getByRole('textbox', { name: '搜索占簿' }), { target: { value: '在线起卦' } });
+    expect(screen.queryByText('项目能否顺利落地')).not.toBeInTheDocument();
+    expect(screen.getByText('关系是否适合继续推进')).toBeVisible();
+
+    fireEvent.change(screen.getByRole('textbox', { name: '搜索占簿' }), { target: { value: '线下起卦' } });
+    expect(screen.getByText('项目能否顺利落地')).toBeVisible();
+    expect(screen.queryByText('关系是否适合继续推进')).not.toBeInTheDocument();
   });
 
   it('keeps opening and confirmed deletion as separate actions', () => {

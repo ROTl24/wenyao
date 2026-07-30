@@ -3,6 +3,8 @@ import { Fragment, useMemo, useState } from 'react';
 import type { ActionEffect, ActiveActionFact, HexagramDynamics, PlateLine, ShenSha, TransformationReturnFact } from '../lib/divination';
 import type { EvidenceEntry, RetrievalDiagnostics } from '../lib/retrieval';
 import type { DivinationSession } from '../lib/session';
+import { CASTING_METHOD_LABELS } from '../lib/session';
+import { formatShanghaiDateTime } from '../lib/shanghaiTime';
 import { HexagramLines } from './HexagramLines';
 import { MarkdownContent } from './MarkdownContent';
 import './ResultScreen.css';
@@ -12,18 +14,22 @@ interface Props {
   session: DivinationSession;
   evidence: EvidenceEntry[];
   retrievalDiagnostics: RetrievalDiagnostics | null;
+  sessionSaveStatus: 'idle' | 'saving' | 'saved' | 'error';
+  sessionSaveError: string;
   analyzing: boolean;
   analysisError: string;
   analysisSaveStatus: 'idle' | 'saving' | 'saved' | 'error';
   analysisSaveError: string;
   chatting: boolean;
+  chatError: string;
+  onRetrySessionSave(): void;
   onAnalyze(): void;
   onRetryAnalysisSave(): void;
   onFollowUp(question: string): void;
   onBack(): void;
 }
 
-export function ResultScreen({ session, evidence, retrievalDiagnostics, analyzing, analysisError, analysisSaveStatus, analysisSaveError, chatting, onAnalyze, onRetryAnalysisSave, onFollowUp, onBack }: Props) {
+export function ResultScreen({ session, evidence, retrievalDiagnostics, sessionSaveStatus, sessionSaveError, analyzing, analysisError, analysisSaveStatus, analysisSaveError, chatting, chatError, onRetrySessionSave, onAnalyze, onRetryAnalysisSave, onFollowUp, onBack }: Props) {
   const [followUp, setFollowUp] = useState('');
   const plate = session.plate!;
   const evidenceSourceCount = useMemo(() => new Set(evidence.map((item) => item.source)).size, [evidence]);
@@ -36,8 +42,9 @@ export function ResultScreen({ session, evidence, retrievalDiagnostics, analyzin
     ? session.analysis
     : null;
   const legacyAnalysis = Boolean(session.analysis && !markdownAnalysis);
+  const sessionReady = sessionSaveStatus !== 'saving' && sessionSaveStatus !== 'error';
   const submit = () => {
-    if (!followUp.trim() || chatting) return;
+    if (!followUp.trim() || chatting || !sessionReady) return;
     onFollowUp(followUp.trim());
     setFollowUp('');
   };
@@ -56,8 +63,8 @@ export function ResultScreen({ session, evidence, retrievalDiagnostics, analyzin
               返回问事
             </button>
             <div className="result-hero-meta">
-              <time dateTime={session.castAt}>{new Date(session.castAt).toLocaleString('zh-CN')}</time>
-              <span>文王纳甲 · 字二背三</span>
+              <time dateTime={session.castAt}>{formatShanghaiDateTime(new Date(session.castAt))}</time>
+              <span>文王纳甲 · 字二背三 · {CASTING_METHOD_LABELS[session.castingMethod]}</span>
             </div>
           </div>
 
@@ -111,12 +118,18 @@ export function ResultScreen({ session, evidence, retrievalDiagnostics, analyzin
             <div className="analysis-heading">
               <h2 className="section-title" id="analysis-heading"><i aria-hidden="true" />AI 解读</h2>
               {markdownAnalysis ? (
-                <button className="analysis-reanalyze" type="button" onClick={onAnalyze} disabled={analyzing}>
+                <button className="analysis-reanalyze" type="button" onClick={onAnalyze} disabled={analyzing || !sessionReady}>
                   <RefreshCw className={analyzing ? 'is-spinning' : undefined} size={15} aria-hidden="true" />
                   {analyzing ? '解析中' : '重新解析'}
                 </button>
               ) : null}
             </div>
+            {sessionSaveStatus === 'saving' || sessionSaveStatus === 'error' ? (
+              <div className={`analysis-save-status analysis-save-status--${sessionSaveStatus}`} role={sessionSaveStatus === 'error' ? 'alert' : 'status'}>
+                {sessionSaveStatus === 'saving' ? <><span className="small-loader" aria-hidden="true" /><span>正在保存本次排盘…</span></> : null}
+                {sessionSaveStatus === 'error' ? <><div><strong>本次排盘尚未保存</strong><p>{sessionSaveError || '写入历史记录失败。'}</p></div><button type="button" onClick={onRetrySessionSave}><RefreshCw size={15} />重试保存</button></> : null}
+              </div>
+            ) : null}
             {session.analysis && analysisSaveStatus !== 'idle' ? (
               <div className={`analysis-save-status analysis-save-status--${analysisSaveStatus}`} role={analysisSaveStatus === 'error' ? 'alert' : 'status'}>
                 {analysisSaveStatus === 'saving' ? <><span className="small-loader" aria-hidden="true" /><span>正在自动保存…</span></> : null}
@@ -125,12 +138,12 @@ export function ResultScreen({ session, evidence, retrievalDiagnostics, analyzin
               </div>
             ) : null}
             {analyzing ? <div className="analysis-loading"><span className="ink-loader" /><strong>正在检索古籍并校验排盘…</strong><p>排盘事实已经锁定，AI 只能依据当前卦象与证据解释。</p></div> : null}
-            {!analyzing && analysisError ? <div className="analysis-error"><strong>AI 分析暂时失败</strong><p>{analysisError}</p><button type="button" onClick={onAnalyze}><RefreshCw size={16} />重新分析</button></div> : null}
+            {!analyzing && analysisError ? <div className="analysis-error"><strong>AI 分析暂时失败</strong><p>{analysisError}</p><button type="button" onClick={onAnalyze} disabled={!sessionReady}><RefreshCw size={16} />重新分析</button></div> : null}
             {!analyzing && legacyAnalysis && !analysisError ? (
-              <div className="analysis-error"><strong>这份历史解读不是当前 Markdown 格式</strong><p>旧版结构化结果不再解析，请重新分析生成 Markdown 解读。</p><button type="button" onClick={onAnalyze}><RefreshCw size={16} />重新分析</button></div>
+              <div className="analysis-error"><strong>这份历史解读不是当前 Markdown 格式</strong><p>旧版结构化结果不再解析，请重新分析生成 Markdown 解读。</p><button type="button" onClick={onAnalyze} disabled={!sessionReady}><RefreshCw size={16} />重新分析</button></div>
             ) : null}
             {!analyzing && !markdownAnalysis && !legacyAnalysis && !analysisError ? (
-              <div className="analysis-error"><strong>这条历史记录没有已保存的 AI 解读</strong><p>打开历史记录不会自动发起新的 AI 请求，如需解读请手动开始。</p><button type="button" onClick={onAnalyze}><Sparkles size={16} />开始解读</button></div>
+              <div className="analysis-error"><strong>{sessionReady ? '这条历史记录没有已保存的 AI 解读' : '排盘保存完成后才能开始解读'}</strong><p>{sessionReady ? '打开历史记录不会自动发起新的 AI 请求，如需解读请手动开始。' : '请等待自动保存完成，或先重试保存本次排盘。'}</p><button type="button" onClick={onAnalyze} disabled={!sessionReady}><Sparkles size={16} />开始解读</button></div>
             ) : null}
             {!analyzing && markdownAnalysis ? (
               <article className="analysis-report">
@@ -299,11 +312,16 @@ export function ResultScreen({ session, evidence, retrievalDiagnostics, analyzin
               })}
             </div>
           ) : null}
+          {chatError ? (
+            <div className="analysis-save-status analysis-save-status--error" role="alert">
+              <div><strong>追问未完成</strong><p>{chatError}</p></div>
+            </div>
+          ) : null}
           <div className="chat-composer">
             <label className="chat-composer-label" htmlFor="follow-up">你的追问</label>
             <div className="chat-input">
-              <input id="follow-up" aria-describedby="follow-up-hint" value={followUp} onChange={(event) => setFollowUp(event.target.value)} onKeyDown={(event) => { if (event.key === 'Enter') submit(); }} placeholder="基于本次卦象，继续问一个相关问题…" />
-              <button type="button" onClick={submit} disabled={!followUp.trim() || chatting}>{chatting ? <span className="small-loader" /> : <Send size={17} />}<span>继续追问</span></button>
+              <input id="follow-up" aria-describedby="follow-up-hint" value={followUp} disabled={!sessionReady} onChange={(event) => setFollowUp(event.target.value)} onKeyDown={(event) => { if (event.key === 'Enter') submit(); }} placeholder="基于本次卦象，继续问一个相关问题…" />
+              <button type="button" onClick={submit} disabled={!followUp.trim() || chatting || !sessionReady}>{chatting ? <span className="small-loader" /> : <Send size={17} />}<span>继续追问</span></button>
             </div>
             <p id="follow-up-hint">按 Enter 发送，回答会继续沿用本次排盘。</p>
           </div>

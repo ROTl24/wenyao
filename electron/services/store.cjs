@@ -2,6 +2,10 @@ const fs = require('node:fs');
 const path = require('node:path');
 const alibabaConfig = require('../../config/alibaba.json');
 const deepseekConfig = require('../../config/deepseek.json');
+const {
+  normalizeStoredSession,
+  validateSessionForSave,
+} = require('./session-validation.cjs');
 
 const DEFAULT_STATE = Object.freeze({ sessions: [], settings: {} });
 
@@ -35,20 +39,19 @@ class JsonStore {
 
   listSessions() {
     return structuredClone(this.state.sessions)
+      .map((session) => normalizeStoredSession(session))
       .sort((left, right) => String(right.updatedAt).localeCompare(String(left.updatedAt)));
   }
 
   getSession(id) {
     const session = this.state.sessions.find((item) => item.id === id);
-    return session ? structuredClone(session) : null;
+    return session ? normalizeStoredSession(session) : null;
   }
 
   saveSession(session) {
-    if (!session || typeof session.id !== 'string' || typeof session.question !== 'string') {
-      throw new TypeError('会话数据无效');
-    }
-    const index = this.state.sessions.findIndex((item) => item.id === session.id);
-    const safeSession = structuredClone(session);
+    const index = this.state.sessions.findIndex((item) => item.id === session?.id);
+    const existing = index >= 0 ? this.state.sessions[index] : null;
+    const safeSession = validateSessionForSave(session, existing);
     if (index >= 0) this.state.sessions[index] = safeSession;
     else this.state.sessions.push(safeSession);
     this.#write();

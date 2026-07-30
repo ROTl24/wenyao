@@ -11,6 +11,7 @@ const session: DivinationSession = {
   id: 'session-1',
   question: '问事业发展',
   category: 'career',
+  castingMethod: 'digital',
   castAt: castAt.toISOString(),
   updatedAt: castAt.toISOString(),
   status: 'complete',
@@ -48,6 +49,8 @@ function renderResult(
     analyzing = false,
     onAnalyze = vi.fn(),
     targetEvidence = evidence,
+    sessionSaveStatus = 'saved',
+    sessionSaveError = '',
     analysisSaveStatus = targetSession.analysis ? 'saved' : 'idle',
     analysisSaveError = '',
     onRetryAnalysisSave = vi.fn(),
@@ -55,6 +58,8 @@ function renderResult(
     analyzing?: boolean;
     onAnalyze?: () => void;
     targetEvidence?: EvidenceEntry[];
+    sessionSaveStatus?: 'idle' | 'saving' | 'saved' | 'error';
+    sessionSaveError?: string;
     analysisSaveStatus?: 'idle' | 'saving' | 'saved' | 'error';
     analysisSaveError?: string;
     onRetryAnalysisSave?: () => void;
@@ -65,11 +70,15 @@ function renderResult(
       session={targetSession}
       evidence={targetEvidence}
       retrievalDiagnostics={null}
+      sessionSaveStatus={sessionSaveStatus}
+      sessionSaveError={sessionSaveError}
       analyzing={analyzing}
       analysisError=""
       analysisSaveStatus={analysisSaveStatus}
       analysisSaveError={analysisSaveError}
       chatting={false}
+      chatError=""
+      onRetrySessionSave={vi.fn()}
       onAnalyze={onAnalyze}
       onRetryAnalysisSave={onRetryAnalysisSave}
       onFollowUp={vi.fn()}
@@ -87,6 +96,7 @@ describe('ResultScreen Markdown 解读', () => {
 
     expect(opening).toHaveAttribute('data-state', 'static');
     expect(screen.getByRole('heading', { level: 1, name: '问事业发展' })).toBeVisible();
+    expect(within(opening).getByText(/在线起卦/)).toBeVisible();
     expect(within(opening).getByText('静卦')).toBeVisible();
     expect(within(opening).queryByText(/^变卦/)).not.toBeInTheDocument();
     expect(Array.from(workspace?.children || []).map((element) => element.classList[0])).toEqual([
@@ -109,6 +119,14 @@ describe('ResultScreen Markdown 解读', () => {
     expect(opening).toHaveAttribute('data-state', 'moving');
     expect(within(opening).getByLabelText(/^变卦/)).toBeVisible();
     expect(opening.querySelectorAll('.hex-line--moving')).toHaveLength(1);
+  });
+
+  it('marks a physical session without changing the contemporary-book result layout', () => {
+    const { container } = renderResult({ ...session, castingMethod: 'physical' });
+    const opening = screen.getByRole('banner', { name: '成卦卷首' });
+
+    expect(within(opening).getByText(/线下起卦/)).toBeVisible();
+    expect(container.querySelector('.result-workspace')).toBeInTheDocument();
   });
 
   it('presents twelve stages and shen sha as concrete 六爻 line facts instead of Bazi pillar decorations', () => {
@@ -271,6 +289,38 @@ describe('ResultScreen Markdown 解读', () => {
     expect(screen.getByText('解读已经生成。')).toBeVisible();
     fireEvent.click(screen.getByRole('button', { name: '重试保存' }));
     expect(onRetryAnalysisSave).toHaveBeenCalledTimes(1);
+  });
+
+  it('blocks analysis and follow-up until a failed complete-session save is retried', () => {
+    const onAnalyze = vi.fn();
+    const onRetrySessionSave = vi.fn();
+    render(
+      <ResultScreen
+        session={session}
+        evidence={evidence}
+        retrievalDiagnostics={null}
+        sessionSaveStatus="error"
+        sessionSaveError="磁盘空间不足。"
+        analyzing={false}
+        analysisError=""
+        analysisSaveStatus="idle"
+        analysisSaveError=""
+        chatting={false}
+        chatError=""
+        onRetrySessionSave={onRetrySessionSave}
+        onAnalyze={onAnalyze}
+        onRetryAnalysisSave={vi.fn()}
+        onFollowUp={vi.fn()}
+        onBack={vi.fn()}
+      />,
+    );
+
+    expect(screen.getByRole('alert')).toHaveTextContent('本次排盘尚未保存');
+    expect(screen.getByRole('button', { name: '开始解读' })).toBeDisabled();
+    expect(screen.getByRole('textbox', { name: '你的追问' })).toBeDisabled();
+    fireEvent.click(screen.getByRole('button', { name: '重试保存' }));
+    expect(onRetrySessionSave).toHaveBeenCalledTimes(1);
+    expect(onAnalyze).not.toHaveBeenCalled();
   });
 
   it('states clearly when no traceable evidence is available', () => {

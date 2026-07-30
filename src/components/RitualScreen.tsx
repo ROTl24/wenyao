@@ -1,10 +1,10 @@
 import { lazy, Suspense, useCallback, useEffect, useState } from 'react';
 import type { DivinationSession } from '../lib/session';
+import { CastingProgress } from './CastingProgress';
 
 const CoinScene = lazy(() => import('./CoinScene'));
 
 const lineNames = ['第一爻', '第二爻', '第三爻', '第四爻', '第五爻', '第六爻'];
-const linePositions = ['上', '五', '四', '三', '二', '初'];
 
 type RitualPhase = 'gathering' | 'casting' | 'settling' | 'revealed';
 
@@ -92,28 +92,12 @@ export function RitualScreen({ session, onConfirm }: Props) {
         </span>
       </section>
 
-      <aside className="casting-progress">
-        <header>
-          <span>六爻成象</span>
-          <strong>{session.tosses.length}<small>/6</small></strong>
-        </header>
-        <div className="casting-lines" aria-label={`已完成 ${session.tosses.length} 爻，共 6 爻`}>
-          {linePositions.map((position, visualIndex) => {
-            const lineIndex = 6 - visualIndex;
-            const confirmed = session.tosses[lineIndex - 1];
-            const isCurrent = lineIndex === current.lineIndex;
-            const visibleLine = confirmed ?? (isCurrent && phase === 'revealed' ? current : undefined);
-            const state = visibleLine ? (visibleLine.baseYang ? 'yang' : 'yin') : 'empty';
-            return (
-              <div className={`casting-line casting-line--${state}${isCurrent ? ' casting-line--current' : ''}${visibleLine?.moving ? ' casting-line--moving' : ''}`} key={lineIndex} aria-label={`${position}爻：${visibleLine?.label ?? (isCurrent ? '正在起卦' : '未成')}`}>
-                <span className="casting-line-index">{position}</span>
-                <span className="casting-line-symbol" aria-hidden="true"><i /><i /></span>
-                <span className="casting-line-state">{visibleLine?.label ?? (isCurrent ? phaseCopy.name : '')}</span>
-              </div>
-            );
-          })}
-        </div>
-      </aside>
+      <CastingProgress
+        confirmed={session.tosses}
+        currentLineIndex={current.lineIndex}
+        preview={phase === 'revealed' ? current : undefined}
+        currentStateLabel={phaseCopy.name}
+      />
 
       <section className="ritual-outcome" id="ritual-status" aria-live="polite">
         <span className="ritual-phase-name">{phaseCopy.name}</span>
