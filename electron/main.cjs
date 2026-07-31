@@ -13,6 +13,7 @@ const { LocalVectorIndex } = require('./services/vector-index.cjs');
 const { hybridSearch } = require('./services/retrieval.cjs');
 const { configureInstallDataPaths } = require('./services/install-data.cjs');
 const { createUpdateManager } = require('./services/update-manager.cjs');
+const { sanitizeUpdateState } = require('./services/update-state.cjs');
 const alibabaConfig = require('../config/alibaba.json');
 const deepseekConfig = require('../config/deepseek.json');
 
@@ -143,7 +144,7 @@ function createWindow() {
 
 function broadcastUpdateState(state) {
   if (!mainWindow || mainWindow.isDestroyed() || mainWindow.webContents.isDestroyed()) return;
-  mainWindow.webContents.send('updates:state', state);
+  mainWindow.webContents.send('updates:state', sanitizeUpdateState(state));
 }
 
 function structuredError(error, fallbackCode = 'UNEXPECTED_ERROR') {
@@ -215,10 +216,10 @@ async function searchCorpus(payload) {
 }
 
 function registerIpc() {
-  ipcMain.handle('updates:get-state', () => updateManager.getState());
-  ipcMain.handle('updates:check', () => updateManager.check('manual'));
-  ipcMain.handle('updates:download', () => updateManager.download());
-  ipcMain.handle('updates:install', () => updateManager.install());
+  ipcMain.handle('updates:get-state', () => sanitizeUpdateState(updateManager.getState()));
+  ipcMain.handle('updates:check', async () => sanitizeUpdateState(await updateManager.check('manual')));
+  ipcMain.handle('updates:download', async () => sanitizeUpdateState(await updateManager.download()));
+  ipcMain.handle('updates:install', () => sanitizeUpdateState(updateManager.install()));
 
   ipcMain.handle('sessions:list', () => store.listSessions());
   ipcMain.handle('sessions:get', (_event, id) => store.getSession(id));

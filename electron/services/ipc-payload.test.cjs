@@ -113,6 +113,15 @@ test('preload independently sanitizes session save payloads', async () => {
     ipcRenderer: {
       invoke(channel, ...args) {
         calls.push({ channel, args });
+        if (channel === 'updates:get-state') {
+          return Promise.resolve({
+            status: 'error',
+            currentVersion: '0.3.0',
+            operation: 'download',
+            manual: true,
+            message: 'C:\\private\\update.exe?token=secret',
+          });
+        }
         return Promise.resolve(args[0]);
       },
       on(channel, listener) {
@@ -130,7 +139,7 @@ test('preload independently sanitizes session save payloads', async () => {
     preloadSource.matchAll(/require\((['"])(.*?)\1\)/g),
     (match) => match[2],
   );
-  assert.deepEqual(requiredModules, ['electron', './services/update-state.cjs']);
+  assert.deepEqual(requiredModules, ['electron']);
   delete require.cache[preloadPath];
   Module._load = function load(request, parent, isMain) {
     if (request === 'electron') return electron;
@@ -176,6 +185,14 @@ test('preload independently sanitizes session save payloads', async () => {
   }]);
 
   const updateStates = [];
+  const currentUpdateState = await exposed.updates.getState();
+  assert.deepEqual(currentUpdateState, {
+    status: 'error',
+    currentVersion: '0.3.0',
+    operation: 'download',
+    manual: true,
+    message: '更新包下载失败，请检查网络连接后重试。',
+  });
   const unsubscribe = exposed.updates.onState((state) => updateStates.push(state));
   listeners.get('updates:state')({}, {
     status: 'downloading',
