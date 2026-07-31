@@ -1,4 +1,5 @@
 const { contextBridge, ipcRenderer } = require('electron');
+const { sanitizeUpdateState } = require('./services/update-state.cjs');
 
 function isRecord(value) {
   return value !== null && typeof value === 'object' && !Array.isArray(value);
@@ -51,6 +52,18 @@ function sanitizeRendererSession(value) {
 }
 
 contextBridge.exposeInMainWorld('wenyao', {
+  updates: {
+    getState: () => ipcRenderer.invoke('updates:get-state').then(sanitizeUpdateState),
+    check: () => ipcRenderer.invoke('updates:check').then(sanitizeUpdateState),
+    download: () => ipcRenderer.invoke('updates:download').then(sanitizeUpdateState),
+    install: () => ipcRenderer.invoke('updates:install').then(sanitizeUpdateState),
+    onState: (listener) => {
+      if (typeof listener !== 'function') return () => {};
+      const subscription = (_event, state) => listener(sanitizeUpdateState(state));
+      ipcRenderer.on('updates:state', subscription);
+      return () => ipcRenderer.removeListener('updates:state', subscription);
+    },
+  },
   sessions: {
     list: () => ipcRenderer.invoke('sessions:list'),
     get: (id) => ipcRenderer.invoke('sessions:get', id),

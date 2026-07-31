@@ -101,6 +101,7 @@ test('sanitizer retains an explicitly supplied physical visualSeed so validation
 
 test('preload independently sanitizes session save payloads', async () => {
   const calls = [];
+  const listeners = new Map();
   let exposed;
   const electron = {
     contextBridge: {
@@ -114,6 +115,12 @@ test('preload independently sanitizes session save payloads', async () => {
         calls.push({ channel, args });
         return Promise.resolve(args[0]);
       },
+      on(channel, listener) {
+        listeners.set(channel, listener);
+      },
+      removeListener(channel, listener) {
+        if (listeners.get(channel) === listener) listeners.delete(channel);
+      },
     },
   };
   const originalLoad = Module._load;
@@ -123,7 +130,7 @@ test('preload independently sanitizes session save payloads', async () => {
     preloadSource.matchAll(/require\((['"])(.*?)\1\)/g),
     (match) => match[2],
   );
-  assert.deepEqual(requiredModules, ['electron']);
+  assert.deepEqual(requiredModules, ['electron', './services/update-state.cjs']);
   delete require.cache[preloadPath];
   Module._load = function load(request, parent, isMain) {
     if (request === 'electron') return electron;
@@ -167,4 +174,23 @@ test('preload independently sanitizes session save payloads', async () => {
       tosses: [],
     }],
   }]);
+
+  const updateStates = [];
+  const unsubscribe = exposed.updates.onState((state) => updateStates.push(state));
+  listeners.get('updates:state')({}, {
+    status: 'downloading',
+    currentVersion: '0.3.0',
+    availableVersion: '0.3.1',
+    progress: 45.67,
+    token: 'must-not-cross-preload',
+    installerPath: 'C:\\private\\update.exe',
+  });
+  assert.deepEqual(updateStates, [{
+    status: 'downloading',
+    currentVersion: '0.3.0',
+    availableVersion: '0.3.1',
+    progress: 45.7,
+  }]);
+  unsubscribe();
+  assert.equal(listeners.has('updates:state'), false);
 });

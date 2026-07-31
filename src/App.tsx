@@ -7,6 +7,7 @@ import { PhysicalReviewScreen } from './components/PhysicalReviewScreen';
 import { ResultScreen } from './components/ResultScreen';
 import { RitualScreen } from './components/RitualScreen';
 import { SettingsPanel } from './components/SettingsPanel';
+import { UpdatePrompt, type PromptUpdateState } from './components/UpdatePrompt';
 import { desktop } from './lib/desktop';
 import { randomToss, upgradePlate } from './lib/divination';
 import { isValidQuestion } from './lib/question';
@@ -36,6 +37,7 @@ import {
   type SessionCategory,
 } from './lib/session';
 import type { LineValue } from './lib/divination';
+import type { UpdateState } from './types/desktop';
 
 type Screen = 'home' | 'casting' | 'physical-casting' | 'physical-review' | 'result';
 type AnalysisSaveStatus = 'idle' | 'saving' | 'saved' | 'error';
@@ -103,6 +105,11 @@ export function App() {
   const [retrievalDiagnostics, setRetrievalDiagnostics] = useState<RetrievalDiagnostics | null>(null);
   const [historyOpen, setHistoryOpen] = useState(false);
   const [settingsOpen, setSettingsOpen] = useState(false);
+  const [updateState, setUpdateState] = useState<UpdateState>({
+    status: 'unsupported',
+    currentVersion: '',
+  });
+  const [updatePromptOpen, setUpdatePromptOpen] = useState(false);
   const [analyzing, setAnalyzing] = useState(false);
   const [analysisError, setAnalysisError] = useState('');
   const [analysisSaveStatus, setAnalysisSaveStatus] = useState<AnalysisSaveStatus>('idle');
@@ -116,6 +123,7 @@ export function App() {
   const sessionSaveQueuesRef = useRef(new Map<string, Promise<void>>());
   const analysisEpochsRef = useRef(new Map<string, symbol>());
   const analysisRunRef = useRef<{ sessionId: string; token: symbol } | null>(null);
+  const dismissedUpdateVersionRef = useRef('');
   const physicalTimeError = useMemo(
     () => shanghaiDateTimeError(physicalTimeInput),
     [physicalTimeInput],
@@ -141,6 +149,52 @@ export function App() {
       });
     });
   }, []);
+
+  useEffect(() => {
+    let active = true;
+    const acceptUpdateState = (next: UpdateState) => {
+      if (!active) return;
+      setUpdateState(next);
+      if (next.status === 'available' && next.availableVersion !== dismissedUpdateVersionRef.current) {
+        setUpdatePromptOpen(true);
+      }
+      if (next.status === 'downloaded') setUpdatePromptOpen(true);
+    };
+    const unsubscribe = desktop.updates.onState(acceptUpdateState);
+    void desktop.updates.getState().then(acceptUpdateState);
+    return () => {
+      active = false;
+      unsubscribe();
+    };
+  }, []);
+
+  const checkForUpdate = async () => {
+    const next = await desktop.updates.check();
+    setUpdateState(next);
+    if (next.status === 'available') setUpdatePromptOpen(true);
+  };
+
+  const downloadUpdate = async () => {
+    setUpdatePromptOpen(true);
+    const next = await desktop.updates.download();
+    setUpdateState(next);
+  };
+
+  const installUpdate = () => {
+    void desktop.updates.install();
+  };
+
+  const dismissUpdatePrompt = () => {
+    if (updateState.status === 'available') {
+      dismissedUpdateVersionRef.current = updateState.availableVersion;
+    }
+    setUpdatePromptOpen(false);
+  };
+
+  const openUpdatePrompt = () => {
+    setSettingsOpen(false);
+    setUpdatePromptOpen(true);
+  };
 
   const isActiveSession = (id: string) => (
     activeSessionIdRef.current === id && !deletedSessionIdsRef.current.has(id)
@@ -569,7 +623,7 @@ export function App() {
         <div className="chrome-brand"><span>爻</span><strong>{appTitle}</strong></div>
         <nav>
           <button type="button" aria-label="历史记录" disabled={physicalFinalizing} onClick={() => setHistoryOpen(true)}><History size={17} /><span>历史</span></button>
-          <button type="button" aria-label="AI 设置" disabled={physicalFinalizing} onClick={() => setSettingsOpen(true)}><Settings2 size={17} /><span>设置</span></button>
+          <button type="button" aria-label="应用设置" disabled={physicalFinalizing} onClick={() => setSettingsOpen(true)}><Settings2 size={17} /><span>设置</span></button>
         </nav>
       </header>
       {screen === 'home' && (
@@ -609,7 +663,22 @@ export function App() {
       )}
       {screen === 'result' && session?.plate && <ResultScreen session={session} evidence={evidence} retrievalDiagnostics={retrievalDiagnostics} sessionSaveStatus={sessionSaveStatus} sessionSaveError={sessionSaveError} analyzing={analyzing} analysisError={analysisError} analysisSaveStatus={analysisSaveStatus} analysisSaveError={analysisSaveError} chatting={chatting} chatError={chatError} onRetrySessionSave={() => void retrySessionSave()} onAnalyze={() => void runAnalysis(session)} onRetryAnalysisSave={() => void retryAnalysisSave()} onFollowUp={followUp} onBack={returnHome} />}
       {historyOpen && <HistoryPanel sessions={history} onClose={() => setHistoryOpen(false)} onOpen={(saved) => void openSession(saved)} onDelete={(id) => void deleteSession(id)} />}
-      {settingsOpen && <SettingsPanel onClose={() => setSettingsOpen(false)} />}
+      {settingsOpen && (
+        <SettingsPanel
+          updateState={updateState}
+          onCheckUpdate={() => void checkForUpdate()}
+          onOpenUpdate={openUpdatePrompt}
+          onClose={() => setSettingsOpen(false)}
+        />
+      )}
+      {updatePromptOpen && ['available', 'downloading', 'downloaded', 'error'].includes(updateState.status) && (
+        <UpdatePrompt
+          state={updateState as PromptUpdateState}
+          onDownload={() => void downloadUpdate()}
+          onInstall={installUpdate}
+          onDismiss={dismissUpdatePrompt}
+        />
+      )}
     </div>
   );
 }

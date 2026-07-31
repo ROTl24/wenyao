@@ -109,8 +109,37 @@ describe('问爻桌面体验', () => {
     fireEvent.click(screen.getByRole('button', { name: '历史记录' }));
     expect(await screen.findByRole('heading', { name: '问爻占簿' })).toBeVisible();
     fireEvent.click(screen.getByRole('button', { name: '关闭历史记录' }));
-    fireEvent.click(screen.getByRole('button', { name: 'AI 设置' }));
-    expect(await screen.findByRole('heading', { name: 'AI 与知识库' })).toBeVisible();
+    fireEvent.click(screen.getByRole('button', { name: '应用设置' }));
+    expect(await screen.findByRole('heading', { name: '应用设置' })).toBeVisible();
+  });
+
+  it('prompts before downloading an available desktop update and cleans up the subscription', async () => {
+    const download = vi.spyOn(desktop.updates, 'download').mockResolvedValue({
+      status: 'downloading',
+      currentVersion: '0.3.0',
+      availableVersion: '0.3.1',
+      progress: 0,
+    });
+    vi.spyOn(desktop.updates, 'getState').mockResolvedValue({
+      status: 'available',
+      currentVersion: '0.3.0',
+      availableVersion: '0.3.1',
+    });
+    const unsubscribe = vi.fn();
+    vi.spyOn(desktop.updates, 'onState').mockReturnValue(unsubscribe);
+
+    const view = render(<App />);
+    expect(await screen.findByRole('heading', { name: '发现新版本' })).toBeVisible();
+    expect(download).not.toHaveBeenCalled();
+
+    fireEvent.click(screen.getByRole('button', { name: '下载更新' }));
+    await waitFor(() => expect(download).toHaveBeenCalledTimes(1));
+    expect(await screen.findByText('0.0%')).toBeVisible();
+
+    fireEvent.click(screen.getByRole('button', { name: '收起并继续使用' }));
+    expect(screen.queryByRole('heading', { name: '下载更新' })).not.toBeInTheDocument();
+    view.unmount();
+    expect(unsubscribe).toHaveBeenCalledTimes(1);
   });
 
   it('opens a completed history record without starting a new AI analysis', async () => {
@@ -388,7 +417,7 @@ describe('问爻桌面体验', () => {
     await waitFor(() => expect(save).toHaveBeenCalledTimes(1));
     expect(screen.getByRole('main')).toHaveAttribute('aria-busy', 'true');
     expect(screen.getByRole('button', { name: '历史记录' })).toBeDisabled();
-    expect(screen.getByRole('button', { name: 'AI 设置' })).toBeDisabled();
+    expect(screen.getByRole('button', { name: '应用设置' })).toBeDisabled();
     expect(screen.getByRole('button', { name: '放弃本次起卦' })).toBeDisabled();
     expect(screen.getByRole('button', { name: '修改初爻' })).toBeDisabled();
     const timeField = screen.getByRole('group', { name: '起卦时间（北京时间）' });

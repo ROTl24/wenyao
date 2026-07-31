@@ -17,7 +17,22 @@ interface PublicSettings {
 interface DesktopError { code: string; message: string; dataSafe: boolean; nextAction: string }
 interface CorpusStatus { count: number; bookCount: number; originalCount: number; summaryCount: number; ruleCount: number; caseCount: number; doctrineCount: number; vectorReady: boolean; vectorModel: string; ready: boolean }
 
+export type UpdateState =
+  | { status: 'idle' | 'upToDate' | 'unsupported'; currentVersion: string }
+  | { status: 'checking'; currentVersion: string; manual: boolean }
+  | { status: 'available'; currentVersion: string; availableVersion: string }
+  | { status: 'downloading'; currentVersion: string; availableVersion: string; progress: number }
+  | { status: 'downloaded'; currentVersion: string; availableVersion: string }
+  | { status: 'error'; currentVersion: string; availableVersion?: string; operation: 'check' | 'download'; manual: boolean; message: string };
+
 export interface DesktopApi {
+  updates: {
+    getState(): Promise<UpdateState>;
+    check(): Promise<UpdateState>;
+    download(): Promise<UpdateState>;
+    install(): Promise<UpdateState>;
+    onState(listener: (state: UpdateState) => void): () => void;
+  };
   sessions: {
     list(): Promise<DivinationSession[]>;
     get(id: string): Promise<DivinationSession | null>;

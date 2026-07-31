@@ -1,4 +1,5 @@
 const { app, BrowserWindow, dialog, ipcMain, safeStorage, shell } = require('electron');
+const { autoUpdater } = require('electron-updater');
 const fs = require('node:fs');
 const path = require('node:path');
 const crypto = require('node:crypto');
@@ -11,6 +12,7 @@ const { createDeepSeekClient } = require('./services/deepseek.cjs');
 const { LocalVectorIndex } = require('./services/vector-index.cjs');
 const { hybridSearch } = require('./services/retrieval.cjs');
 const { configureInstallDataPaths } = require('./services/install-data.cjs');
+const { createUpdateManager } = require('./services/update-manager.cjs');
 const alibabaConfig = require('../config/alibaba.json');
 const deepseekConfig = require('../config/deepseek.json');
 
@@ -36,6 +38,7 @@ let corpus = [];
 let corpusHash = '';
 let vectorIndex;
 let vectorBuildPromise = null;
+let updateManager;
 
 function resourcePath(name) {
   const candidates = [path.join(app.getAppPath(), 'resources', name), path.join(process.resourcesPath, 'resources', name)];
@@ -138,6 +141,11 @@ function createWindow() {
   else mainWindow.loadURL('http://127.0.0.1:5173');
 }
 
+function broadcastUpdateState(state) {
+  if (!mainWindow || mainWindow.isDestroyed() || mainWindow.webContents.isDestroyed()) return;
+  mainWindow.webContents.send('updates:state', state);
+}
+
 function structuredError(error, fallbackCode = 'UNEXPECTED_ERROR') {
   const status = Number(error?.status || 0);
   return {
@@ -207,6 +215,11 @@ async function searchCorpus(payload) {
 }
 
 function registerIpc() {
+  ipcMain.handle('updates:get-state', () => updateManager.getState());
+  ipcMain.handle('updates:check', () => updateManager.check('manual'));
+  ipcMain.handle('updates:download', () => updateManager.download());
+  ipcMain.handle('updates:install', () => updateManager.install());
+
   ipcMain.handle('sessions:list', () => store.listSessions());
   ipcMain.handle('sessions:get', (_event, id) => store.getSession(id));
   ipcMain.handle('sessions:save', (_event, session) => store.saveSession(sanitizeRendererSession(session)));
@@ -411,9 +424,17 @@ app.whenReady().then(() => {
       .catch((error) => { process.stderr.write(`${error.message}\n`); app.exit(1); });
     return;
   }
+  updateManager = createUpdateManager({
+    updater: app.isPackaged && process.platform === 'win32' ? autoUpdater : null,
+    currentVersion: app.getVersion(),
+    supported: app.isPackaged && process.platform === 'win32',
+    broadcast: broadcastUpdateState,
+  });
   registerIpc();
   createWindow();
+  updateManager.start();
   app.on('activate', () => { if (BrowserWindow.getAllWindows().length === 0) createWindow(); });
 });
 
+app.on('before-quit', () => updateManager?.stop());
 app.on('window-all-closed', () => { if (process.platform !== 'darwin') app.quit(); });

@@ -1,12 +1,36 @@
-import { Database, KeyRound, ShieldCheck, X } from 'lucide-react';
+import { Database, KeyRound, RefreshCw, ShieldCheck, X } from 'lucide-react';
 import { useEffect, useState } from 'react';
 import alibabaConfig from '../../config/alibaba.json';
 import deepseekConfig from '../../config/deepseek.json';
 import { desktop } from '../lib/desktop';
+import type { UpdateState } from '../types/desktop';
 
-interface Props { onClose(): void }
+interface Props {
+  updateState: UpdateState;
+  onCheckUpdate(): void;
+  onOpenUpdate(): void;
+  onClose(): void;
+}
 
-export function SettingsPanel({ onClose }: Props) {
+function updateStatusText(state: UpdateState) {
+  switch (state.status) {
+    case 'unsupported': return '浏览器预览不支持桌面应用更新';
+    case 'idle': return '已启用启动检查与每 6 小时自动检查';
+    case 'checking': return '正在检查新版本…';
+    case 'upToDate': return '当前已经是最新版本';
+    case 'available': return `发现 v${state.availableVersion}`;
+    case 'downloading': return `正在下载 v${state.availableVersion} · ${state.progress.toFixed(1)}%`;
+    case 'downloaded': return `v${state.availableVersion} 已下载，等待安装`;
+    case 'error': return state.manual ? state.message : '上次自动检查未完成，可手动重试';
+  }
+}
+
+export function SettingsPanel({
+  updateState,
+  onCheckUpdate,
+  onOpenUpdate,
+  onClose,
+}: Props) {
   const [alibabaBaseUrl, setAlibabaBaseUrl] = useState(alibabaConfig.baseUrl);
   const [alibabaModel, setAlibabaModel] = useState(alibabaConfig.model);
   const [embeddingModel, setEmbeddingModel] = useState(alibabaConfig.embeddingModel);
@@ -84,7 +108,32 @@ export function SettingsPanel({ onClose }: Props) {
   return (
     <div className="overlay" role="presentation" onMouseDown={(event) => { if (event.target === event.currentTarget) onClose(); }}>
       <aside className="side-panel settings-panel" aria-modal="true" role="dialog">
-        <header><div><h2>AI 与知识库</h2><p>两套密钥均由 Windows DPAPI 加密保存</p></div><button type="button" aria-label="关闭 AI 设置" onClick={onClose}><X /></button></header>
+        <header><div><h2>应用设置</h2><p>软件更新、AI 模型与本地知识库</p></div><button type="button" aria-label="关闭设置" onClick={onClose}><X /></button></header>
+
+        <section className="settings-section update-settings">
+          <div className="settings-heading"><RefreshCw /><div><strong>软件更新</strong><span>{updateStatusText(updateState)}</span></div></div>
+          <div className="update-version-row"><span>当前版本</span><strong>{updateState.currentVersion ? `v${updateState.currentVersion}` : '未知'}</strong></div>
+          {updateState.status === 'error' && updateState.manual && <p className="settings-status" role="alert">{updateState.message}</p>}
+          <button
+            className="index-button"
+            type="button"
+            disabled={updateState.status === 'unsupported' || updateState.status === 'checking' || updateState.status === 'downloading'}
+            onClick={updateState.status === 'available' || updateState.status === 'downloaded' || (updateState.status === 'error' && updateState.operation === 'download')
+              ? onOpenUpdate
+              : onCheckUpdate}
+          >
+            {updateState.status === 'checking'
+              ? '正在检查…'
+              : updateState.status === 'downloading'
+                ? `下载中 ${updateState.progress.toFixed(1)}%`
+                : updateState.status === 'available' || updateState.status === 'downloaded' || (updateState.status === 'error' && updateState.operation === 'download')
+                  ? '查看更新'
+                  : updateState.status === 'error'
+                    ? '重新检查'
+                    : '检查更新'}
+          </button>
+          <p className="update-signing-note">当前版本尚未进行 Windows 代码签名，安装更新时仍可能出现 SmartScreen 提示；SHA-512 完整性校验不等同于发布者身份验证。</p>
+        </section>
 
         <section className="settings-section">
           <div className="settings-heading"><KeyRound /><div><strong>阿里云百炼 · 千问检索栈</strong><span>原千问配置负责聊天连通性、向量召回与可选重排</span></div></div>

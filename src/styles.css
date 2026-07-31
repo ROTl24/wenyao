@@ -210,6 +210,9 @@ button:focus-visible, input:focus-visible, textarea:focus-visible { outline: 2px
 .settings-actions { display: flex; gap: 8px; margin-top: 15px; }
 .settings-actions button:first-child { background: var(--cinnabar); color: #f2e7d4; }
 .settings-status { font-size: 12px; color: #5f615a; }
+.update-version-row { min-height: 42px; padding: 0 12px; border: 1px solid var(--line); display: flex; align-items: center; justify-content: space-between; color: var(--muted); font-size: 12px; }
+.update-version-row strong { color: var(--ink); font: 18px var(--serif); letter-spacing: .08em; }
+.update-signing-note { margin: 12px 0 0; color: #765d54; font-size: 11px; line-height: 1.6; }
 .corpus-stats { display: grid; grid-template-columns: repeat(3, 1fr); gap: 8px; }
 .corpus-stats--knowledge { grid-template-columns: repeat(4, 1fr); }
 .corpus-stats span { padding: 12px; border: 1px solid var(--line); text-align: center; font-size: 12px; }
@@ -220,6 +223,21 @@ button:focus-visible, input:focus-visible, textarea:focus-visible { outline: 2px
 .index-button:disabled { opacity: .4; cursor: not-allowed; }
 .security-note { display: flex; gap: 12px; margin-top: 20px; color: #60625c; }
 .security-note svg { flex: 0 0 auto; color: var(--bronze); }
+
+.update-overlay { position: fixed; z-index: 140; inset: 42px 0 0; background: rgba(25,25,22,.48); backdrop-filter: blur(5px); display: grid; place-items: center; padding: 24px; }
+.update-dialog { position: relative; width: min(510px, 92vw); min-height: 320px; overflow: hidden; border: 1px solid rgba(75,66,51,.28); background-color: var(--paper-light); background-image: radial-gradient(circle at 86% 18%, rgba(152,43,36,.06), transparent 28%), repeating-linear-gradient(94deg, rgba(69,59,45,.018) 0 1px, transparent 1px 5px); box-shadow: 0 30px 90px rgba(20,20,18,.28); padding: 48px 50px 42px; }
+.update-dialog::before { content: ""; position: absolute; inset: 12px; border: 1px solid rgba(140,113,70,.18); pointer-events: none; }
+.update-dialog__close { position: absolute; z-index: 2; top: 18px; right: 18px; width: 36px; height: 36px; border: 0; background: transparent; display: grid; place-items: center; cursor: pointer; }
+.update-dialog__seal { position: absolute; right: 48px; top: 58px; width: 36px; height: 36px; border: 1px solid var(--cinnabar); color: var(--cinnabar); display: grid; place-items: center; font: 18px var(--serif); transform: rotate(4deg); opacity: .72; }
+.update-dialog__eyebrow { margin: 0 0 12px; color: var(--cinnabar); font-size: 11px; letter-spacing: .18em; }
+.update-dialog h2 { max-width: calc(100% - 70px); margin: 0 0 20px; font: 34px var(--serif); letter-spacing: .08em; }
+.update-dialog > p:not(.update-dialog__eyebrow) { max-width: 390px; margin: 0; color: var(--muted); font: 14px/1.85 var(--reading); }
+.update-dialog__actions { display: flex; flex-wrap: wrap; gap: 10px; margin-top: 28px; }
+.update-dialog__actions button { min-height: 42px; padding: 0 18px; border: 1px solid rgba(70,63,51,.28); background: transparent; display: inline-flex; align-items: center; justify-content: center; gap: 8px; cursor: pointer; }
+.update-dialog__actions .update-primary-action { border-color: var(--cinnabar); background: var(--cinnabar); color: #f5e9d7; }
+.update-progress { height: 7px; margin-top: 28px; overflow: hidden; background: rgba(80,73,61,.12); }
+.update-progress span { display: block; width: 100%; height: 100%; background: linear-gradient(90deg, var(--bronze), var(--cinnabar)); transform-origin: left; transition: transform 240ms ease; }
+.update-progress__label { display: block; margin-top: 9px; color: var(--cinnabar); font: 16px var(--serif); text-align: right; }
 .security-note p { margin: 0; font-size: 12px; line-height: 1.6; }
 .security-note strong { display: block; font: 14px var(--serif); }
 

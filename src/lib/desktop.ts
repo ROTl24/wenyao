@@ -2,6 +2,7 @@ import corpus from '../../resources/corpus.json';
 import alibabaConfig from '../../config/alibaba.json';
 import deepseekConfig from '../../config/deepseek.json';
 import type { DesktopApi } from '../types/desktop';
+import type { UpdateState } from '../types/desktop';
 import type { DivinationSession } from './session';
 import { searchEvidence } from './retrieval';
 import {
@@ -11,6 +12,10 @@ import {
 } from './sessionValidation';
 
 const STORAGE_KEY = 'wenyao-browser-sessions';
+const browserUpdateState: UpdateState = {
+  status: 'unsupported',
+  currentVersion: '',
+};
 
 function storedBrowserSessions(): unknown[] {
   try {
@@ -32,6 +37,13 @@ function storedSessionId(value: unknown): unknown {
 }
 
 const browserFallback: DesktopApi = {
+  updates: {
+    async getState() { return structuredClone(browserUpdateState); },
+    async check() { return structuredClone(browserUpdateState); },
+    async download() { return structuredClone(browserUpdateState); },
+    async install() { return structuredClone(browserUpdateState); },
+    onState() { return () => {}; },
+  },
   sessions: {
     async list() { return browserSessions().sort((a, b) => b.updatedAt.localeCompare(a.updatedAt)); },
     async get(id) { return browserSessions().find((item) => item.id === id) || null; },
