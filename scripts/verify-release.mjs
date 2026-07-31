@@ -72,6 +72,9 @@ if (!packageJson.scripts?.build?.includes('scripts/build-windows-installer.mjs')
 if (!packageJson.scripts?.['release:windows']?.includes('scripts/build-windows-installer.mjs')) {
   throw new Error('Windows 发布构建未接入问爻安装器构建脚本');
 }
+if (packageJson.build?.electronDist != null) {
+  throw new Error('标准 Electron 构建不应配置自定义 electronDist；应由 electron-builder 获取匹配版本');
+}
 for (const expectedLine of [
   'ShowInstDetails show',
   'SetDetailsPrint both',
