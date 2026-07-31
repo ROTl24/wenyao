@@ -16,49 +16,6 @@ function pipelineTrace(retrievalDiagnostics) {
   };
 }
 
-function localUseGodBasis(professionalContext, plate) {
-  const secondaryRelations = new Set(professionalContext.useGod.secondaryRelations || []);
-  const missingPrimaryFact = professionalContext.useGod.primaryRelation && professionalContext.useGod.candidates.length === 0
-    ? `当前盘明爻与伏神中未见${professionalContext.useGod.primaryRelation}爻候选`
-    : null;
-  const supportingCandidates = [
-    ...professionalContext.useGod.candidates,
-    ...plate.lines
-      .filter((line) => secondaryRelations.has(line.relation) || line.role)
-      .map((line) => ({ ...line, source: 'visible', lineIndex: line.index })),
-    ...(plate.fuShen || [])
-      .filter((item) => secondaryRelations.has(item.relation))
-      .map((item) => ({ ...item, source: 'hidden' })),
-  ];
-  const uniqueCandidates = [...new Map(supportingCandidates.map((candidate) => (
-    [`${candidate.source}:${candidate.lineIndex}:${candidate.relation}:${candidate.ganZhi}`, candidate]
-  ))).values()];
-  const facts = uniqueCandidates.map((candidate) => {
-    const location = candidate.source === 'hidden'
-      ? `${candidate.relation}${candidate.ganZhi}伏于第${candidate.lineIndex}爻`
-      : `第${candidate.lineIndex}爻${candidate.relation}${candidate.ganZhi}${candidate.role ? `（${candidate.role}）` : ''}`;
-    const classifiedDayClash = candidate.source === 'visible'
-      ? ({ 'hidden-movement': '暗动', 'day-break': '日破', 'ordinary-clash': '日冲' }[candidate.dayClashAssessment?.kind] || '')
-      : candidate.dayClash ? '日冲' : '';
-    const states = [candidate.moving && '动爻', candidate.void && '旬空', candidate.monthBreak && '月破', classifiedDayClash].filter(Boolean);
-    return states.length ? `${location}，${states.join('、')}` : location;
-  });
-  if (missingPrimaryFact) facts.unshift(missingPrimaryFact);
-  return facts.length
-    ? `当前盘用于取用核对的具体爻为：${facts.join('；')}。`
-    : '当前排盘没有可供这条取用提示核对的具体爻，因此本地模式不作进一步判断。';
-}
-
-function localUseGodJudgment(professionalContext) {
-  if (professionalContext.useGod.primaryRelation) {
-    return `本地模式以${professionalContext.useGod.primaryRelation}爻作为当前取用主线。`;
-  }
-  if (professionalContext.useGod.primaryRole) {
-    return `本地模式以${professionalContext.useGod.primaryRole}爻作为当前取用主线。`;
-  }
-  return '本地模式需要先结合具体事项确定主用神。';
-}
-
 function reasoningPlan(category, plate) {
   const professionalContext = buildProfessionalContext(category, plate);
   return {
@@ -83,63 +40,6 @@ function reasoningPlan(category, plate) {
       lineInteractions: professionalContext.lineInteractions,
     },
     stages: REASONING_STAGES,
-  };
-}
-
-function createLocalReport({ question, category, plate, retrievalDiagnostics }) {
-  const professionalContext = buildProfessionalContext(category, plate);
-  const worldLine = plate.lines.find((line) => line.role === '世');
-  const responseLine = plate.lines.find((line) => line.role === '应');
-  const movement = plate.movingLines.length
-    ? `动爻：第 ${plate.movingLines.join('、')} 爻。`
-    : '动爻：无。';
-  const fact = (text) => `- ${text} [排盘事实](#plate-facts)`;
-  const questionText = String(question || '当前占问').replace(/[。！？!?]+$/g, '');
-  const markdown = [
-    `## ${ANALYSIS_SECTION_HEADINGS[0]}`,
-    fact(`核心问题：${questionText}`),
-    fact(`类别：${category}`),
-    fact('分析目标：当前本地模式只整理排盘事实与取用提示，不作完整综合判断'),
-    '',
-    `## ${ANALYSIS_SECTION_HEADINGS[1]}`,
-    fact(`已提供关键信息：本卦${plate.baseHexagram.name}，变卦${plate.changedHexagram.name}，${movement}月建${plate.monthGanZhi || '未载'}，日辰${plate.dayGanZhi || '未载'}`),
-    fact('信息完整度：信息不足会影响判断，当前仅保留可由程序事实支持的有限分析'),
-    '',
-    `## ${ANALYSIS_SECTION_HEADINGS[2]}`,
-    fact(`取用主线：${localUseGodJudgment(professionalContext)}`),
-    fact(`候选事实：${localUseGodBasis(professionalContext, plate)}`),
-    fact(`世应定位：世爻为${worldLine ? `第${worldLine.index}爻${worldLine.relation}${worldLine.ganZhi}` : '未载'}，应爻为${responseLine ? `第${responseLine.index}爻${responseLine.relation}${responseLine.ganZhi}` : '未载'}`),
-    '',
-    `## ${ANALYSIS_SECTION_HEADINGS[3]}`,
-    fact('用神旺衰与状态：本地模式暂不代替完整的月日旺衰、空破和伏藏综合判断'),
-    fact(`当前状态事实：${localUseGodBasis(professionalContext, plate)}`),
-    '',
-    `## ${ANALYSIS_SECTION_HEADINGS[4]}`,
-    fact('生克制化分析：本地模式暂不作完整原神、忌神、仇神的力量比较'),
-    '',
-    `## ${ANALYSIS_SECTION_HEADINGS[5]}`,
-    fact(`动爻与变爻分析：${movement}当前报告只展示程序锁定的动静事实`),
-    '',
-    `## ${ANALYSIS_SECTION_HEADINGS[6]}`,
-    fact('世应关系分析：当前仅保留世爻与应爻定位，暂不作完整互动强弱判断'),
-    '',
-    `## ${ANALYSIS_SECTION_HEADINGS[7]}`,
-    fact('辅助因素修正：六神、冲合、伏神等辅助因素需要在云端完整解读中结合用神统一判断'),
-    '',
-    `## ${ANALYSIS_SECTION_HEADINGS[8]}`,
-    fact('综合结论：不足判断，当前本地模式没有足够分析链条支持确定的成败结论'),
-    '',
-    `## ${ANALYSIS_SECTION_HEADINGS[9]}`,
-    fact('应期不足以精断，当前本地报告不硬猜日期'),
-    '',
-    `## ${ANALYSIS_SECTION_HEADINGS[10]}`,
-    fact('最终一句话结论：当前只完成排盘事实整理，配置云端 AI 后再生成完整六爻解读'),
-  ].join('\n');
-  return {
-    mode: 'local',
-    markdown,
-    generatedAt: new Date().toISOString(),
-    pipeline: pipelineTrace(retrievalDiagnostics),
   };
 }
 
@@ -1010,7 +910,21 @@ function requireAIResponse(value, label = 'AI 解读') {
   return value;
 }
 
+function assertCloudAnalysisConfigured({ apiKey, model }) {
+  if (
+    typeof apiKey === 'string'
+    && apiKey.trim()
+    && typeof model === 'string'
+    && model.trim()
+  ) return;
+  const error = new Error('尚未配置 DeepSeek AI 解读服务。');
+  error.publicCode = 'AI_NOT_CONFIGURED';
+  error.publicNextAction = '请先在“设置”中填写 DeepSeek API 密钥和模型，并完成连接测试。';
+  throw error;
+}
+
 async function postChat({ baseUrl, model, apiKey, messages, provider = 'deepseek', signal }) {
+  assertCloudAnalysisConfigured({ apiKey, model });
   if (provider !== 'deepseek') throw new Error(`不支持的解读 provider：${provider}`);
   const client = createDeepSeekClient({ apiKey, baseUrl });
   const { content } = await client.chat({ model, messages, responseFormat: null, signal });
@@ -1018,6 +932,7 @@ async function postChat({ baseUrl, model, apiKey, messages, provider = 'deepseek
 }
 
 async function analyzeCloud({ baseUrl, model, apiKey, provider = 'deepseek', question, category, plate, evidence = [], retrievalDiagnostics, signal }) {
+  assertCloudAnalysisConfigured({ apiKey, model });
   const plan = reasoningPlan(category, plate);
   const payload = {
     responseFormat: 'markdown',
@@ -1053,6 +968,7 @@ async function analyzeCloud({ baseUrl, model, apiKey, provider = 'deepseek', que
 }
 
 async function followUpCloud({ baseUrl, model, apiKey, provider = 'deepseek', question, session, evidence = [], signal }) {
+  assertCloudAnalysisConfigured({ apiKey, model });
   const originalReport = session?.analysis?.markdown;
   if (!session?.plate || typeof originalReport !== 'string' || !originalReport.trim()) {
     throw new Error('原报告没有可用于追问的文本内容，请先生成主报告');
@@ -1096,7 +1012,6 @@ async function followUpCloud({ baseUrl, model, apiKey, provider = 'deepseek', qu
 
 module.exports = {
   analyzeCloud,
-  createLocalReport,
   followUpCloud,
   postChat,
   reasoningPlan,

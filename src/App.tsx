@@ -9,7 +9,6 @@ import { RitualScreen } from './components/RitualScreen';
 import { SettingsPanel } from './components/SettingsPanel';
 import { desktop } from './lib/desktop';
 import { randomToss, upgradePlate } from './lib/divination';
-import { createBrowserLocalReport } from './lib/localAnalysis';
 import { isValidQuestion } from './lib/question';
 import type { EvidenceEntry, RetrievalDiagnostics } from './lib/retrieval';
 import {
@@ -293,11 +292,6 @@ export function App() {
       const result = await desktop.ai.analyze({ question: target.question, category: target.category, plate: target.plate, evidence: found.evidence, retrievalDiagnostics: found.diagnostics || undefined });
       if (result.ok && result.report) {
         await persistAnalysis(withAnalysis(target, result.report), runToken);
-      } else if (desktop.platform === 'browser') {
-        await persistAnalysis(
-          withAnalysis(target, createBrowserLocalReport(target, found.evidence)),
-          runToken,
-        );
       } else if (ownsAnalysisUi()) {
         setAnalysisError(`${result.error?.message || 'AI 分析失败'} ${result.error?.nextAction || ''}`.trim());
       }

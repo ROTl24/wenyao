@@ -21,6 +21,23 @@ test('legacy sessions default to digital only when castingMethod is absent', () 
   assert.equal(Object.hasOwn(legacy, 'castingMethod'), false);
 });
 
+test('legacy local reports are dropped from normalized sessions without mutating stored input', () => {
+  const stored = {
+    id: 'legacy-local-report',
+    castingMethod: 'digital',
+    analysis: {
+      mode: 'local',
+      markdown: '旧本地基础推演',
+      generatedAt: '2026-07-11T04:00:00.000Z',
+    },
+  };
+
+  const normalized = normalizeStoredSession(stored);
+
+  assert.equal(Object.hasOwn(normalized, 'analysis'), false);
+  assert.equal(stored.analysis.mode, 'local');
+});
+
 test('explicitly invalid stored casting methods are rejected', () => {
   for (const castingMethod of ['manual', undefined, null]) {
     const session = { id: 'invalid-method', castingMethod };

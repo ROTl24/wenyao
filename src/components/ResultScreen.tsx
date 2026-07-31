@@ -38,7 +38,9 @@ export function ResultScreen({ session, evidence, retrievalDiagnostics, sessionS
   const changedBits = plate.lines.map((line) => line.changedYang).reverse();
   const hasMovingLines = plate.movingLines.length > 0;
   const dynamicsLabel = hexagramDynamicsLabel(plate.relationFacts.hexagramDynamics);
-  const markdownAnalysis = session.analysis && typeof session.analysis.markdown === 'string' && session.analysis.markdown.trim()
+  const markdownAnalysis = session.analysis?.mode === 'cloud'
+    && typeof session.analysis.markdown === 'string'
+    && session.analysis.markdown.trim()
     ? session.analysis
     : null;
   const legacyAnalysis = Boolean(session.analysis && !markdownAnalysis);
@@ -138,7 +140,7 @@ export function ResultScreen({ session, evidence, retrievalDiagnostics, sessionS
               </div>
             ) : null}
             {analyzing ? <div className="analysis-loading"><span className="ink-loader" /><strong>正在检索古籍并校验排盘…</strong><p>排盘事实已经锁定，AI 只能依据当前卦象与证据解释。</p></div> : null}
-            {!analyzing && analysisError ? <div className="analysis-error"><strong>AI 分析暂时失败</strong><p>{analysisError}</p><button type="button" onClick={onAnalyze} disabled={!sessionReady}><RefreshCw size={16} />重新分析</button></div> : null}
+            {!analyzing && analysisError ? <div className="analysis-error" role="alert"><strong>AI 分析暂时失败</strong><p>{analysisError}</p><button type="button" onClick={onAnalyze} disabled={!sessionReady}><RefreshCw size={16} />重新分析</button></div> : null}
             {!analyzing && legacyAnalysis && !analysisError ? (
               <div className="analysis-error"><strong>这份历史解读不是当前 Markdown 格式</strong><p>旧版结构化结果不再解析，请重新分析生成 Markdown 解读。</p><button type="button" onClick={onAnalyze} disabled={!sessionReady}><RefreshCw size={16} />重新分析</button></div>
             ) : null}
@@ -147,7 +149,7 @@ export function ResultScreen({ session, evidence, retrievalDiagnostics, sessionS
             ) : null}
             {!analyzing && markdownAnalysis ? (
               <article className="analysis-report">
-                <div className="analysis-mode"><Sparkles size={15} />{markdownAnalysis.mode === 'cloud' ? '云端 AI · Markdown 解读' : '本地基础推演'}</div>
+                <div className="analysis-mode"><Sparkles size={15} />云端 AI · Markdown 解读</div>
                 {markdownAnalysis.pipeline ? (
                   <div className="pipeline-trace">
                     <span>排盘事实锁定</span>

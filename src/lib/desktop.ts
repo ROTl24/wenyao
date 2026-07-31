@@ -74,7 +74,7 @@ const browserFallback: DesktopApi = {
     },
   },
   ai: {
-    async analyze() { return { ok: false, error: { code: 'DESKTOP_ONLY', message: '浏览器预览不发送 AI 请求。', dataSafe: true, nextAction: '桌面应用中可使用本地基础推演或云端 AI。' } }; },
+    async analyze() { return { ok: false, error: { code: 'DESKTOP_ONLY', message: '浏览器预览不发送 AI 请求。', dataSafe: true, nextAction: '请在桌面应用中配置 DeepSeek 后生成云端 AI 解读。' } }; },
     async followUp() { return { ok: false, error: { code: 'DESKTOP_ONLY', message: '浏览器预览不发送 AI 请求。', dataSafe: true, nextAction: '请使用桌面应用。' } }; },
   },
   platform: 'browser',

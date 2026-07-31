@@ -39,7 +39,7 @@ function completedPhysicalSession(): DivinationSession {
 }
 
 describe('会话存储契约', () => {
-  it('normalizes only a missing legacy casting method', () => {
+  it('normalizes a missing legacy casting method', () => {
     const {
       castingMethod: _castingMethod,
       ...legacy
@@ -55,6 +55,22 @@ describe('会话存储契约', () => {
     expect(normalized.plate).not.toBe(plate);
     expect(normalized.messages).not.toBe(messages);
     expect(Object.hasOwn(legacy, 'castingMethod')).toBe(false);
+  });
+
+  it('drops legacy local reports without mutating the stored input', () => {
+    const stored = {
+      ...completedDigitalSession(),
+      analysis: {
+        mode: 'local',
+        markdown: '旧本地基础推演',
+        generatedAt: '2026-07-11T04:00:00.000Z',
+      },
+    };
+
+    const normalized = normalizeStoredSession(stored);
+
+    expect(normalized.analysis).toBeUndefined();
+    expect(stored.analysis.mode).toBe('local');
   });
 
   it('rejects explicitly invalid stored casting methods instead of migrating them', () => {
@@ -95,6 +111,19 @@ describe('会话存储契约', () => {
   it('accepts canonical digital and physical session shapes', () => {
     expect(() => validateSessionForSave(completedDigitalSession())).not.toThrow();
     expect(() => validateSessionForSave(completedPhysicalSession())).not.toThrow();
+  });
+
+  it('rejects local reports at the persistence seam', () => {
+    const session = {
+      ...completedDigitalSession(),
+      analysis: {
+        mode: 'local',
+        markdown: '不得保存的本地替代解读',
+        generatedAt: '2026-07-11T04:00:00.000Z',
+      },
+    };
+
+    expect(() => validateSessionForSave(session)).toThrow('仅允许保存云端 AI 解读');
   });
 
   it('validates the complete top-level session contract', () => {

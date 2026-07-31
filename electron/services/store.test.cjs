@@ -84,6 +84,20 @@ test('JsonStore persists, orders and deletes valid sessions atomically', () => {
   assert.equal(fs.existsSync(`${store.filePath}.tmp`), false);
 });
 
+test('JsonStore rejects local substitute reports', () => {
+  const store = createStore();
+  assert.throws(
+    () => store.saveSession(sessionFixture({
+      analysis: {
+        mode: 'local',
+        markdown: '不得保存的本地替代解读',
+        generatedAt: UPDATED_AT,
+      },
+    })),
+    /仅允许保存云端 AI 解读/,
+  );
+});
+
 test('legacy sessions without castingMethod read as digital without rewriting or changing the plate', () => {
   const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'wenyao-store-'));
   const filePath = path.join(dir, 'app-data.json');
@@ -160,7 +174,7 @@ test('digital confirmed and current tosses require a non-empty visualSeed', () =
 test('physical casting persists only a complete six-line record with no current toss or visualSeed', () => {
   const store = createStore();
   const saved = store.saveSession(physicalSession({
-    analysis: { markdown: '# 已解读' },
+    analysis: { mode: 'cloud', markdown: '# 已解读', generatedAt: UPDATED_AT },
     messages: [{ id: 'message-1', role: 'user', content: '追问', createdAt: UPDATED_AT }],
   }));
 
@@ -169,7 +183,7 @@ test('physical casting persists only a complete six-line record with no current 
   assert.equal(saved.tosses.length, 6);
   assert.equal(saved.tosses.some((toss) => Object.hasOwn(toss, 'visualSeed')), false);
   assert.deepEqual(saved.plate, { baseHexagram: { name: '测试卦' } });
-  assert.deepEqual(saved.analysis, { markdown: '# 已解读' });
+  assert.deepEqual(saved.analysis, { mode: 'cloud', markdown: '# 已解读', generatedAt: UPDATED_AT });
   assert.equal(saved.messages.length, 1);
 
   assert.throws(

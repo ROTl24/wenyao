@@ -149,7 +149,7 @@ function validateTossSequence(session: UnknownRecord & {
 }
 
 /**
- * Normalizes the only supported legacy storage difference on a detached copy.
+ * Normalizes supported legacy storage differences on a detached copy.
  */
 export function normalizeStoredSession(value: unknown): DivinationSession {
   const normalized = structuredClone(value);
@@ -158,6 +158,9 @@ export function normalizeStoredSession(value: unknown): DivinationSession {
     normalized.castingMethod = 'digital';
   } else if (!CASTING_METHODS.has(normalized.castingMethod as CastingMethod)) {
     throw new TypeError('起卦方式无效');
+  }
+  if (isRecord(normalized.analysis) && normalized.analysis.mode === 'local') {
+    delete normalized.analysis;
   }
   return normalized as unknown as DivinationSession;
 }
@@ -185,6 +188,13 @@ export function validateSessionForSave(
   }
   if (!CASTING_METHODS.has(value.castingMethod as CastingMethod)) {
     throw new TypeError('起卦方式无效');
+  }
+  if (
+    hasOwn(value, 'analysis')
+    && value.analysis !== undefined
+    && (!isRecord(value.analysis) || value.analysis.mode !== 'cloud')
+  ) {
+    throw new TypeError('仅允许保存云端 AI 解读');
   }
   if (
     existingValue

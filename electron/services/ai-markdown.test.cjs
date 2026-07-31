@@ -2,7 +2,6 @@ const assert = require('node:assert/strict');
 const test = require('node:test');
 const {
   analyzeCloud,
-  createLocalReport,
   followUpCloud,
   postChat: requestAIResponse,
   reasoningPlan,
@@ -184,6 +183,41 @@ test('postChat requests text output and returns the response verbatim without JS
     assert.equal(Object.hasOwn(requestBody, 'response_format'), false);
   } finally {
     restore();
+  }
+});
+
+test('cloud analysis refuses missing provider configuration before any network request', async () => {
+  let requestCount = 0;
+  const originalFetch = global.fetch;
+  global.fetch = async () => {
+    requestCount += 1;
+    throw new Error('network must not be called');
+  };
+  try {
+    for (const configuration of [
+      { apiKey: '', model: 'deepseek-v4-pro' },
+      { apiKey: 'secret', model: '' },
+    ]) {
+      await assert.rejects(
+        analyzeCloud({
+          baseUrl: 'https://api.deepseek.com',
+          ...configuration,
+          question: '学业会好吗？',
+          category: 'study',
+          plate: studyPlate,
+          evidence,
+        }),
+        (error) => {
+          assert.equal(error.publicCode, 'AI_NOT_CONFIGURED');
+          assert.match(error.message, /尚未配置 DeepSeek AI 解读服务/);
+          assert.match(error.publicNextAction, /设置/);
+          return true;
+        },
+      );
+    }
+    assert.equal(requestCount, 0);
+  } finally {
+    global.fetch = originalFetch;
   }
 });
 
@@ -1635,58 +1669,6 @@ test('follow-up continues the same plate with a focused conversational response 
   } finally {
     restore();
   }
-});
-
-test('local report uses the strict 11-section Markdown contract', async () => {
-  const report = createLocalReport({
-    question: '学业会好吗？',
-    category: 'study',
-    plate: studyPlate,
-    evidence,
-    retrievalDiagnostics: { mode: 'lexical-fallback', warnings: [] },
-  });
-
-  assert.equal(report.mode, 'local');
-  assert.match(report.markdown, /^## 1\. 占问主题/);
-  assert.match(report.markdown, /## 11\. 最终一句话结论/);
-  assert.match(report.markdown, /#plate-facts/);
-  assert.match(report.markdown, /第1爻父母庚子/);
-  assert.match(report.markdown, /第4爻父母丁亥/);
-  assert.match(report.markdown, /第5爻官鬼丁酉/);
-  assert.match(report.markdown, /第3爻妻财庚辰（世）/);
-  assert.equal(await validateMarkdownReport(report.markdown, '本地报告', {
-    plate: studyPlate,
-    evidence: [],
-    strictStructure: true,
-  }), report.markdown);
-  assert.equal(Object.hasOwn(report, 'claims'), false);
-});
-
-test('local report distinguishes dark movement and day break instead of flattening both to day clash', () => {
-  const classifiedPlate = structuredClone(studyPlate);
-  classifiedPlate.lines[0].dayClash = true;
-  classifiedPlate.lines[0].dayClashAssessment = {
-    kind: 'hidden-movement',
-    seasonalStrength: '旺',
-    dayToLineElementRelation: '同类',
-  };
-  classifiedPlate.lines[3].dayClash = true;
-  classifiedPlate.lines[3].dayClashAssessment = {
-    kind: 'day-break',
-    seasonalStrength: '休',
-    dayToLineElementRelation: '克',
-  };
-
-  const report = createLocalReport({
-    question: '学业会好吗？',
-    category: 'study',
-    plate: classifiedPlate,
-    evidence: [],
-    retrievalDiagnostics: { mode: 'lexical-fallback', warnings: [] },
-  });
-
-  assert.match(report.markdown, /第1爻父母庚子，暗动/);
-  assert.match(report.markdown, /第4爻父母丁亥，日破/);
 });
 
 test('strict report validation rejects missing sentence citations and missing sections', async () => {

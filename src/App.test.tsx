@@ -130,10 +130,42 @@ describe('问爻桌面体验', () => {
     expect(analyze).not.toHaveBeenCalled();
   });
 
+  it('shows an explicit AI error without creating a local substitute report', async () => {
+    const savedSession = completedHistorySession('没有密钥时不生成替代解读');
+    localStorage.setItem('wenyao-browser-sessions', JSON.stringify([savedSession]));
+    vi.spyOn(desktop.ai, 'analyze').mockResolvedValue({
+      ok: false,
+      error: {
+        code: 'AI_NOT_CONFIGURED',
+        message: '尚未配置 DeepSeek AI 解读服务。',
+        dataSafe: true,
+        nextAction: '请先在“设置”中完成配置。',
+      },
+    });
+
+    render(<App />);
+    fireEvent.click(screen.getByRole('button', { name: '历史记录' }));
+    fireEvent.click((await screen.findByText('没有密钥时不生成替代解读')).closest('button')!);
+    fireEvent.click(await screen.findByRole('button', { name: '开始解读' }));
+
+    expect(await screen.findByRole('alert')).toHaveTextContent('尚未配置 DeepSeek AI 解读服务');
+    expect(screen.queryByText('本地基础推演')).not.toBeInTheDocument();
+    expect(screen.queryByRole('article', { name: 'AI 解读' })).not.toBeInTheDocument();
+    const [stored] = JSON.parse(localStorage.getItem('wenyao-browser-sessions') || '[]') as DivinationSession[];
+    expect(stored.analysis).toBeUndefined();
+  });
+
   it('keeps a generated analysis visible and retries only the failed save', async () => {
     const savedSession = completedHistorySession('解读保存失败时怎么办');
     localStorage.setItem('wenyao-browser-sessions', JSON.stringify([savedSession]));
-    const analyze = vi.spyOn(desktop.ai, 'analyze');
+    const analyze = vi.spyOn(desktop.ai, 'analyze').mockResolvedValue({
+      ok: true,
+      report: {
+        mode: 'cloud',
+        markdown: '## 1. 占问主题\n\n云端解读已经生成。',
+        generatedAt: new Date().toISOString(),
+      },
+    });
     const save = vi.spyOn(desktop.sessions, 'save')
       .mockRejectedValueOnce(new Error('disk full'))
       .mockImplementation(async (next) => next);

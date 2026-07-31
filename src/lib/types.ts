@@ -1,5 +1,5 @@
 export interface AnalysisReport {
-  mode: 'cloud' | 'local';
+  mode: 'cloud';
   markdown: string;
   generatedAt: string;
   pipeline?: {

@@ -5,7 +5,7 @@ const crypto = require('node:crypto');
 const { pathToFileURL } = require('node:url');
 const { JsonStore } = require('./services/store.cjs');
 const { sanitizeRendererSession } = require('./services/ipc-payload.cjs');
-const { analyzeCloud, createLocalReport, followUpCloud } = require('./services/ai.cjs');
+const { analyzeCloud, followUpCloud } = require('./services/ai.cjs');
 const { createAlibabaClient } = require('./services/alibaba.cjs');
 const { createDeepSeekClient } = require('./services/deepseek.cjs');
 const { LocalVectorIndex } = require('./services/vector-index.cjs');
@@ -131,10 +131,18 @@ function createWindow() {
 function structuredError(error, fallbackCode = 'UNEXPECTED_ERROR') {
   const status = Number(error?.status || 0);
   return {
-    code: status === 401 || status === 403 ? 'AI_AUTH_FAILED' : fallbackCode,
+    code: status === 401 || status === 403
+      ? 'AI_AUTH_FAILED'
+      : typeof error?.publicCode === 'string'
+        ? error.publicCode
+        : fallbackCode,
     message: error instanceof Error ? error.message : '操作失败',
     dataSafe: true,
-    nextAction: status === 401 || status === 403 ? '请在设置中检查 API 密钥和模型权限。' : '已保存的起卦与排盘不会丢失，可以稍后重试。',
+    nextAction: status === 401 || status === 403
+      ? '请在设置中检查 API 密钥和模型权限。'
+      : typeof error?.publicNextAction === 'string'
+        ? error.publicNextAction
+        : '已保存的起卦与排盘不会丢失，可以稍后重试。',
   };
 }
 
@@ -262,7 +270,6 @@ function registerIpc() {
     try {
       const settings = store.getRawSettings();
       const apiKey = getApiKey('deepseek');
-      if (!apiKey || !settings.deepseekModel) return { ok: true, report: createLocalReport({ ...payload, evidence }) };
       const report = await analyzeCloud({ ...payload, evidence, baseUrl: validateBaseUrl(settings.deepseekBaseUrl), model: settings.deepseekModel, apiKey, provider: 'deepseek', signal: AbortSignal.timeout(180000) });
       return { ok: true, report };
     } catch (error) { return { ok: false, error: structuredError(error, 'AI_ANALYSIS_FAILED') }; }
@@ -274,9 +281,6 @@ function registerIpc() {
     try {
       const settings = store.getRawSettings();
       const apiKey = getApiKey('deepseek');
-      if (!apiKey || !settings.deepseekModel) {
-        return { ok: true, answer: { content: '当前未配置云端 AI。排盘和历史已安全保存；配置模型后可继续围绕同一卦象追问。' } };
-      }
       const answer = await followUpCloud({ ...payload, evidence, baseUrl: validateBaseUrl(settings.deepseekBaseUrl), model: settings.deepseekModel, apiKey, provider: 'deepseek', signal: AbortSignal.timeout(180000) });
       return { ok: true, answer };
     } catch (error) { return { ok: false, error: structuredError(error, 'AI_FOLLOW_UP_FAILED') }; }

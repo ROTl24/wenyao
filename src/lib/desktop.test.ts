@@ -23,7 +23,7 @@ function completedDigitalSession(id = 'digital-session'): DivinationSession {
     ...session,
     id,
     analysis: {
-      mode: 'local',
+      mode: 'cloud',
       markdown: '旧解读保持不变。',
       generatedAt: castAt.toISOString(),
     },

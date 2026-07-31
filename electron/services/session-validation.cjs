@@ -40,6 +40,9 @@ function normalizeStoredSession(session) {
   } else if (!CASTING_METHODS.has(normalized.castingMethod)) {
     throw new TypeError('起卦方式无效');
   }
+  if (isRecord(normalized.analysis) && normalized.analysis.mode === 'local') {
+    delete normalized.analysis;
+  }
   return normalized;
 }
 
@@ -119,6 +122,13 @@ function validateSessionForSave(input, existing = null) {
     throw new TypeError('会话数据无效');
   }
   if (!CASTING_METHODS.has(input.castingMethod)) throw new TypeError('起卦方式无效');
+  if (
+    Object.hasOwn(input, 'analysis')
+    && input.analysis !== undefined
+    && (!isRecord(input.analysis) || input.analysis.mode !== 'cloud')
+  ) {
+    throw new TypeError('仅允许保存云端 AI 解读');
+  }
   if (existing && storedCastingMethod(existing) !== input.castingMethod) {
     throw new TypeError('起卦方式不可更改');
   }
