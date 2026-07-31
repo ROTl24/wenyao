@@ -49,6 +49,14 @@ jobs:
           WIN_CSC_LINK: ${{ secrets.WIN_CSC_LINK }}
           WIN_CSC_KEY_PASSWORD: ${{ secrets.WIN_CSC_KEY_PASSWORD }}
 
+      - name: Upload update blockmap to draft release
+        shell: pwsh
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          $packageVersion = node -p "require('./package.json').version"
+          gh release upload "$env:GITHUB_REF_NAME" "release/WenYao-$packageVersion-Setup.exe.blockmap" --clobber
+
       - name: Verify local release artifacts
         run: npm run verify:release
 

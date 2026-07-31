@@ -13,6 +13,7 @@ const blockmapPath = `${installerPath}.blockmap`;
 const latestPath = path.join(releaseRoot, 'latest.yml');
 const packagedUpdateConfigPath = path.join(releaseRoot, 'win-unpacked', 'resources', 'app-update.yml');
 const installerBuildScriptPath = path.join(projectRoot, 'scripts', 'build-windows-installer.mjs');
+const releaseWorkflowPath = path.join(projectRoot, '.github', 'workflows', 'release-windows.yml');
 
 function requireFile(filePath, minimumBytes = 1) {
   if (!existsSync(filePath)) throw new Error(`缺少发布产物：${path.relative(projectRoot, filePath)}`);
@@ -44,6 +45,7 @@ requireFile(packagedUpdateConfigPath, 40);
 const latest = readFileSync(latestPath, 'utf8');
 const packagedUpdateConfig = readFileSync(packagedUpdateConfigPath, 'utf8');
 const installerBuildScript = readFileSync(installerBuildScriptPath, 'utf8');
+const releaseWorkflow = readFileSync(releaseWorkflowPath, 'utf8');
 const metadataVersion = yamlScalar(latest, 'version');
 const metadataPath = yamlScalar(latest, 'path');
 const metadataSha512 = yamlScalar(latest, 'sha512');
@@ -74,6 +76,15 @@ if (!packageJson.scripts?.['release:windows']?.includes('scripts/build-windows-i
 }
 if (packageJson.build?.electronDist != null) {
   throw new Error('标准 Electron 构建不应配置自定义 electronDist；应由 electron-builder 获取匹配版本');
+}
+for (const expectedLine of [
+  'Upload update blockmap to draft release',
+  'gh release upload',
+  'release/WenYao-$packageVersion-Setup.exe.blockmap',
+]) {
+  if (!releaseWorkflow.includes(expectedLine)) {
+    throw new Error(`Windows 发布工作流缺少 ${expectedLine}`);
+  }
 }
 for (const expectedLine of [
   'ShowInstDetails show',
