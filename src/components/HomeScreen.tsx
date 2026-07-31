@@ -1,6 +1,7 @@
 import { isValidQuestion, QUESTION_LENGTH } from '../lib/question';
 import { CASTING_METHOD_LABELS, type CastingMethod, type SessionCategory } from '../lib/session';
 import { SESSION_CATEGORY_LABELS } from '../lib/sessionCategories';
+import { BeijingDateTimeField } from './BeijingDateTimeField';
 
 const categories: Array<{ id: SessionCategory; mark: string }> = [
   { id: 'career', mark: '事' },
@@ -98,19 +99,15 @@ export function HomeScreen({
           </div>
         </div>
         {castingMethod === 'physical' && (
-          <div className="physical-time-field">
-            <label htmlFor="physical-cast-time">起卦时间（北京时间）</label>
-            <input
-              id="physical-cast-time"
-              type="datetime-local"
-              value={physicalTimeInput}
-              onChange={(event) => onPhysicalTimeChange(event.target.value)}
-              aria-invalid={Boolean(physicalTimeError)}
-              aria-describedby={physicalTimeError ? 'physical-cast-time-error' : 'physical-cast-time-note'}
-            />
-            <span id="physical-cast-time-note">默认当前时间，可修改到实际摇卦时刻</span>
-            {physicalTimeError && <p id="physical-cast-time-error" role="alert">{physicalTimeError}</p>}
-          </div>
+          <BeijingDateTimeField
+            id="physical-cast-time"
+            value={physicalTimeInput}
+            error={physicalTimeError}
+            disabled={false}
+            helperText="默认当前时间，可修改到实际摇卦时刻"
+            layout="wide"
+            onChange={onPhysicalTimeChange}
+          />
         )}
         <button className="primary-ink-button" type="button" disabled={!valid} onClick={onStart}>开始起卦</button>
         <p className="ritual-note">静心片刻，专注于一件事</p>

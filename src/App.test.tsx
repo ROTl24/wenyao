@@ -1,4 +1,4 @@
-import { act, fireEvent, render, screen, waitFor } from '@testing-library/react';
+import { act, fireEvent, render, screen, waitFor, within } from '@testing-library/react';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import { App } from './App';
 import { desktop } from './lib/desktop';
@@ -359,7 +359,10 @@ describe('问爻桌面体验', () => {
     expect(screen.getByRole('button', { name: 'AI 设置' })).toBeDisabled();
     expect(screen.getByRole('button', { name: '放弃本次起卦' })).toBeDisabled();
     expect(screen.getByRole('button', { name: '修改初爻' })).toBeDisabled();
-    expect(screen.getByLabelText('起卦时间（北京时间）')).toBeDisabled();
+    const timeField = screen.getByRole('group', { name: '起卦时间（北京时间）' });
+    expect(within(timeField).getByLabelText('日期')).toBeDisabled();
+    expect(within(timeField).getByLabelText('时刻')).toBeDisabled();
+    expect(within(timeField).getByRole('button', { name: '使用当前北京时间' })).toBeDisabled();
     expect(analyze).not.toHaveBeenCalled();
 
     await act(async () => {

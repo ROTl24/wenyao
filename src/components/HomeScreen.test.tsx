@@ -61,7 +61,7 @@ describe('HomeScreen 事项题签', () => {
         onStart={vi.fn()}
       />,
     );
-    expect(screen.queryByLabelText('起卦时间（北京时间）')).not.toBeInTheDocument();
+    expect(screen.queryByRole('group', { name: '起卦时间（北京时间）' })).not.toBeInTheDocument();
     fireEvent.click(screen.getByRole('button', { name: /线下起卦/ }));
     expect(onCastingMethodChange).toHaveBeenCalledWith('physical');
 
@@ -76,6 +76,34 @@ describe('HomeScreen 事项题签', () => {
         onStart={vi.fn()}
       />,
     );
-    expect(screen.getByLabelText('起卦时间（北京时间）')).toHaveValue('2026-07-12T12:00');
+    const timeField = screen.getByRole('group', { name: '起卦时间（北京时间）' });
+    expect(within(timeField).getByLabelText('日期')).toHaveValue('2026-07-12');
+    expect(within(timeField).getByLabelText('时刻')).toHaveValue('12:00');
+
+    fireEvent.change(within(timeField).getByLabelText('时刻'), { target: { value: '12:01' } });
+    expect(sharedProps.onPhysicalTimeChange).toHaveBeenCalledWith('2026-07-12T12:01');
+  });
+
+  it('associates an offline time error with both segments and prevents starting', () => {
+    const error = '请输入完整的北京时间';
+    render(
+      <HomeScreen
+        question="问事业"
+        category="career"
+        {...sharedProps}
+        castingMethod="physical"
+        physicalTimeInput="2026-07-12T"
+        physicalTimeError={error}
+        onQuestionChange={vi.fn()}
+        onCategoryChange={vi.fn()}
+        onStart={vi.fn()}
+      />,
+    );
+
+    const timeField = screen.getByRole('group', { name: '起卦时间（北京时间）' });
+    expect(within(timeField).getByLabelText('日期')).toHaveAccessibleDescription(error);
+    expect(within(timeField).getByLabelText('时刻')).toHaveAccessibleDescription(error);
+    expect(within(timeField).getByRole('alert')).toHaveTextContent(error);
+    expect(screen.getByRole('button', { name: '开始起卦' })).toBeDisabled();
   });
 });

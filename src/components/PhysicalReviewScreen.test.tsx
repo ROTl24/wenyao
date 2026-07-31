@@ -50,10 +50,14 @@ describe('线下六爻终审页', () => {
     expect(screen.getByText('三字 · 老阴 6')).toBeVisible();
     expect(screen.getByText('三背 · 老阳 9')).toBeVisible();
 
-    const timeInput = screen.getByLabelText('起卦时间（北京时间）');
-    expect(timeInput).toHaveValue('2026-07-12T12:00');
+    const timeField = screen.getByRole('group', { name: '起卦时间（北京时间）' });
+    const dateInput = within(timeField).getByLabelText('日期');
+    const timeInput = within(timeField).getByLabelText('时刻');
+    expect(dateInput).toHaveValue('2026-07-12');
+    expect(timeInput).toHaveValue('12:00');
+    expect(dateInput).toHaveAttribute('aria-invalid', 'false');
     expect(timeInput).toHaveAttribute('aria-invalid', 'false');
-    fireEvent.change(timeInput, { target: { value: '2026-07-12T12:01' } });
+    fireEvent.change(timeInput, { target: { value: '12:01' } });
     expect(onTimeChange).toHaveBeenCalledWith('2026-07-12T12:01');
 
     fireEvent.click(screen.getByRole('button', { name: '修改二爻' }));
@@ -86,9 +90,10 @@ describe('线下六爻终审页', () => {
       />,
     );
 
-    const timeInput = screen.getByLabelText('起卦时间（北京时间）');
-    expect(timeInput).toHaveAttribute('aria-invalid', 'true');
-    expect(timeInput).toHaveAccessibleDescription('起卦时间不能超过当前北京时间 5 分钟');
+    const timeField = screen.getByRole('group', { name: '起卦时间（北京时间）' });
+    expect(within(timeField).getByLabelText('日期')).toHaveAttribute('aria-invalid', 'true');
+    expect(within(timeField).getByLabelText('时刻')).toHaveAttribute('aria-invalid', 'true');
+    expect(timeField).toHaveAccessibleDescription('起卦时间不能超过当前北京时间 5 分钟');
     expect(screen.getByRole('alert')).toHaveTextContent('起卦时间不能超过当前北京时间 5 分钟');
     expect(screen.getByRole('button', { name: '确认并生成排盘' })).toBeDisabled();
   });
@@ -124,7 +129,10 @@ describe('线下六爻终审页', () => {
 
     expect(screen.getByRole('main')).toHaveAttribute('aria-busy', 'true');
     expect(screen.getByRole('button', { name: '放弃本次起卦' })).toBeDisabled();
-    expect(screen.getByLabelText('起卦时间（北京时间）')).toBeDisabled();
+    const timeField = screen.getByRole('group', { name: '起卦时间（北京时间）' });
+    expect(within(timeField).getByLabelText('日期')).toBeDisabled();
+    expect(within(timeField).getByLabelText('时刻')).toBeDisabled();
+    expect(within(timeField).getByRole('button', { name: '使用当前北京时间' })).toBeDisabled();
     expect(screen.getByRole('button', { name: '修改初爻' })).toBeDisabled();
     expect(within(editor).getAllByRole('button').every((button) => (
       button.hasAttribute('disabled')

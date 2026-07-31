@@ -231,11 +231,34 @@ button:focus-visible, input:focus-visible, textarea:focus-visible { outline: 2px
 .casting-method-button strong { font: 17px/1.4 var(--serif); letter-spacing: .08em; }
 .casting-method-button span { margin-top: 5px; color: var(--muted); font-size: 11px; }
 .casting-method-button--selected { border-color: var(--cinnabar); color: var(--cinnabar); background: rgba(247,239,226,.7); }
-.physical-time-field { display: grid; grid-template-columns: minmax(180px, .45fr) minmax(250px, .55fr); align-items: center; gap: 6px 18px; margin-top: 18px; padding: 14px 17px; border: 1px solid rgba(140,113,70,.32); background: rgba(245,239,225,.5); text-align: left; }
-.physical-time-field label { font: 15px/1.5 var(--serif); }
-.physical-time-field input, .physical-review-summary input { width: 100%; height: 42px; border: 1px solid rgba(43,44,39,.3); background: rgba(250,247,239,.74); padding: 0 12px; color: var(--ink); }
-.physical-time-field > span { color: var(--muted); font-size: 10px; }
-.physical-time-field p, .physical-review-summary p { margin: 0; color: var(--cinnabar); font-size: 11px; }
+.beijing-date-time-field { min-width: 0; text-align: left; }
+.beijing-date-time-field--wide { display: grid; grid-template-columns: minmax(180px, .43fr) minmax(250px, .57fr); grid-template-areas: "heading controls" "support controls"; align-items: center; gap: 4px 18px; margin-top: 18px; padding: 13px 16px; border: 1px solid rgba(140,113,70,.34); background: rgba(245,239,225,.5); }
+.beijing-date-time-field--compact { display: grid; grid-template-areas: "heading" "controls" "support"; gap: 9px; }
+.beijing-date-time-field__heading { grid-area: heading; min-width: 0; display: flex; align-items: center; gap: 9px; }
+.beijing-date-time-field__title { min-width: 0; display: inline-flex; align-items: baseline; gap: 8px; font: 15px/1.5 var(--serif); letter-spacing: .03em; }
+.beijing-date-time-field__title small { padding-left: 8px; border-left: 1px solid rgba(140,113,70,.45); color: var(--bronze); font: 9px/1.4 var(--ui); letter-spacing: .12em; white-space: nowrap; }
+.beijing-date-time-field__now { min-width: 48px; min-height: 44px; margin-left: auto; padding: 0 7px; border: 0; border-bottom: 1px solid rgba(152,43,36,.52); background: transparent; color: var(--cinnabar); font: 11px/1 var(--serif); letter-spacing: .12em; cursor: pointer; transition: color var(--motion-fast) ease, border-color var(--motion-fast) ease, background-color var(--motion-fast) ease, transform var(--motion-fast) var(--ease-out); }
+.beijing-date-time-field__now:hover:not(:disabled) { border-color: var(--cinnabar); background: rgba(152,43,36,.055); }
+.beijing-date-time-field__now:active:not(:disabled) { transform: translateY(1px); }
+.beijing-date-time-field__controls { grid-area: controls; min-width: 0; display: grid; grid-template-columns: minmax(146px, 1.16fr) minmax(112px, .84fr); border: 1px solid rgba(140,113,70,.45); background: rgba(250,247,239,.68); transition: border-color var(--motion-fast) ease, box-shadow var(--motion-fast) ease, background-color var(--motion-fast) ease; }
+.beijing-date-time-field__controls:focus-within { border-color: var(--cinnabar); box-shadow: 0 0 0 3px var(--focus-ring); background: rgba(250,247,239,.92); }
+.beijing-date-time-field__segment { position: relative; min-width: 0; padding: 0 7px 0 12px; }
+.beijing-date-time-field__segment + .beijing-date-time-field__segment { border-left: 1px solid rgba(140,113,70,.32); }
+.beijing-date-time-field__segment label { position: absolute; z-index: 2; top: 7px; left: 12px; color: var(--bronze); font: 9px/1.25 var(--ui); letter-spacing: .13em; pointer-events: none; }
+.beijing-date-time-field__input-wrap { position: relative; min-width: 0; }
+.beijing-date-time-field__input-wrap input { position: relative; z-index: 1; width: 100%; min-width: 0; height: 56px; padding: 14px 34px 0 0; border: 0; outline: 0; background: transparent; color: var(--ink); font: 14px/1 var(--ui); font-variant-numeric: tabular-nums; letter-spacing: .025em; color-scheme: light; }
+.beijing-date-time-field__input-wrap input:focus-visible { outline: 0; box-shadow: none; }
+.beijing-date-time-field__input-wrap input::-webkit-calendar-picker-indicator { position: absolute; z-index: 2; top: 0; right: -7px; width: 44px; height: 56px; margin: 0; padding: 0; opacity: 0; cursor: pointer; }
+.beijing-date-time-field__input-wrap > svg { position: absolute; z-index: 0; right: 5px; bottom: 12px; color: rgba(140,113,70,.76); pointer-events: none; }
+.beijing-date-time-field__support { grid-area: support; min-width: 0; min-height: 15px; }
+.beijing-date-time-field__support span, .beijing-date-time-field__support p { display: block; margin: 0; color: var(--muted); font-size: 10px; line-height: 1.5; }
+.beijing-date-time-field__support p { color: var(--cinnabar); }
+.beijing-date-time-field--invalid .beijing-date-time-field__controls { border-color: rgba(152,43,36,.74); background: rgba(152,43,36,.035); }
+.beijing-date-time-field--disabled { opacity: .58; }
+.beijing-date-time-field--disabled .beijing-date-time-field__controls { background: rgba(232,227,214,.58); }
+.beijing-date-time-field button:disabled, .beijing-date-time-field input:disabled { cursor: not-allowed; }
+.beijing-date-time-field--compact .beijing-date-time-field__title { font-size: 15px; }
+.beijing-date-time-field--compact .beijing-date-time-field__controls { grid-template-columns: minmax(135px, 1.12fr) minmax(106px, .88fr); }
 .text-button { border: 0; background: transparent; display: inline-flex; align-items: center; gap: 6px; padding: 0; color: #555752; cursor: pointer; }
 
 .physical-casting-screen, .physical-review-screen { position: relative; height: calc(100% - 42px); overflow: auto; color: var(--ink); }
@@ -288,8 +311,7 @@ button:focus-visible, input:focus-visible, textarea:focus-visible { outline: 2px
 .physical-review-editor strong, .physical-review-editor small { display: block; }
 .physical-review-editor small { margin-top: 3px; color: var(--muted); font-size: 9px; }
 .physical-review-summary { position: sticky; top: 18px; padding: 24px; border: 1px solid rgba(43,44,39,.19); background: rgba(242,236,222,.68); }
-.physical-review-summary > label { display: block; margin-bottom: 8px; font: 15px var(--serif); }
-.physical-review-summary > p { margin-top: 8px; }
+.physical-review-summary > p { margin-top: 8px; color: var(--cinnabar); font-size: 11px; }
 .physical-review-facts { display: grid; gap: 8px; margin: 20px 0; padding: 15px 0; border-top: 1px solid var(--line); border-bottom: 1px solid var(--line); }
 .physical-review-facts span { display: flex; justify-content: space-between; color: var(--muted); font-size: 11px; }
 .physical-review-facts strong { color: var(--ink); font: 13px var(--serif); }
@@ -341,8 +363,8 @@ button:focus-visible, input:focus-visible, textarea:focus-visible { outline: 2px
   .category-button__mark { width: 23px; height: 23px; }
   .category-button__label { font-size: 14px; }
   .primary-ink-button { width: 100%; margin-top: 26px; }
-  .casting-method-row, .physical-time-field, .physical-toss-options { grid-template-columns: 1fr; }
-  .physical-time-field { gap: 8px; }
+  .casting-method-row, .physical-toss-options { grid-template-columns: 1fr; }
+  .beijing-date-time-field--wide { grid-template-columns: 1fr; grid-template-areas: "heading" "controls" "support"; gap: 8px; }
   .physical-casting-screen { display: block; padding: 24px 18px 48px; }
   .physical-casting-intro { padding-top: 8px; margin-bottom: 22px; }
   .physical-casting-panel { padding: 18px; }

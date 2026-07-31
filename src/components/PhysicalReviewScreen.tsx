@@ -5,6 +5,7 @@ import {
   PHYSICAL_TOSS_OPTIONS,
   type PhysicalCastDraft,
 } from '../lib/physicalCasting';
+import { BeijingDateTimeField } from './BeijingDateTimeField';
 
 const lineNames = ['初爻', '二爻', '三爻', '四爻', '五爻', '上爻'];
 
@@ -90,17 +91,15 @@ export function PhysicalReviewScreen({
         </section>
 
         <aside className="physical-review-summary">
-          <label htmlFor="physical-review-time">起卦时间（北京时间）</label>
-          <input
+          <BeijingDateTimeField
             id="physical-review-time"
-            type="datetime-local"
             value={timeInput}
+            error={timeError}
             disabled={finalizing}
-            onChange={(event) => onTimeChange(event.target.value)}
-            aria-invalid={Boolean(timeError)}
-            aria-describedby={timeError ? 'physical-review-time-error' : undefined}
+            helperText=""
+            layout="compact"
+            onChange={onTimeChange}
           />
-          {timeError && <p id="physical-review-time-error" role="alert">{timeError}</p>}
           <div className="physical-review-facts">
             <span>起卦方式<strong>线下起卦</strong></span>
             <span>铜钱规则<strong>字 2 · 背 3</strong></span>
