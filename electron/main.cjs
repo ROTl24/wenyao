@@ -12,6 +12,7 @@ const { createDeepSeekClient } = require('./services/deepseek.cjs');
 const { LocalVectorIndex } = require('./services/vector-index.cjs');
 const { hybridSearch } = require('./services/retrieval.cjs');
 const { configureInstallDataPaths } = require('./services/install-data.cjs');
+const { prepareApplicationStartup } = require('./services/app-startup.cjs');
 const { createUpdateManager } = require('./services/update-manager.cjs');
 const { sanitizeUpdateState } = require('./services/update-state.cjs');
 const alibabaConfig = require('../config/alibaba.json');
@@ -24,8 +25,16 @@ const oneTimeSetupKeys = process.argv.includes('--configure-api-keys-env') ? {
 delete process.env.WENYAO_ALIBABA_KEY;
 delete process.env.WENYAO_DEEPSEEK_KEY;
 
+let startup = {
+  shouldStart: false,
+  commandMode: false,
+};
 try {
-  configureInstallDataPaths(app);
+  startup = prepareApplicationStartup({
+    app,
+    argv: process.argv,
+    configureDataPaths: configureInstallDataPaths,
+  });
 } catch (error) {
   const message = error instanceof Error ? error.message : '无法初始化安装目录中的数据文件夹。';
   process.stderr.write(`${message}\n`);
@@ -311,67 +320,77 @@ function registerIpc() {
   });
 }
 
-app.whenReady().then(() => {
-  store = new JsonStore(dataPath());
-  corpus = loadCorpus();
-  corpusHash = hashCorpus(corpus);
-  vectorIndex = loadVectorIndex(store.getRawSettings().embeddingModel);
-  if (process.argv.includes('--configure-api-keys-env')) {
-    try {
-      if (!oneTimeSetupKeys || (!oneTimeSetupKeys.alibaba && !oneTimeSetupKeys.deepseek)) throw new Error('未收到 API 密钥');
-      if (!safeStorage.isEncryptionAvailable()) throw new Error('当前 Windows 环境无法启用 DPAPI 密钥保护');
-      const settings = {
-        alibabaBaseUrl: alibabaConfig.baseUrl,
-        alibabaModel: alibabaConfig.model,
-        embeddingModel: alibabaConfig.embeddingModel,
-        embeddingDimensions: alibabaConfig.embeddingDimensions,
-        rerankModel: alibabaConfig.rerankModel,
-        rerankUrl: alibabaConfig.rerankUrl,
-        deepseekBaseUrl: deepseekConfig.baseUrl,
-        deepseekModel: deepseekConfig.model,
-      };
-      const configuredProviders = [];
-      if (oneTimeSetupKeys.alibaba) {
-        settings.encryptedAlibabaApiKey = safeStorage.encryptString(oneTimeSetupKeys.alibaba).toString('base64');
-        configuredProviders.push('阿里云');
-      }
-      if (oneTimeSetupKeys.deepseek) {
-        settings.encryptedDeepSeekApiKey = safeStorage.encryptString(oneTimeSetupKeys.deepseek).toString('base64');
-        configuredProviders.push('DeepSeek');
-      }
-      store.saveSettings(settings);
-      process.stdout.write(`${configuredProviders.join('、')} API 密钥已由 Windows DPAPI 加密保存。\n`);
-      app.quit();
-    } catch (error) { process.stderr.write(`${error.message}\n`); app.exit(1); }
-    return;
+if (startup.shouldStart) {
+  if (!startup.commandMode) {
+    app.on('second-instance', () => {
+      if (!mainWindow || mainWindow.isDestroyed()) return;
+      if (mainWindow.isMinimized()) mainWindow.restore();
+      mainWindow.show();
+      mainWindow.focus();
+    });
   }
-  if (process.argv.includes('--build-vector-index')) {
-    const apiKey = getApiKey('alibaba');
-    if (!apiKey) { process.stderr.write('尚未配置阿里云 API 密钥。\n'); app.exit(1); return; }
-    void buildVectorIndex({ apiKey, onProgress: (done, total) => process.stdout.write(`向量索引 ${done}/${total}\n`) })
-      .then(() => { process.stdout.write('向量索引构建完成。\n'); app.quit(); })
-      .catch((error) => { process.stderr.write(`${error.message}\n`); app.exit(1); });
-    return;
-  }
-  if (process.argv.includes('--verify-model-stack')) {
-    void verifyModelStack()
-      .then((result) => { process.stdout.write(`${JSON.stringify(result)}\n`); if (result.alibabaChatReady && result.deepseekChatReady && result.embeddingReady) app.quit(); else app.exit(1); })
-      .catch((error) => { process.stderr.write(`${error.message}\n`); app.exit(1); });
-    return;
-  }
-  if (process.argv.includes('--verify-hybrid-retrieval')) {
-    void searchCorpus({ query: '近期事业升迁是否有机会', domainTerms: ['事业', '功名', '官鬼', '世爻'], limit: 8 })
-      .then((result) => {
-        process.stdout.write(`${JSON.stringify({ diagnostics: result.diagnostics, evidence: result.evidence.map((item) => ({ id: item.id, source: item.source, kind: item.knowledgeKind })) })}\n`);
+
+  app.whenReady().then(() => {
+    store = new JsonStore(dataPath());
+    corpus = loadCorpus();
+    corpusHash = hashCorpus(corpus);
+    vectorIndex = loadVectorIndex(store.getRawSettings().embeddingModel);
+    if (process.argv.includes('--configure-api-keys-env')) {
+      try {
+        if (!oneTimeSetupKeys || (!oneTimeSetupKeys.alibaba && !oneTimeSetupKeys.deepseek)) throw new Error('未收到 API 密钥');
+        if (!safeStorage.isEncryptionAvailable()) throw new Error('当前 Windows 环境无法启用 DPAPI 密钥保护');
+        const settings = {
+          alibabaBaseUrl: alibabaConfig.baseUrl,
+          alibabaModel: alibabaConfig.model,
+          embeddingModel: alibabaConfig.embeddingModel,
+          embeddingDimensions: alibabaConfig.embeddingDimensions,
+          rerankModel: alibabaConfig.rerankModel,
+          rerankUrl: alibabaConfig.rerankUrl,
+          deepseekBaseUrl: deepseekConfig.baseUrl,
+          deepseekModel: deepseekConfig.model,
+        };
+        const configuredProviders = [];
+        if (oneTimeSetupKeys.alibaba) {
+          settings.encryptedAlibabaApiKey = safeStorage.encryptString(oneTimeSetupKeys.alibaba).toString('base64');
+          configuredProviders.push('阿里云');
+        }
+        if (oneTimeSetupKeys.deepseek) {
+          settings.encryptedDeepSeekApiKey = safeStorage.encryptString(oneTimeSetupKeys.deepseek).toString('base64');
+          configuredProviders.push('DeepSeek');
+        }
+        store.saveSettings(settings);
+        process.stdout.write(`${configuredProviders.join('、')} API 密钥已由 Windows DPAPI 加密保存。\n`);
         app.quit();
-      })
-      .catch((error) => { process.stderr.write(`${error.message}\n`); app.exit(1); });
-    return;
-  }
-  if (process.argv.includes('--verify-analysis')) {
-    const apiKey = getApiKey('deepseek');
-    const settings = store.getRawSettings();
-    const plate = {
+      } catch (error) { process.stderr.write(`${error.message}\n`); app.exit(1); }
+      return;
+    }
+    if (process.argv.includes('--build-vector-index')) {
+      const apiKey = getApiKey('alibaba');
+      if (!apiKey) { process.stderr.write('尚未配置阿里云 API 密钥。\n'); app.exit(1); return; }
+      void buildVectorIndex({ apiKey, onProgress: (done, total) => process.stdout.write(`向量索引 ${done}/${total}\n`) })
+        .then(() => { process.stdout.write('向量索引构建完成。\n'); app.quit(); })
+        .catch((error) => { process.stderr.write(`${error.message}\n`); app.exit(1); });
+      return;
+    }
+    if (process.argv.includes('--verify-model-stack')) {
+      void verifyModelStack()
+        .then((result) => { process.stdout.write(`${JSON.stringify(result)}\n`); if (result.alibabaChatReady && result.deepseekChatReady && result.embeddingReady) app.quit(); else app.exit(1); })
+        .catch((error) => { process.stderr.write(`${error.message}\n`); app.exit(1); });
+      return;
+    }
+    if (process.argv.includes('--verify-hybrid-retrieval')) {
+      void searchCorpus({ query: '近期事业升迁是否有机会', domainTerms: ['事业', '功名', '官鬼', '世爻'], limit: 8 })
+        .then((result) => {
+          process.stdout.write(`${JSON.stringify({ diagnostics: result.diagnostics, evidence: result.evidence.map((item) => ({ id: item.id, source: item.source, kind: item.knowledgeKind })) })}\n`);
+          app.quit();
+        })
+        .catch((error) => { process.stderr.write(`${error.message}\n`); app.exit(1); });
+      return;
+    }
+    if (process.argv.includes('--verify-analysis')) {
+      const apiKey = getApiKey('deepseek');
+      const settings = store.getRawSettings();
+      const plate = {
       baseHexagram: { name: '泽雷随', shortName: '随', palace: '震', palaceElement: '木', shiLine: 3, yingLine: 6 },
       changedHexagram: { name: '泽雷随', shortName: '随', palace: '震', palaceElement: '木', shiLine: 3, yingLine: 6 },
       movingLines: [], monthGanZhi: '乙未', monthBranch: '未', dayGanZhi: '戊子', voidBranches: ['午', '未'],
@@ -385,7 +404,7 @@ app.whenReady().then(() => {
       ],
       fuShen: [{ lineIndex: 4, relation: '子孙', ganZhi: '庚午', branch: '午', element: '火', flyRelation: '父母', flyGanZhi: '丁亥', flyElement: '水', flyEffect: '飞克伏', status: '受制倾向', void: true, monthBreak: false, dayClash: true }],
     };
-    void searchCorpus({ query: '学业会好吗', domainTerms: ['学业', '父母', '官鬼', '用神两现'], limit: 8 })
+      void searchCorpus({ query: '学业会好吗', domainTerms: ['学业', '父母', '官鬼', '用神两现'], limit: 8 })
       .then(async ({ evidence, diagnostics }) => {
         const report = await analyzeCloud({ baseUrl: validateBaseUrl(settings.deepseekBaseUrl), model: settings.deepseekModel, apiKey, provider: 'deepseek', question: '学业会好吗？', category: 'study', plate, evidence, retrievalDiagnostics: diagnostics, signal: AbortSignal.timeout(180000) });
         const answer = await followUpCloud({
@@ -423,19 +442,20 @@ app.whenReady().then(() => {
           && !result.followUpHasJsonEnvelope) app.quit(); else app.exit(1);
       })
       .catch((error) => { process.stderr.write(`${error.message}\n`); app.exit(1); });
-    return;
-  }
-  updateManager = createUpdateManager({
-    updater: app.isPackaged && process.platform === 'win32' ? autoUpdater : null,
-    currentVersion: app.getVersion(),
-    supported: app.isPackaged && process.platform === 'win32',
-    broadcast: broadcastUpdateState,
+      return;
+    }
+    updateManager = createUpdateManager({
+      updater: app.isPackaged && process.platform === 'win32' ? autoUpdater : null,
+      currentVersion: app.getVersion(),
+      supported: app.isPackaged && process.platform === 'win32',
+      broadcast: broadcastUpdateState,
+    });
+    registerIpc();
+    createWindow();
+    updateManager.start();
+    app.on('activate', () => { if (BrowserWindow.getAllWindows().length === 0) createWindow(); });
   });
-  registerIpc();
-  createWindow();
-  updateManager.start();
-  app.on('activate', () => { if (BrowserWindow.getAllWindows().length === 0) createWindow(); });
-});
 
-app.on('before-quit', () => updateManager?.stop());
-app.on('window-all-closed', () => { if (process.platform !== 'darwin') app.quit(); });
+  app.on('before-quit', () => updateManager?.stop());
+  app.on('window-all-closed', () => { if (process.platform !== 'darwin') app.quit(); });
+}
