@@ -81,6 +81,55 @@ describe('BeijingDateTimeField', () => {
     expect(onChange).toHaveBeenCalledWith('2026-07-12T12:34');
   });
 
+  it('uses an in-app ink calendar instead of the native blue-white picker', () => {
+    const onChange = vi.fn();
+    render(<BeijingDateTimeField {...baseProps} onChange={onChange} />);
+    const trigger = screen.getByRole('button', { name: '打开日期选择面板' });
+
+    fireEvent.click(trigger);
+    const calendar = screen.getByRole('dialog', { name: '选择起卦日期' });
+    expect(trigger).toHaveAttribute('aria-expanded', 'true');
+    expect(within(calendar).getByText('2026年7月')).toBeVisible();
+    expect(within(calendar).getByRole('button', { name: '2026年7月12日' }))
+      .toHaveAttribute('aria-pressed', 'true');
+
+    fireEvent.click(within(calendar).getByRole('button', { name: '2026年7月13日' }));
+    expect(onChange).toHaveBeenCalledWith('2026-07-13T12:00');
+    expect(screen.queryByRole('dialog', { name: '选择起卦日期' })).not.toBeInTheDocument();
+    expect(trigger).toHaveFocus();
+  });
+
+  it('supports month navigation and keyboard opening without a system picker', () => {
+    render(<BeijingDateTimeField {...baseProps} onChange={vi.fn()} />);
+    const dateInput = screen.getByLabelText('日期');
+
+    fireEvent.keyDown(dateInput, { key: 'ArrowDown', altKey: true });
+    const calendar = screen.getByRole('dialog', { name: '选择起卦日期' });
+    fireEvent.click(within(calendar).getByRole('button', { name: '下个月' }));
+    expect(within(calendar).getByText('2026年8月')).toBeVisible();
+
+    fireEvent.keyDown(document, { key: 'Escape' });
+    expect(screen.queryByRole('dialog', { name: '选择起卦日期' })).not.toBeInTheDocument();
+    expect(screen.getByRole('button', { name: '打开日期选择面板' })).toHaveFocus();
+  });
+
+  it('uses a themed minute-precision time editor', () => {
+    const onChange = vi.fn();
+    render(<BeijingDateTimeField {...baseProps} onChange={onChange} />);
+
+    fireEvent.click(screen.getByRole('button', { name: '打开时刻选择面板' }));
+    const timePicker = screen.getByRole('dialog', { name: '选择起卦时刻' });
+    expect(within(timePicker).getByLabelText('小时')).toHaveValue(12);
+    expect(within(timePicker).getByLabelText('分钟')).toHaveValue(0);
+
+    fireEvent.change(within(timePicker).getByLabelText('小时'), { target: { value: '9' } });
+    fireEvent.change(within(timePicker).getByLabelText('分钟'), { target: { value: '7' } });
+    fireEvent.click(within(timePicker).getByRole('button', { name: '确定' }));
+
+    expect(onChange).toHaveBeenCalledWith('2026-07-12T09:07');
+    expect(screen.queryByRole('dialog', { name: '选择起卦时刻' })).not.toBeInTheDocument();
+  });
+
   it('locks every action when disabled and keeps keyboard focus visible when enabled', () => {
     const { rerender } = render(
       <BeijingDateTimeField {...baseProps} disabled onChange={vi.fn()} />,
@@ -89,6 +138,8 @@ describe('BeijingDateTimeField', () => {
     expect(screen.getByLabelText('日期')).toBeDisabled();
     expect(screen.getByLabelText('时刻')).toBeDisabled();
     expect(screen.getByRole('button', { name: '使用当前北京时间' })).toBeDisabled();
+    expect(screen.getByRole('button', { name: '打开日期选择面板' })).toBeDisabled();
+    expect(screen.getByRole('button', { name: '打开时刻选择面板' })).toBeDisabled();
 
     rerender(<BeijingDateTimeField {...baseProps} onChange={vi.fn()} />);
     const date = screen.getByLabelText('日期');

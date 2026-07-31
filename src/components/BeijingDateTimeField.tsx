@@ -1,5 +1,8 @@
 import { CalendarDays, Clock3 } from 'lucide-react';
+import { useEffect, useRef, useState } from 'react';
 import { formatShanghaiDateTimeInput } from '../lib/shanghaiTime';
+import { BeijingDatePicker } from './BeijingDatePicker';
+import { BeijingTimePicker } from './BeijingTimePicker';
 
 interface Props {
   id: string;
@@ -32,12 +35,58 @@ export function BeijingDateTimeField({
   onChange,
 }: Props) {
   const { date, time } = splitDateTime(value);
+  const [openPicker, setOpenPicker] = useState<'date' | 'time' | null>(null);
+  const rootRef = useRef<HTMLDivElement>(null);
+  const dateTriggerRef = useRef<HTMLButtonElement>(null);
+  const timeTriggerRef = useRef<HTMLButtonElement>(null);
   const noteId = `${id}-note`;
   const errorId = `${id}-error`;
   const describedBy = error ? errorId : helperText ? noteId : undefined;
+  const nowValue = formatShanghaiDateTimeInput();
+  const { date: today, time: nowTime } = splitDateTime(nowValue);
+
+  useEffect(() => {
+    if (!openPicker) return undefined;
+    function handlePointerDown(event: MouseEvent) {
+      if (!rootRef.current?.contains(event.target as Node)) {
+        setOpenPicker(null);
+      }
+    }
+    function handleKeyDown(event: KeyboardEvent) {
+      if (event.key === 'Escape') {
+        const trigger = openPicker === 'date' ? dateTriggerRef.current : timeTriggerRef.current;
+        trigger?.focus();
+        setOpenPicker(null);
+      }
+    }
+    document.addEventListener('mousedown', handlePointerDown);
+    document.addEventListener('keydown', handleKeyDown);
+    return () => {
+      document.removeEventListener('mousedown', handlePointerDown);
+      document.removeEventListener('keydown', handleKeyDown);
+    };
+  }, [openPicker]);
+
+  useEffect(() => {
+    if (disabled) setOpenPicker(null);
+  }, [disabled]);
+
+  function closePickerAndFocus(type: 'date' | 'time') {
+    const trigger = type === 'date' ? dateTriggerRef.current : timeTriggerRef.current;
+    trigger?.focus();
+    setOpenPicker(null);
+  }
+
+  function openFromKeyboard(event: React.KeyboardEvent, type: 'date' | 'time') {
+    if ((event.altKey && event.key === 'ArrowDown') || event.key === 'F4') {
+      event.preventDefault();
+      setOpenPicker(type);
+    }
+  }
 
   return (
     <div
+      ref={rootRef}
       className={[
         'beijing-date-time-field',
         `beijing-date-time-field--${layout}`,
@@ -57,7 +106,10 @@ export function BeijingDateTimeField({
           className="beijing-date-time-field__now"
           type="button"
           disabled={disabled}
-          onClick={() => onChange(formatShanghaiDateTimeInput())}
+          onClick={() => {
+            setOpenPicker(null);
+            onChange(formatShanghaiDateTimeInput());
+          }}
           aria-label="使用当前北京时间"
         >
           此刻
@@ -75,9 +127,23 @@ export function BeijingDateTimeField({
               disabled={disabled}
               aria-invalid={Boolean(error)}
               aria-describedby={describedBy}
+              onFocus={() => setOpenPicker(null)}
+              onKeyDown={(event) => openFromKeyboard(event, 'date')}
               onChange={(event) => onChange(`${event.target.value}T${time}`)}
             />
-            <CalendarDays size={17} aria-hidden="true" />
+            <button
+              ref={dateTriggerRef}
+              className="beijing-date-time-field__picker-trigger"
+              type="button"
+              disabled={disabled}
+              aria-label="打开日期选择面板"
+              aria-haspopup="dialog"
+              aria-expanded={openPicker === 'date'}
+              aria-controls={`${id}-date-picker`}
+              onClick={() => setOpenPicker((current) => current === 'date' ? null : 'date')}
+            >
+              <CalendarDays size={17} aria-hidden="true" />
+            </button>
           </div>
         </div>
         <div className="beijing-date-time-field__segment">
@@ -91,12 +157,58 @@ export function BeijingDateTimeField({
               disabled={disabled}
               aria-invalid={Boolean(error)}
               aria-describedby={describedBy}
+              onFocus={() => setOpenPicker(null)}
+              onKeyDown={(event) => openFromKeyboard(event, 'time')}
               onChange={(event) => onChange(`${date}T${event.target.value}`)}
             />
-            <Clock3 size={17} aria-hidden="true" />
+            <button
+              ref={timeTriggerRef}
+              className="beijing-date-time-field__picker-trigger"
+              type="button"
+              disabled={disabled}
+              aria-label="打开时刻选择面板"
+              aria-haspopup="dialog"
+              aria-expanded={openPicker === 'time'}
+              aria-controls={`${id}-time-picker`}
+              onClick={() => setOpenPicker((current) => current === 'time' ? null : 'time')}
+            >
+              <Clock3 size={17} aria-hidden="true" />
+            </button>
           </div>
         </div>
       </div>
+
+      {openPicker === 'date' && (
+        <BeijingDatePicker
+          id={`${id}-date-picker`}
+          value={date}
+          today={today}
+          onSelect={(nextDate) => {
+            onChange(`${nextDate}T${time}`);
+            closePickerAndFocus('date');
+          }}
+          onClear={() => {
+            onChange(`T${time}`);
+            closePickerAndFocus('date');
+          }}
+        />
+      )}
+
+      {openPicker === 'time' && (
+        <BeijingTimePicker
+          id={`${id}-time-picker`}
+          value={time}
+          now={nowTime}
+          onApply={(nextTime) => {
+            onChange(`${date}T${nextTime}`);
+            closePickerAndFocus('time');
+          }}
+          onClear={() => {
+            onChange(`${date}T`);
+            closePickerAndFocus('time');
+          }}
+        />
+      )}
 
       {(error || helperText) && (
         <div className="beijing-date-time-field__support">
