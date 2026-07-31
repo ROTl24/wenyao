@@ -56,7 +56,7 @@ npm.cmd run verify:retrieval
 npm.cmd run build
 ```
 
-安装包生成到 `release/WenYao-0.1.0-Setup.exe`。
+安装包生成到 `release/WenYao-0.2.0-Setup.exe`。
 
 ## 古籍证据包
 
