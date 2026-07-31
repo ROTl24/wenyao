@@ -1,4 +1,4 @@
-const { app, BrowserWindow, ipcMain, safeStorage, shell } = require('electron');
+const { app, BrowserWindow, dialog, ipcMain, safeStorage, shell } = require('electron');
 const fs = require('node:fs');
 const path = require('node:path');
 const crypto = require('node:crypto');
@@ -10,6 +10,7 @@ const { createAlibabaClient } = require('./services/alibaba.cjs');
 const { createDeepSeekClient } = require('./services/deepseek.cjs');
 const { LocalVectorIndex } = require('./services/vector-index.cjs');
 const { hybridSearch } = require('./services/retrieval.cjs');
+const { configureInstallDataPaths } = require('./services/install-data.cjs');
 const alibabaConfig = require('../config/alibaba.json');
 const deepseekConfig = require('../config/deepseek.json');
 
@@ -19,6 +20,15 @@ const oneTimeSetupKeys = process.argv.includes('--configure-api-keys-env') ? {
 } : null;
 delete process.env.WENYAO_ALIBABA_KEY;
 delete process.env.WENYAO_DEEPSEEK_KEY;
+
+try {
+  configureInstallDataPaths(app);
+} catch (error) {
+  const message = error instanceof Error ? error.message : '无法初始化安装目录中的数据文件夹。';
+  process.stderr.write(`${message}\n`);
+  dialog.showErrorBox('问爻无法启动', `${message}\n\n请确认安装目录可写，或重新安装到当前用户拥有写入权限的目录。`);
+  app.exit(1);
+}
 
 let mainWindow;
 let store;
