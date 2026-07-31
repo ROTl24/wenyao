@@ -12,6 +12,7 @@ const installerPath = path.join(releaseRoot, installerName);
 const blockmapPath = `${installerPath}.blockmap`;
 const latestPath = path.join(releaseRoot, 'latest.yml');
 const packagedUpdateConfigPath = path.join(releaseRoot, 'win-unpacked', 'resources', 'app-update.yml');
+const installerBuildScriptPath = path.join(projectRoot, 'scripts', 'build-windows-installer.mjs');
 
 function requireFile(filePath, minimumBytes = 1) {
   if (!existsSync(filePath)) throw new Error(`缺少发布产物：${path.relative(projectRoot, filePath)}`);
@@ -42,6 +43,7 @@ requireFile(packagedUpdateConfigPath, 40);
 
 const latest = readFileSync(latestPath, 'utf8');
 const packagedUpdateConfig = readFileSync(packagedUpdateConfigPath, 'utf8');
+const installerBuildScript = readFileSync(installerBuildScriptPath, 'utf8');
 const metadataVersion = yamlScalar(latest, 'version');
 const metadataPath = yamlScalar(latest, 'path');
 const metadataSha512 = yamlScalar(latest, 'sha512');
@@ -64,6 +66,28 @@ for (const expectedLine of ['provider: github', 'owner: ROTl24', 'repo: wenyao']
     throw new Error(`app-update.yml 缺少 ${expectedLine}`);
   }
 }
+if (!packageJson.scripts?.build?.includes('scripts/build-windows-installer.mjs')) {
+  throw new Error('默认构建未接入问爻安装器构建脚本');
+}
+if (!packageJson.scripts?.['release:windows']?.includes('scripts/build-windows-installer.mjs')) {
+  throw new Error('Windows 发布构建未接入问爻安装器构建脚本');
+}
+for (const expectedLine of [
+  'ShowInstDetails show',
+  'SetDetailsPrint both',
+  '正在检查问爻是否正在运行',
+  '正在检查并安全替换已有版本',
+  '正在准备安装目录',
+  '正在安装桌面程序与内置卦理资料',
+  '正在写入版本与卸载信息',
+  '正在创建开始菜单快捷方式',
+  '正在创建桌面快捷方式',
+  '正在完成安装',
+]) {
+  if (!installerBuildScript.includes(expectedLine)) {
+    throw new Error(`安装进度反馈缺少 ${expectedLine}`);
+  }
+}
 
 process.stdout.write(`${JSON.stringify({
   version,
@@ -72,4 +96,5 @@ process.stdout.write(`${JSON.stringify({
   metadata: 'latest.yml',
   blockmap: `${installerName}.blockmap`,
   provider: 'github:ROTl24/wenyao',
+  installerFeedbackSteps: 9,
 })}\n`);
