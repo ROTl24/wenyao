@@ -229,35 +229,30 @@ test('toss order, faces, value and derived fields must be self-consistent', () =
   assert.throws(() => store.saveSession(wrongDerived), /投币历史冲突/);
 });
 
-test('JsonStore never exposes an encrypted secret through public settings', () => {
+test('JsonStore never exposes an encrypted secret through public AI state', () => {
   const store = createStore();
-  store.saveSettings({ alibabaBaseUrl: 'https://api.example.com/v1', alibabaModel: 'model-a', embeddingModel: 'embed-a', embeddingDimensions: 1024, rerankModel: 'rank-a', rerankUrl: '', deepseekBaseUrl: 'https://api.deepseek.com', deepseekModel: 'deepseek-v4-pro', encryptedAlibabaApiKey: 'ciphertext', encryptedDeepSeekApiKey: 'ciphertext-2' });
-  assert.deepEqual(store.getPublicSettings(), {
-    alibabaBaseUrl: 'https://api.example.com/v1',
-    alibabaModel: 'model-a',
-    embeddingModel: 'embed-a',
-    embeddingDimensions: 1024,
-    rerankModel: 'rank-a',
-    rerankUrl: '',
-    deepseekBaseUrl: 'https://api.deepseek.com',
-    deepseekModel: 'deepseek-v4-pro',
-    hasAlibabaApiKey: true,
-    hasDeepSeekApiKey: true,
-  });
+  const state = store.getRawAIState();
+  state.connections = [{
+    id: 'provider-a', providerId: 'custom', presetId: null, label: '服务 A', region: '',
+    baseUrl: 'https://api.example.com/v1', fields: {}, encryptedApiKey: 'ciphertext',
+    capabilities: { generation: { protocol: 'openai-chat', model: 'model-a' } },
+    createdAt: new Date().toISOString(), updatedAt: new Date().toISOString(),
+  }];
+  state.activePipeline = { generation: { connectionId: 'provider-a' }, embedding: null, rerank: null };
+  store.saveAIState(state);
+
+  const publicState = store.getPublicAIState();
+  assert.equal(publicState.connections[0].hasApiKey, true);
+  assert.equal(Object.hasOwn(publicState.connections[0], 'encryptedApiKey'), false);
+  assert.equal(JSON.stringify(publicState).includes('ciphertext'), false);
 });
 
-test('JsonStore defaults to the Alibaba retrieval and DeepSeek analysis stacks', () => {
+test('JsonStore defaults to an unconfigured provider-neutral AI state', () => {
   const store = createStore();
-  assert.deepEqual(store.getPublicSettings(), {
-    alibabaBaseUrl: 'https://dashscope.aliyuncs.com/compatible-mode/v1',
-    alibabaModel: 'qwen3.7-plus',
-    embeddingModel: 'text-embedding-v4',
-    embeddingDimensions: 1024,
-    rerankModel: 'qwen3-rerank',
-    rerankUrl: '',
-    deepseekBaseUrl: 'https://api.deepseek.com',
-    deepseekModel: 'deepseek-v4-pro',
-    hasAlibabaApiKey: false,
-    hasDeepSeekApiKey: false,
-  });
+  const state = store.getPublicAIState();
+  assert.equal(state.schemaVersion, 2);
+  assert.deepEqual(state.connections, []);
+  assert.equal(state.activePipeline, null);
+  assert.equal(state.draft, null);
+  assert.deepEqual(state.usage, []);
 });

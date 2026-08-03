@@ -1,12 +1,16 @@
-import { Database, KeyRound, RefreshCw, ShieldCheck, X } from 'lucide-react';
-import { useEffect, useState } from 'react';
-import alibabaConfig from '../../config/alibaba.json';
-import deepseekConfig from '../../config/deepseek.json';
+import { Database, ExternalLink, RefreshCw, ShieldCheck, X } from 'lucide-react';
+import { useEffect, useMemo, useState } from 'react';
 import { desktop } from '../lib/desktop';
-import type { UpdateState } from '../types/desktop';
+import type { AIConfigStatus, AIProviderCatalog, UpdateState } from '../types/desktop';
+import { AIAdvancedSettings } from './AIAdvancedSettings';
+import { AIStatusCard } from './AIStatusCard';
 
 interface Props {
   updateState: UpdateState;
+  aiStatus: AIConfigStatus;
+  aiCatalog: AIProviderCatalog;
+  onAIStatus(status: AIConfigStatus): void;
+  onConfigureAI(): void;
   onCheckUpdate(): void;
   onOpenUpdate(): void;
   onClose(): void;
@@ -27,147 +31,52 @@ function updateStatusText(state: UpdateState) {
 
 export function SettingsPanel({
   updateState,
+  aiStatus,
+  aiCatalog,
+  onAIStatus,
+  onConfigureAI,
   onCheckUpdate,
   onOpenUpdate,
   onClose,
 }: Props) {
-  const [alibabaBaseUrl, setAlibabaBaseUrl] = useState(alibabaConfig.baseUrl);
-  const [alibabaModel, setAlibabaModel] = useState(alibabaConfig.model);
-  const [embeddingModel, setEmbeddingModel] = useState(alibabaConfig.embeddingModel);
-  const [embeddingDimensions, setEmbeddingDimensions] = useState(alibabaConfig.embeddingDimensions);
-  const [rerankModel, setRerankModel] = useState(alibabaConfig.rerankModel);
-  const [rerankUrl, setRerankUrl] = useState(alibabaConfig.rerankUrl);
-  const [deepseekBaseUrl, setDeepseekBaseUrl] = useState(deepseekConfig.baseUrl);
-  const [deepseekModel, setDeepseekModel] = useState(deepseekConfig.model);
-  const [alibabaApiKey, setAlibabaApiKey] = useState('');
-  const [deepseekApiKey, setDeepseekApiKey] = useState('');
-  const [hasAlibabaApiKey, setHasAlibabaApiKey] = useState(false);
-  const [hasDeepSeekApiKey, setHasDeepSeekApiKey] = useState(false);
-  const [status, setStatus] = useState('');
-  const [indexing, setIndexing] = useState(false);
+  const [advancedOpen, setAdvancedOpen] = useState(false);
   const [corpus, setCorpus] = useState({ count: 0, bookCount: 0, originalCount: 0, summaryCount: 0, ruleCount: 0, caseCount: 0, doctrineCount: 0, vectorReady: false, vectorModel: '', ready: false });
-
-  useEffect(() => {
-    void Promise.all([desktop.settings.get(), desktop.corpus.status()]).then(([settings, corpusStatus]) => {
-      setAlibabaBaseUrl(settings.alibabaBaseUrl);
-      setAlibabaModel(settings.alibabaModel);
-      setEmbeddingModel(settings.embeddingModel);
-      setEmbeddingDimensions(settings.embeddingDimensions);
-      setRerankModel(settings.rerankModel);
-      setRerankUrl(settings.rerankUrl);
-      setDeepseekBaseUrl(settings.deepseekBaseUrl);
-      setDeepseekModel(settings.deepseekModel);
-      setHasAlibabaApiKey(settings.hasAlibabaApiKey);
-      setHasDeepSeekApiKey(settings.hasDeepSeekApiKey);
-      setCorpus(corpusStatus);
-    });
-  }, []);
-
-  const save = async () => {
-    setStatus('保存中…');
-    try {
-      const result = await desktop.settings.save({
-        alibabaBaseUrl,
-        alibabaModel,
-        embeddingModel,
-        embeddingDimensions,
-        rerankModel,
-        rerankUrl,
-        deepseekBaseUrl,
-        deepseekModel,
-        alibabaApiKey: alibabaApiKey || undefined,
-        deepseekApiKey: deepseekApiKey || undefined,
-      });
-      setHasAlibabaApiKey(result.hasAlibabaApiKey);
-      setHasDeepSeekApiKey(result.hasDeepSeekApiKey);
-      setAlibabaApiKey('');
-      setDeepseekApiKey('');
-      setCorpus(await desktop.corpus.status());
-      setStatus('阿里云检索与 DeepSeek 解读设置已保存。');
-    } catch (error) { setStatus(error instanceof Error ? error.message : '保存失败。'); }
-  };
-
-  const test = async () => {
-    setStatus('正在测试阿里云与 DeepSeek 连接…');
-    const result = await desktop.settings.test();
-    setStatus(result.ok ? result.message || '连接成功。' : `${result.error?.message} ${result.error?.nextAction}`);
-  };
-
-  const rebuildVectors = async () => {
-    setIndexing(true);
-    setStatus(`正在向阿里云 text-embedding-v4 生成 ${corpus.count} 条本地向量，窗口可继续保留打开…`);
-    try {
-      const result = await desktop.corpus.rebuildVectors();
-      if (!result.ok) { setStatus(`${result.error?.message} ${result.error?.nextAction}`); return; }
-      const latest = await desktop.corpus.status();
-      setCorpus(latest);
-      setStatus(`向量索引已完成：${result.result?.count} 条，${result.result?.dimensions} 维。`);
-    } finally { setIndexing(false); }
-  };
+  useEffect(() => { void desktop.corpus.status().then(setCorpus); }, [aiStatus.status, aiStatus.activeFingerprint]);
+  const usage = useMemo(() => aiStatus.usage.reduce((total, item) => total + item.totalTokens, 0), [aiStatus.usage]);
+  const activePresetIds = new Set(aiStatus.connections.filter((connection) => aiStatus.activeCapabilities && Object.values(aiStatus.activeCapabilities).some((capability) => capability.connectionId === connection.id)).map((connection) => connection.presetId));
+  const billingLinks = aiCatalog.presets.filter((preset) => activePresetIds.has(preset.id));
 
   return (
     <div className="overlay" role="presentation" onMouseDown={(event) => { if (event.target === event.currentTarget) onClose(); }}>
       <aside className="side-panel settings-panel" aria-modal="true" role="dialog">
-        <header><div><h2>应用设置</h2><p>软件更新、AI 模型与本地知识库</p></div><button type="button" aria-label="关闭设置" onClick={onClose}><X /></button></header>
+        <header><div><h2>应用设置</h2><p>软件更新、AI 服务与本地知识库</p></div><button type="button" aria-label="关闭设置" onClick={onClose}><X /></button></header>
+
+        <section className="settings-section">
+          <AIStatusCard status={aiStatus} onConfigure={onConfigureAI} onAdvanced={() => setAdvancedOpen(true)} />
+          <p className="ai-billing-note">AI 调用费用由所选服务商收取，问爻不会代扣，也不会根据可能变化的价格自行估算金额。</p>
+          {billingLinks.length ? <div className="ai-billing-links">{billingLinks.map((preset) => <button type="button" key={preset.id} onClick={() => void desktop.aiConfig.openExternal(preset.setup.billingUrl)}>{preset.name} 余额 / 充值 <ExternalLink size={13} /></button>)}</div> : null}
+          {usage > 0 ? <p className="ai-usage-summary">本机已记录 {aiStatus.usage.length} 次带用量响应，共 {usage.toLocaleString('zh-CN')} Tokens；不含未返回用量的服务。</p> : null}
+        </section>
 
         <section className="settings-section update-settings">
           <div className="settings-heading"><RefreshCw /><div><strong>软件更新</strong><span>{updateStatusText(updateState)}</span></div></div>
           <div className="update-version-row"><span>当前版本</span><strong>{updateState.currentVersion ? `v${updateState.currentVersion}` : '未知'}</strong></div>
-          {updateState.status === 'error' && updateState.manual && <p className="settings-status" role="alert">{updateState.message}</p>}
-          <button
-            className="index-button"
-            type="button"
-            disabled={updateState.status === 'unsupported' || updateState.status === 'checking' || updateState.status === 'downloading'}
-            onClick={updateState.status === 'available' || updateState.status === 'downloaded' || (updateState.status === 'error' && updateState.operation === 'download')
-              ? onOpenUpdate
-              : onCheckUpdate}
-          >
-            {updateState.status === 'checking'
-              ? '正在检查…'
-              : updateState.status === 'downloading'
-                ? `下载中 ${updateState.progress.toFixed(1)}%`
-                : updateState.status === 'available' || updateState.status === 'downloaded' || (updateState.status === 'error' && updateState.operation === 'download')
-                  ? '查看更新'
-                  : updateState.status === 'error'
-                    ? '重新检查'
-                    : '检查更新'}
+          {updateState.status === 'error' && updateState.manual ? <p className="settings-status" role="alert">{updateState.message}</p> : null}
+          <button className="index-button" type="button" disabled={updateState.status === 'unsupported' || updateState.status === 'checking' || updateState.status === 'downloading'} onClick={updateState.status === 'available' || updateState.status === 'downloaded' || (updateState.status === 'error' && updateState.operation === 'download') ? onOpenUpdate : onCheckUpdate}>
+            {updateState.status === 'checking' ? '正在检查…' : updateState.status === 'downloading' ? `下载中 ${updateState.progress.toFixed(1)}%` : updateState.status === 'available' || updateState.status === 'downloaded' || (updateState.status === 'error' && updateState.operation === 'download') ? '查看更新' : updateState.status === 'error' ? '重新检查' : '检查更新'}
           </button>
           <p className="update-signing-note">当前版本尚未进行 Windows 代码签名，安装更新时仍可能出现 SmartScreen 提示；SHA-512 完整性校验不等同于发布者身份验证。</p>
         </section>
 
         <section className="settings-section">
-          <div className="settings-heading"><KeyRound /><div><strong>阿里云百炼 · 千问检索栈</strong><span>原千问配置负责聊天连通性、向量召回与可选重排</span></div></div>
-          <label>官方兼容 API 地址<input value={alibabaBaseUrl} onChange={(event) => setAlibabaBaseUrl(event.target.value)} /></label>
-          <label>千问模型<input value={alibabaModel} onChange={(event) => setAlibabaModel(event.target.value)} /></label>
-          <div className="settings-grid">
-            <label>向量模型<input value={embeddingModel} onChange={(event) => setEmbeddingModel(event.target.value)} /></label>
-            <label>向量维度<input value={embeddingDimensions} readOnly /></label>
-          </div>
-          <div className="settings-grid">
-            <label>重排模型<input value={rerankModel} onChange={(event) => setRerankModel(event.target.value)} /></label>
-            <label>重排业务空间地址（可选）<input value={rerankUrl} onChange={(event) => setRerankUrl(event.target.value)} placeholder="没有 Workspace ID 可留空" /></label>
-          </div>
-          <label>阿里云 API 密钥<input type="password" value={alibabaApiKey} onChange={(event) => setAlibabaApiKey(event.target.value)} placeholder={hasAlibabaApiKey ? '密钥已安全保存；留空表示不修改' : '输入后由 Windows 加密'} /></label>
-        </section>
-
-        <section className="settings-section">
-          <div className="settings-heading"><KeyRound /><div><strong>DeepSeek · AI 解读</strong><span>只有正式解读与追问走 DeepSeek 官方接口</span></div></div>
-          <label>官方 API 地址<input value={deepseekBaseUrl} onChange={(event) => setDeepseekBaseUrl(event.target.value)} /></label>
-          <label>解读模型<input value={deepseekModel} onChange={(event) => setDeepseekModel(event.target.value)} /></label>
-          <label>DeepSeek API 密钥<input type="password" value={deepseekApiKey} onChange={(event) => setDeepseekApiKey(event.target.value)} placeholder={hasDeepSeekApiKey ? '密钥已安全保存；留空表示不修改' : '输入后由 Windows 加密'} /></label>
-          <div className="settings-actions"><button type="button" onClick={save}>保存设置</button><button type="button" onClick={test}>测试两套连接</button></div>
-          {status && <p className="settings-status">{status}</p>}
-        </section>
-
-        <section className="settings-section">
-          <div className="settings-heading"><Database /><div><strong>本地结构化古籍库</strong><span>{corpus.vectorReady ? `${corpus.vectorModel} 向量索引已就绪` : '尚未构建语义向量索引'}</span></div></div>
+          <div className="settings-heading"><Database /><div><strong>本地结构化古籍库</strong><span>{corpus.vectorReady ? `${corpus.vectorModel} 向量索引已就绪` : '向量索引尚未完成'}</span></div></div>
           <div className="corpus-stats corpus-stats--knowledge"><span><b>{corpus.bookCount}</b>本古籍</span><span><b>{corpus.ruleCount}</b>条规则</span><span><b>{corpus.caseCount}</b>条占例</span><span><b>{corpus.doctrineCount}</b>条义理</span></div>
-          {corpus.vectorReady ? <p className="corpus-ready">混合检索可用：关键词召回 + 本地向量召回 + 阿里云可选重排。</p> : <p className="corpus-warning">首次构建会把古籍片段分批发送给阿里云向量模型并把结果保存在本机。之后日常解卦只发送问题和少量候选证据。</p>}
-          <button className="index-button" type="button" onClick={() => void rebuildVectors()} disabled={!hasAlibabaApiKey || indexing}>{indexing ? '正在构建向量索引…' : '构建 / 更新向量索引'}</button>
+          {corpus.vectorReady ? <p className="corpus-ready">严格检索已启用：关键词候选 + 向量召回 + 专用模型重排。</p> : <p className="corpus-warning">AI 解读必须等待向量召回和重排均可用，不会退回关键词检索生成报告。</p>}
         </section>
 
-        <div className="security-note"><ShieldCheck /><p><strong>隐私边界</strong>两套密钥分别由 Windows DPAPI 加密；历史和向量索引留在本机。日常解卦只把当前问题、只读排盘和命中的少量证据发送给 DeepSeek。</p></div>
+        <div className="security-note"><ShieldCheck /><p><strong>隐私边界</strong>访问密钥由 Windows DPAPI 加密，历史和向量索引留在本机。设置中可以随时查看当前问题、排盘、证据与追问分别发送给哪一家服务商。</p></div>
       </aside>
+      {advancedOpen ? <AIAdvancedSettings catalog={aiCatalog} status={aiStatus} onStatus={onAIStatus} onClose={() => setAdvancedOpen(false)} /> : null}
     </div>
   );
 }

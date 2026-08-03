@@ -1,10 +1,9 @@
 const { spawn } = require('node:child_process');
 const path = require('node:path');
 
-const alibabaKey = process.env.WENYAO_ALIBABA_KEY || '';
-const deepseekKey = process.env.WENYAO_DEEPSEEK_KEY || '';
-if (!alibabaKey && !deepseekKey) {
-  process.stderr.write('未提供一次性配置密钥。\n');
+const siliconFlowKey = process.env.WENYAO_SILICONFLOW_KEY || '';
+if (!siliconFlowKey) {
+  process.stderr.write('未提供 WENYAO_SILICONFLOW_KEY。\n');
   process.exit(1);
 }
 const electron = path.join(__dirname, '..', 'node_modules', 'electron', 'dist', 'electron.exe');

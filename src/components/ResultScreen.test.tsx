@@ -3,6 +3,7 @@ import { describe, expect, it, vi } from 'vitest';
 import { buildPlate } from '../lib/divination';
 import type { EvidenceEntry } from '../lib/retrieval';
 import type { DivinationSession } from '../lib/session';
+import type { AIConfigStatus } from '../types/desktop';
 import { ResultScreen } from './ResultScreen';
 
 const castAt = new Date('2026-07-13T08:00:00.000Z');
@@ -43,6 +44,23 @@ const evidence: EvidenceEntry[] = [
   },
 ];
 
+const readyAIStatus: AIConfigStatus = {
+  status: 'ready',
+  message: 'AI 服务已就绪',
+  activeCapabilities: {
+    generation: { connectionId: 'test', providerId: 'test', label: '测试服务', model: 'chat-test' },
+    embedding: { connectionId: 'test', providerId: 'test', label: '测试服务', model: 'embedding-test' },
+    rerank: { connectionId: 'test', providerId: 'test', label: '测试服务', model: 'rerank-test' },
+  },
+  activeFingerprint: 'test-index',
+  corpusCount: 2,
+  consentAcceptedAt: castAt.toISOString(),
+  connections: [],
+  activePipeline: null,
+  draft: null,
+  usage: [],
+};
+
 function renderResult(
   targetSession: DivinationSession = session,
   {
@@ -54,6 +72,7 @@ function renderResult(
     analysisSaveStatus = targetSession.analysis ? 'saved' : 'idle',
     analysisSaveError = '',
     onRetryAnalysisSave = vi.fn(),
+    targetAIStatus = readyAIStatus,
   }: {
     analyzing?: boolean;
     onAnalyze?: () => void;
@@ -63,11 +82,13 @@ function renderResult(
     analysisSaveStatus?: 'idle' | 'saving' | 'saved' | 'error';
     analysisSaveError?: string;
     onRetryAnalysisSave?: () => void;
+    targetAIStatus?: AIConfigStatus;
   } = {},
 ) {
   const view = render(
     <ResultScreen
       session={targetSession}
+      aiStatus={targetAIStatus}
       evidence={targetEvidence}
       retrievalDiagnostics={null}
       sessionSaveStatus={sessionSaveStatus}
@@ -89,6 +110,14 @@ function renderResult(
 }
 
 describe('ResultScreen Markdown 解读', () => {
+  it('keeps the active AI stack usable while a replacement vector index builds', () => {
+    renderResult(session, {
+      targetAIStatus: { ...readyAIStatus, status: 'building', message: '正在准备新方案' },
+    });
+    expect(screen.getByRole('button', { name: '开始解读' })).toBeEnabled();
+    expect(screen.getByRole('textbox', { name: '你的追问' })).toBeEnabled();
+  });
+
   it('presents a static cast as a single-hexagram opening and keeps analysis, plate and evidence in reading order', () => {
     const { container } = renderResult();
     const opening = screen.getByRole('banner', { name: '成卦卷首' });
@@ -297,6 +326,7 @@ describe('ResultScreen Markdown 解读', () => {
     render(
       <ResultScreen
         session={session}
+        aiStatus={readyAIStatus}
         evidence={evidence}
         retrievalDiagnostics={null}
         sessionSaveStatus="error"

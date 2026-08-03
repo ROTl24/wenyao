@@ -7,4 +7,9 @@ export interface AnalysisReport {
     stages: string[];
     warnings: string[];
   };
+  provider?: Record<'generation' | 'embedding' | 'rerank', {
+    providerId: string;
+    connectionLabel: string;
+    model: string;
+  }>;
 }

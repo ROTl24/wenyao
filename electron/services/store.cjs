@@ -1,7 +1,10 @@
 const fs = require('node:fs');
 const path = require('node:path');
-const alibabaConfig = require('../../config/alibaba.json');
-const deepseekConfig = require('../../config/deepseek.json');
+const {
+  migrateLegacySettings,
+  normalizeAIState,
+  publicAIState,
+} = require('./ai-config.cjs');
 const {
   normalizeStoredSession,
   validateSessionForSave,
@@ -13,7 +16,18 @@ class JsonStore {
   constructor(filePath) {
     this.filePath = filePath;
     fs.mkdirSync(path.dirname(filePath), { recursive: true });
-    this.state = this.#load();
+    const loaded = this.#load();
+    const migration = migrateLegacySettings(loaded.settings);
+    this.state = { ...loaded, settings: migration.settings };
+    if (migration.migrated) {
+      const backupPath = `${this.filePath}.pre-ai-v2-${Date.now()}.bak`;
+      if (fs.existsSync(this.filePath)) fs.copyFileSync(this.filePath, backupPath);
+      try { this.#write(); }
+      catch (error) {
+        this.state = loaded;
+        throw error;
+      }
+    }
   }
 
   #load() {
@@ -64,64 +78,34 @@ class JsonStore {
     return true;
   }
 
-  saveSettings(settings) {
-    this.state.settings = { ...this.state.settings, ...structuredClone(settings) };
+  getRawAIState() {
+    return normalizeAIState(this.state.settings.ai);
+  }
+
+  getPublicAIState() {
+    return publicAIState(this.state.settings.ai);
+  }
+
+  saveAIState(aiState) {
+    this.state.settings = {
+      ...this.state.settings,
+      ai: normalizeAIState(aiState),
+    };
     this.#write();
-    return this.getPublicSettings();
+    return this.getPublicAIState();
   }
 
-  getRawSettings() {
-    const {
-      alibabaBaseUrl = alibabaConfig.baseUrl,
-      alibabaModel = alibabaConfig.model,
-      embeddingModel = alibabaConfig.embeddingModel,
-      embeddingDimensions = alibabaConfig.embeddingDimensions,
-      rerankModel = alibabaConfig.rerankModel,
-      rerankUrl = alibabaConfig.rerankUrl,
-      deepseekBaseUrl = deepseekConfig.baseUrl,
-      deepseekModel = deepseekConfig.model,
-      encryptedAlibabaApiKey = '',
-      encryptedDeepSeekApiKey = '',
-    } = this.state.settings;
-    return {
-      alibabaBaseUrl,
-      alibabaModel,
-      embeddingModel,
-      embeddingDimensions,
-      rerankModel,
-      rerankUrl,
-      deepseekBaseUrl,
-      deepseekModel,
-      encryptedAlibabaApiKey,
-      encryptedDeepSeekApiKey,
-    };
+  updateAIState(updater) {
+    const current = this.getRawAIState();
+    const next = updater(structuredClone(current));
+    return this.saveAIState(next === undefined ? current : next);
   }
 
-  getPublicSettings() {
-    const {
-      alibabaBaseUrl = alibabaConfig.baseUrl,
-      alibabaModel = alibabaConfig.model,
-      embeddingModel = alibabaConfig.embeddingModel,
-      embeddingDimensions = alibabaConfig.embeddingDimensions,
-      rerankModel = alibabaConfig.rerankModel,
-      rerankUrl = alibabaConfig.rerankUrl,
-      deepseekBaseUrl = deepseekConfig.baseUrl,
-      deepseekModel = deepseekConfig.model,
-      encryptedAlibabaApiKey = '',
-      encryptedDeepSeekApiKey = '',
-    } = this.state.settings;
-    return {
-      alibabaBaseUrl,
-      alibabaModel,
-      embeddingModel,
-      embeddingDimensions,
-      rerankModel,
-      rerankUrl,
-      deepseekBaseUrl,
-      deepseekModel,
-      hasAlibabaApiKey: Boolean(encryptedAlibabaApiKey),
-      hasDeepSeekApiKey: Boolean(encryptedDeepSeekApiKey),
-    };
+  appendAIUsage(entry) {
+    return this.updateAIState((state) => {
+      state.usage = [...state.usage, structuredClone(entry)].slice(-1000);
+      return state;
+    });
   }
 }
 

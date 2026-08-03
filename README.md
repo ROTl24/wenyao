@@ -19,7 +19,8 @@
 - 6/7/8/9、六十四卦、变卦、完整干支纳甲、变爻六亲、六神、世应、月日与旬空
 - 在线路线每一轮自动保存并可从历史恢复；线下草稿仅驻留当前界面，终审确认后一次保存
 - 古籍证据栏、Markdown 云端 AI 解读与同卦追问
-- 阿里云百炼 `qwen3.7-plus` 与 `text-embedding-v4` 检索栈、DeepSeek 官方 `deepseek-v4-pro` 分阶段解卦
+- 面向新手的一站式 AI 连接向导：推荐 SiliconFlow 中国大陆完整方案，也支持阿里云百炼、DeepSeek 与自定义兼容接口
+- 解读、向量召回和专用重排是一个不可拆开的质量契约；任一能力失败都不会降级生成报告
 - API 密钥使用 Windows DPAPI 加密，历史、古籍、结构化索引和向量索引保存在本机
 - 历史搜索、来源标记、恢复和二次确认删除
 - Windows NSIS 安装包与免安装目录
@@ -56,8 +57,11 @@ npm.cmd run typecheck
 npm.cmd run eval:retrieval
 npm.cmd run verify:models
 npm.cmd run verify:retrieval
+npm.cmd run verify:analysis
 npm.cmd run build
 ```
+
+三条 `verify:*` 命令会使用桌面应用中已启用的真实配置并可能产生服务商费用；普通开发检查使用 `npm.cmd test` 与 `npm.cmd run typecheck` 即可。
 
 安装包生成到 `release/WenYao-0.3.0-Setup.exe`；`npm.cmd run verify:release` 会校验安装包、更新元数据、blockmap 与内置 GitHub 更新源是否一致。
 
@@ -65,7 +69,7 @@ npm.cmd run build
 
 `resources/corpus.json` 已收入用户提供的《易隐》《卜筮正宗》《易冒》《火珠林》《增删卜易》五本纯文本古籍，共 1263 条原文证据。每条证据保留书名、章节标题和原始文本行号；`resources/corpus-manifest.json` 记录原文件名、SHA-256、编码、行数和条目数，便于复核与重建。
 
-`resources/knowledge-index.json` 将原文进一步标注为 495 条规则、190 条占例和 578 条义理；`resources/corpus-vectors.f32` 是 1,263 条原文的 1024 维本地向量索引。桌面端检索采用关键词/BM25 类召回与向量召回的 RRF 融合，再由阿里云 qwen3-rerank 业务空间接口（配置后）对候选证据精排。
+`resources/knowledge-index.json` 将原文进一步标注为 495 条规则、190 条占例和 578 条义理。桌面端检索采用关键词候选与所选向量模型的语义召回进行 RRF 融合，再交给专用重排模型精排。向量索引按“服务商 + API 地址 + 模型 + 维度 + 语料哈希”隔离保存，可暂停、恢复和断点续建；不会把不同模型的向量混用。
 
 语料构建脚本会自动识别 UTF-8/GB18030、去除下载站广告、按章节和段落切分，并拒绝含乱码或重复证据 ID 的构建结果：
 
@@ -73,21 +77,20 @@ npm.cmd run build
 npm.cmd run build:corpus -- "C:\path\易隐.txt" "C:\path\卜筮正宗.txt" "C:\path\易冒.txt" "C:\path\火珠林.txt" "C:\path\增删卜易.txt"
 ```
 
-## 双 provider 模型设置
+## AI 服务设置
 
-阿里云百炼负责千问连通性、古籍向量召回和可选重排：
+第一次点击“开始解读”时，问爻会打开连接向导。不了解 API Key 的用户只需要：选择服务商、按按钮打开官方控制台、创建一串“访问密钥”并粘贴回来。它是给软件调用 AI 的专用密码，不是服务商登录密码；问爻不会索取账号密码，也不会读取剪贴板。
 
-- 官方兼容 API：`https://dashscope.aliyuncs.com/compatible-mode/v1`
-- 千问模型：`qwen3.7-plus`
-- 向量模型：`text-embedding-v4`（1024 维）
-- 重排模型：`qwen3-rerank`（需要填写阿里云 Workspace 专属重排地址）
+新手默认使用 SiliconFlow 中国大陆完整方案，一把密钥同时提供：
 
-DeepSeek 官方接口只负责 AI 解读与同一卦象追问：
+- 解读：`deepseek-ai/DeepSeek-V4-Pro`
+- 向量：`Qwen/Qwen3-Embedding-4B`（1024 维）
+- 重排：`Qwen/Qwen3-Reranker-8B`
 
-- 官方 API：`https://api.deepseek.com`
-- 解读模型：`deepseek-v4-pro`
-- 主报告与追问直接返回严格 11 节 Markdown，固定使用“占问主题”到“最终一句话结论”的章节顺序；界面支持标题、列表与引用，并禁用模型输出中的原始 HTML
-- 每个判断、事实、条件、应期和最终结论句末都要求紧跟行内引用标签：盘面事实使用 `#plate-facts`，古籍规则使用真实的 `#evidence-ID`
-- 运行时按 Markdown 语义校验 11 节结构、句末引用、当前排盘事实与证据 ID；首次草稿不合格时只允许重写一次，引用标签可点击回看盘面或证据卡片
+高级设置允许把三项能力分配给不同连接，并支持 OpenAI-compatible Chat、OpenAI-compatible Embeddings、Cohere 风格 Rerank 与阿里云 Rerank。内置预设还包括阿里云百炼完整方案和 DeepSeek 官方解读方案；DeepSeek 只有解读能力，必须另配向量与重排。外部自定义服务强制使用 HTTPS，只有 `localhost` / `127.0.0.1` 可使用 HTTP 和无密钥模式。
 
-两套 API Key 分别由 Windows DPAPI 加密保存。首次重建向量索引会把古籍片段分批发送给阿里云向量模型并把生成结果保存在本机；更换向量模型后必须重新构建索引，旧模型的向量不能混用。起卦、排盘、历史和本地古籍浏览可离线使用；AI 解读与同卦追问必须配置 DeepSeek 密钥，未配置或请求失败时不会生成替代解读。
+启用新组合前，问爻会依次检查精确模型可用性、解读、向量与重排，再构建独立向量索引。检测或构建失败时旧方案继续可用，不会静默替换模型。Embedding 与 Rerank 的短暂网络故障会有限重试；正式解读超时不会自动重试，避免重复扣费。
+
+主报告与追问直接返回 Markdown。每个判断、事实、条件、应期和最终结论句末都要求引用排盘事实或真实证据；引用可点击回看盘面或古籍原文。
+
+访问密钥由 Windows DPAPI 加密保存；明文只在用户填写密码框并交给主进程加密的短暂过程存在，公开设置不会返回密文或明文，日志也不会记录密钥。初次建库会把内置古籍片段分批发送给所选向量服务；解卦时只发送当前问题、排盘与命中的少量证据；不会上传全部历史。调用费用由服务商直接收取，问爻只记录服务商返回的 Token 用量，不根据可能变化的价格估算金额。起卦、排盘、历史和古籍浏览仍可离线使用；AI 未配置或三项能力任一不可用时，不会生成本地替代解读。

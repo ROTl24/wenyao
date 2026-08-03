@@ -1,7 +1,6 @@
 import corpus from '../../resources/corpus.json';
-import alibabaConfig from '../../config/alibaba.json';
-import deepseekConfig from '../../config/deepseek.json';
-import type { DesktopApi } from '../types/desktop';
+import aiProviderCatalog from '../../config/ai-providers.json';
+import type { AIConfigStatus, AIProviderCatalog, DesktopApi } from '../types/desktop';
 import type { UpdateState } from '../types/desktop';
 import type { DivinationSession } from './session';
 import { searchEvidence } from './retrieval';
@@ -15,6 +14,18 @@ const STORAGE_KEY = 'wenyao-browser-sessions';
 const browserUpdateState: UpdateState = {
   status: 'unsupported',
   currentVersion: '',
+};
+const browserAIStatus: AIConfigStatus = {
+  status: 'unconfigured',
+  message: '浏览器预览不连接 AI 服务',
+  activeCapabilities: null,
+  activeFingerprint: '',
+  corpusCount: corpus.length,
+  consentAcceptedAt: '',
+  connections: [],
+  activePipeline: null,
+  draft: null,
+  usage: [],
 };
 
 function storedBrowserSessions(): unknown[] {
@@ -68,11 +79,18 @@ const browserFallback: DesktopApi = {
       return true;
     },
   },
-  settings: {
-    async get() { return { alibabaBaseUrl: alibabaConfig.baseUrl, alibabaModel: alibabaConfig.model, embeddingModel: alibabaConfig.embeddingModel, embeddingDimensions: alibabaConfig.embeddingDimensions, rerankModel: alibabaConfig.rerankModel, rerankUrl: alibabaConfig.rerankUrl, deepseekBaseUrl: deepseekConfig.baseUrl, deepseekModel: deepseekConfig.model, hasAlibabaApiKey: false, hasDeepSeekApiKey: false }; },
-    async save(payload) { return { alibabaBaseUrl: payload.alibabaBaseUrl, alibabaModel: payload.alibabaModel, embeddingModel: payload.embeddingModel, embeddingDimensions: payload.embeddingDimensions, rerankModel: payload.rerankModel, rerankUrl: payload.rerankUrl, deepseekBaseUrl: payload.deepseekBaseUrl, deepseekModel: payload.deepseekModel, hasAlibabaApiKey: false, hasDeepSeekApiKey: false }; },
-    async clearKey() { return { alibabaBaseUrl: alibabaConfig.baseUrl, alibabaModel: alibabaConfig.model, embeddingModel: alibabaConfig.embeddingModel, embeddingDimensions: alibabaConfig.embeddingDimensions, rerankModel: alibabaConfig.rerankModel, rerankUrl: alibabaConfig.rerankUrl, deepseekBaseUrl: deepseekConfig.baseUrl, deepseekModel: deepseekConfig.model, hasAlibabaApiKey: false, hasDeepSeekApiKey: false }; },
-    async test() { return { ok: false, error: { code: 'DESKTOP_ONLY', message: '请在桌面应用中测试 AI 连接。', dataSafe: true, nextAction: '启动 Electron 桌面窗口。' } }; },
+  aiConfig: {
+    async getCatalog() { return structuredClone(aiProviderCatalog) as AIProviderCatalog; },
+    async getStatus() { return structuredClone(browserAIStatus); },
+    async saveDraft() { return { ok: false, error: { code: 'DESKTOP_ONLY', message: '浏览器预览不保存 AI 密钥。', dataSafe: true, nextAction: '请启动 Electron 桌面应用。' } }; },
+    async testDraft() { return { ok: false, error: { code: 'DESKTOP_ONLY', message: '浏览器预览不测试 AI 连接。', dataSafe: true, nextAction: '请启动 Electron 桌面应用。' } }; },
+    async buildAndActivate() { return { ok: false, error: { code: 'DESKTOP_ONLY', message: '浏览器预览不构建向量索引。', dataSafe: true, nextAction: '请启动 Electron 桌面应用。' } }; },
+    async pauseBuild() { return structuredClone(browserAIStatus); },
+    async resumeBuild() { return structuredClone(browserAIStatus); },
+    async cancelBuild() { return structuredClone(browserAIStatus); },
+    async removeConnection() { return { ok: false, error: { code: 'DESKTOP_ONLY', message: '浏览器预览没有 AI 连接。', dataSafe: true, nextAction: '请启动 Electron 桌面应用。' } }; },
+    async openExternal(url) { window.open(url, '_blank', 'noopener,noreferrer'); return true; },
+    onStatus() { return () => {}; },
   },
   corpus: {
     async list() { return corpus as import('./retrieval').EvidenceEntry[]; },
@@ -86,7 +104,7 @@ const browserFallback: DesktopApi = {
     },
   },
   ai: {
-    async analyze() { return { ok: false, error: { code: 'DESKTOP_ONLY', message: '浏览器预览不发送 AI 请求。', dataSafe: true, nextAction: '请在桌面应用中配置 DeepSeek 后生成云端 AI 解读。' } }; },
+    async analyze() { return { ok: false, error: { code: 'DESKTOP_ONLY', message: '浏览器预览不发送 AI 请求。', dataSafe: true, nextAction: '请在桌面应用中连接完整 AI 服务后生成云端解读。' } }; },
     async followUp() { return { ok: false, error: { code: 'DESKTOP_ONLY', message: '浏览器预览不发送 AI 请求。', dataSafe: true, nextAction: '请使用桌面应用。' } }; },
   },
   platform: 'browser',

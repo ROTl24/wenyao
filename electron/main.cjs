@@ -1,34 +1,26 @@
 const { app, BrowserWindow, dialog, ipcMain, safeStorage, shell } = require('electron');
 const { autoUpdater } = require('electron-updater');
+const crypto = require('node:crypto');
 const fs = require('node:fs');
 const path = require('node:path');
-const crypto = require('node:crypto');
 const { pathToFileURL } = require('node:url');
-const { JsonStore } = require('./services/store.cjs');
-const { sanitizeRendererSession } = require('./services/ipc-payload.cjs');
-const { analyzeCloud, followUpCloud } = require('./services/ai.cjs');
-const { createAlibabaClient } = require('./services/alibaba.cjs');
-const { createDeepSeekClient } = require('./services/deepseek.cjs');
-const { LocalVectorIndex } = require('./services/vector-index.cjs');
-const { hybridSearch } = require('./services/retrieval.cjs');
+const { AIRuntime } = require('./services/ai-runtime.cjs');
+const { structuredProviderError } = require('./services/ai-provider.cjs');
 const { configureInstallDataPaths } = require('./services/install-data.cjs');
+const { sanitizeRendererSession } = require('./services/ipc-payload.cjs');
 const { prepareApplicationStartup } = require('./services/app-startup.cjs');
+const { JsonStore } = require('./services/store.cjs');
 const { createUpdateManager } = require('./services/update-manager.cjs');
 const { sanitizeUpdateState } = require('./services/update-state.cjs');
-const alibabaConfig = require('../config/alibaba.json');
-const deepseekConfig = require('../config/deepseek.json');
 
-const oneTimeSetupKeys = process.argv.includes('--configure-api-keys-env') ? {
-  alibaba: String(process.env.WENYAO_ALIBABA_KEY || ''),
-  deepseek: String(process.env.WENYAO_DEEPSEEK_KEY || ''),
-} : null;
+const oneTimeSiliconFlowKey = process.argv.includes('--configure-api-keys-env')
+  ? String(process.env.WENYAO_SILICONFLOW_KEY || '')
+  : '';
+delete process.env.WENYAO_SILICONFLOW_KEY;
 delete process.env.WENYAO_ALIBABA_KEY;
 delete process.env.WENYAO_DEEPSEEK_KEY;
 
-let startup = {
-  shouldStart: false,
-  commandMode: false,
-};
+let startup = { shouldStart: false, commandMode: false };
 try {
   startup = prepareApplicationStartup({
     app,
@@ -45,13 +37,14 @@ try {
 let mainWindow;
 let store;
 let corpus = [];
-let corpusHash = '';
-let vectorIndex;
-let vectorBuildPromise = null;
+let aiRuntime;
 let updateManager;
 
 function resourcePath(name) {
-  const candidates = [path.join(app.getAppPath(), 'resources', name), path.join(process.resourcesPath, 'resources', name)];
+  const candidates = [
+    path.join(app.getAppPath(), 'resources', name),
+    path.join(process.resourcesPath, 'resources', name),
+  ];
   return candidates.find((candidate) => fs.existsSync(candidate)) || candidates[0];
 }
 
@@ -60,52 +53,38 @@ function dataPath() {
 }
 
 function loadCorpus() {
-  const found = resourcePath('corpus.json');
-  if (!found) return [];
   try {
-    const parsed = JSON.parse(fs.readFileSync(found, 'utf8'));
+    const parsed = JSON.parse(fs.readFileSync(resourcePath('corpus.json'), 'utf8'));
     if (!Array.isArray(parsed)) return [];
     let knowledge = new Map();
     try {
       const index = JSON.parse(fs.readFileSync(resourcePath('knowledge-index.json'), 'utf8'));
       knowledge = new Map((index.units || []).map((unit) => [unit.id, unit]));
     } catch {}
-    return parsed.map((entry) => ({ ...entry, knowledgeKind: knowledge.get(entry.id)?.kind || 'doctrine', topics: knowledge.get(entry.id)?.topics || entry.tags || [] }));
+    return parsed.map((entry) => ({
+      ...entry,
+      knowledgeKind: knowledge.get(entry.id)?.kind || 'doctrine',
+      topics: knowledge.get(entry.id)?.topics || entry.tags || [],
+    }));
   } catch {
     return [];
   }
 }
 
 function hashCorpus(entries) {
-  return crypto.createHash('sha256').update(entries.map((entry) => `${entry.id}:${entry.title}:${entry.text}`).join('\n')).digest('hex');
+  return crypto.createHash('sha256')
+    .update(entries.map((entry) => `${entry.id}:${entry.title}:${entry.text}`).join('\n'))
+    .digest('hex');
 }
 
-function loadVectorIndex(model) {
-  const bases = [
-    path.join(app.getPath('userData'), 'corpus-vectors'),
-    resourcePath('corpus-vectors.f32').replace(/\.f32$/, ''),
-  ];
-  for (const base of bases) {
-    const candidate = new LocalVectorIndex(base);
-    if (candidate.load({ model, corpusHash })) return candidate;
-  }
-  return new LocalVectorIndex(bases[0]);
+function broadcastUpdateState(state) {
+  if (!mainWindow || mainWindow.isDestroyed() || mainWindow.webContents.isDestroyed()) return;
+  mainWindow.webContents.send('updates:state', sanitizeUpdateState(state));
 }
 
-async function buildVectorIndex({ apiKey, onProgress = () => {} }) {
-  const settings = store.getRawSettings();
-  const client = createAlibabaClient({ apiKey, baseUrl: validateBaseUrl(settings.alibabaBaseUrl) });
-  const vectors = [];
-  for (let offset = 0; offset < corpus.length; offset += 10) {
-    const batch = corpus.slice(offset, offset + 10).map((entry) => `${entry.title}\n${entry.text}`);
-    vectors.push(...await client.embed(batch, { model: settings.embeddingModel, dimensions: settings.embeddingDimensions, signal: AbortSignal.timeout(60000) }));
-    onProgress(Math.min(corpus.length, offset + batch.length), corpus.length);
-  }
-  const base = app.isPackaged ? path.join(app.getPath('userData'), 'corpus-vectors') : path.join(app.getAppPath(), 'resources', 'corpus-vectors');
-  const index = new LocalVectorIndex(base);
-  index.write({ model: settings.embeddingModel, corpusHash, ids: corpus.map((entry) => entry.id), vectors });
-  vectorIndex = index;
-  return { count: corpus.length, model: settings.embeddingModel, dimensions: vectors[0]?.length || settings.embeddingDimensions };
+function broadcastAIStatus(status) {
+  if (!mainWindow || mainWindow.isDestroyed() || mainWindow.webContents.isDestroyed()) return;
+  mainWindow.webContents.send('ai-config:status', status);
 }
 
 function createWindow() {
@@ -131,9 +110,7 @@ function createWindow() {
   });
   mainWindow.setMenuBarVisibility(false);
   mainWindow.webContents.setWindowOpenHandler(({ url }) => {
-    if (/^https?:\/\//i.test(url)) {
-      void shell.openExternal(url).catch((error) => console.error('无法打开外部链接', error));
-    }
+    if (allowedExternalUrl(url)) void shell.openExternal(url).catch((error) => console.error('无法打开外部链接', error));
     return { action: 'deny' };
   });
   mainWindow.webContents.on('will-navigate', (event, url) => {
@@ -141,9 +118,7 @@ function createWindow() {
       const target = new URL(url);
       const trusted = new URL(trustedEntryUrl);
       if (target.origin === trusted.origin && target.pathname === trusted.pathname) return;
-    } catch {
-      // Invalid or non-standard URLs must never replace the application document.
-    }
+    } catch {}
     event.preventDefault();
   });
   mainWindow.once('ready-to-show', () => mainWindow.show());
@@ -151,77 +126,10 @@ function createWindow() {
   else mainWindow.loadURL('http://127.0.0.1:5173');
 }
 
-function broadcastUpdateState(state) {
-  if (!mainWindow || mainWindow.isDestroyed() || mainWindow.webContents.isDestroyed()) return;
-  mainWindow.webContents.send('updates:state', sanitizeUpdateState(state));
-}
-
-function structuredError(error, fallbackCode = 'UNEXPECTED_ERROR') {
-  const status = Number(error?.status || 0);
-  return {
-    code: status === 401 || status === 403
-      ? 'AI_AUTH_FAILED'
-      : typeof error?.publicCode === 'string'
-        ? error.publicCode
-        : fallbackCode,
-    message: error instanceof Error ? error.message : '操作失败',
-    dataSafe: true,
-    nextAction: status === 401 || status === 403
-      ? '请在设置中检查 API 密钥和模型权限。'
-      : typeof error?.publicNextAction === 'string'
-        ? error.publicNextAction
-        : '已保存的起卦与排盘不会丢失，可以稍后重试。',
-  };
-}
-
-function getApiKey(provider) {
-  const settings = store.getRawSettings();
-  const encrypted = provider === 'alibaba' ? settings.encryptedAlibabaApiKey : settings.encryptedDeepSeekApiKey;
-  if (!encrypted || !safeStorage.isEncryptionAvailable()) return '';
-  try { return safeStorage.decryptString(Buffer.from(encrypted, 'base64')); }
-  catch { return ''; }
-}
-
-function validateBaseUrl(value) {
-  const url = new URL(value);
-  const local = ['localhost', '127.0.0.1'].includes(url.hostname);
-  if (url.protocol !== 'https:' && !(local && url.protocol === 'http:')) throw new Error('API 地址必须使用 HTTPS；本机地址可以使用 HTTP。');
-  return url.toString().replace(/\/$/, '');
-}
-
-async function verifyModelStack() {
-  const settings = store.getRawSettings();
-  const alibabaApiKey = getApiKey('alibaba');
-  const deepseekApiKey = getApiKey('deepseek');
-  if (!alibabaApiKey) throw new Error('尚未配置阿里云 API 密钥。');
-  if (!deepseekApiKey) throw new Error('尚未配置 DeepSeek API 密钥。');
-
-  const alibaba = createAlibabaClient({ apiKey: alibabaApiKey, baseUrl: validateBaseUrl(settings.alibabaBaseUrl), rerankUrl: settings.rerankUrl });
-  const deepseek = createDeepSeekClient({ apiKey: deepseekApiKey, baseUrl: validateBaseUrl(settings.deepseekBaseUrl) });
-  const [vector] = await alibaba.embed(['六爻模型连接测试'], { model: settings.embeddingModel, dimensions: settings.embeddingDimensions, signal: AbortSignal.timeout(30000) });
-  await alibaba.chat({ model: settings.alibabaModel, messages: [{ role: 'user', content: '只回复：连接成功' }], signal: AbortSignal.timeout(60000) });
-  const deepseekResponse = await deepseek.chat({ model: settings.deepseekModel, messages: [{ role: 'system', content: '只输出合法 JSON。' }, { role: 'user', content: '输出 {"ok":true}' }], thinkingType: 'disabled', signal: AbortSignal.timeout(60000) });
-  JSON.parse(deepseekResponse.content);
-  let rerankReady = false;
-  if (settings.rerankUrl) {
-    const ranked = await alibaba.rerank('事业', ['官鬼为事业用神', '妻财为求财用神'], { model: settings.rerankModel, topN: 1, signal: AbortSignal.timeout(30000) });
-    rerankReady = ranked.length > 0;
-  }
-  return { alibabaChatReady: true, deepseekChatReady: true, embeddingReady: vector.length === settings.embeddingDimensions, rerankReady, rerankConfigured: Boolean(settings.rerankUrl) };
-}
-
-async function searchCorpus(payload) {
-  const settings = store.getRawSettings();
-  const apiKey = getApiKey('alibaba');
-  const client = apiKey ? createAlibabaClient({ apiKey, baseUrl: validateBaseUrl(settings.alibabaBaseUrl), rerankUrl: settings.rerankUrl }) : null;
-  return hybridSearch({
-    corpus,
-    query: String(payload.query || ''),
-    domainTerms: Array.isArray(payload.domainTerms) ? payload.domainTerms : [],
-    limit: Math.min(12, Math.max(1, Number(payload.limit) || 8)),
-    vectorSearch: client && vectorIndex?.vectors ? async (query) => vectorIndex.search((await client.embed([query], { model: settings.embeddingModel, dimensions: settings.embeddingDimensions, signal: AbortSignal.timeout(30000) }))[0], 40) : undefined,
-    rerank: client && settings.rerankUrl ? async (query, documents) => client.rerank(query, documents, { model: settings.rerankModel, topN: 12, signal: AbortSignal.timeout(60000) }) : undefined,
-  });
+function allowedExternalUrl(value) {
+  const catalog = aiRuntime.getCatalog();
+  const allowed = new Set(catalog.presets.flatMap((preset) => Object.values(preset.setup || {})));
+  return allowed.has(value);
 }
 
 function registerIpc() {
@@ -235,162 +143,99 @@ function registerIpc() {
   ipcMain.handle('sessions:save', (_event, session) => store.saveSession(sanitizeRendererSession(session)));
   ipcMain.handle('sessions:delete', (_event, id) => store.deleteSession(id));
 
-  ipcMain.handle('settings:get', () => store.getPublicSettings());
-  ipcMain.handle('settings:save', (_event, payload) => {
-    const next = {
-      alibabaBaseUrl: validateBaseUrl(payload.alibabaBaseUrl || alibabaConfig.baseUrl),
-      alibabaModel: String(payload.alibabaModel || alibabaConfig.model).trim(),
-      embeddingModel: String(payload.embeddingModel || alibabaConfig.embeddingModel).trim(),
-      embeddingDimensions: Number(payload.embeddingDimensions) || alibabaConfig.embeddingDimensions,
-      rerankModel: String(payload.rerankModel || alibabaConfig.rerankModel).trim(),
-      rerankUrl: payload.rerankUrl ? validateBaseUrl(payload.rerankUrl) : '',
-      deepseekBaseUrl: validateBaseUrl(payload.deepseekBaseUrl || deepseekConfig.baseUrl),
-      deepseekModel: String(payload.deepseekModel || deepseekConfig.model).trim(),
-    };
-    if (typeof payload.alibabaApiKey === 'string' && payload.alibabaApiKey.trim()) {
-      if (!safeStorage.isEncryptionAvailable()) throw structuredError(new Error('当前 Windows 环境无法启用 DPAPI 密钥保护。'), 'SECRET_STORAGE_UNAVAILABLE');
-      next.encryptedAlibabaApiKey = safeStorage.encryptString(payload.alibabaApiKey.trim()).toString('base64');
-    }
-    if (typeof payload.deepseekApiKey === 'string' && payload.deepseekApiKey.trim()) {
-      if (!safeStorage.isEncryptionAvailable()) throw structuredError(new Error('当前 Windows 环境无法启用 DPAPI 密钥保护。'), 'SECRET_STORAGE_UNAVAILABLE');
-      next.encryptedDeepSeekApiKey = safeStorage.encryptString(payload.deepseekApiKey.trim()).toString('base64');
-    }
-    const saved = store.saveSettings(next);
-    vectorIndex = loadVectorIndex(next.embeddingModel);
-    return saved;
+  ipcMain.handle('ai-config:get-catalog', () => aiRuntime.getCatalog());
+  ipcMain.handle('ai-config:get-status', () => aiRuntime.getStatus());
+  ipcMain.handle('ai-config:save-draft', (_event, payload) => {
+    try { return { ok: true, status: aiRuntime.saveDraft(payload) }; }
+    catch (error) { return { ok: false, error: structuredProviderError(error, 'AI_DRAFT_INVALID') }; }
   });
-  ipcMain.handle('settings:clear-key', () => store.saveSettings({ encryptedAlibabaApiKey: '', encryptedDeepSeekApiKey: '' }));
-  ipcMain.handle('settings:test', async () => {
-    try {
-      const result = await verifyModelStack();
-      const rerankMessage = result.rerankConfigured ? '，重排也已连接' : '；未配置阿里云业务空间重排地址，当前使用融合排序';
-      return { ok: true, message: `阿里云千问向量与聊天、DeepSeek 解读均连接成功${rerankMessage}。` };
-    } catch (error) { return { ok: false, error: structuredError(error, 'AI_CONNECTION_FAILED') }; }
+  ipcMain.handle('ai-config:test-draft', () => aiRuntime.testDraft());
+  ipcMain.handle('ai-config:build-and-activate', async () => {
+    try { return await aiRuntime.buildAndActivate(); }
+    catch (error) { return { ok: false, error: structuredProviderError(error, 'VECTOR_INDEX_FAILED'), status: aiRuntime.getStatus() }; }
+  });
+  ipcMain.handle('ai-config:pause-build', () => aiRuntime.pauseBuild());
+  ipcMain.handle('ai-config:resume-build', () => aiRuntime.resumeBuild());
+  ipcMain.handle('ai-config:cancel-build', () => aiRuntime.cancelBuild());
+  ipcMain.handle('ai-config:remove-connection', (_event, id) => {
+    try { return { ok: true, status: aiRuntime.removeConnection(String(id || '')) }; }
+    catch (error) { return { ok: false, error: structuredProviderError(error, 'AI_CONNECTION_REMOVE_FAILED') }; }
+  });
+  ipcMain.handle('ai-config:open-external', async (_event, url) => {
+    if (!allowedExternalUrl(url)) return false;
+    await shell.openExternal(url);
+    return true;
   });
 
   ipcMain.handle('corpus:list', () => structuredClone(corpus));
-  ipcMain.handle('corpus:status', () => ({
-    count: corpus.length,
-    bookCount: new Set(corpus.map((item) => item.source)).size,
-    originalCount: corpus.filter((item) => item.sourceType === 'original').length,
-    summaryCount: corpus.filter((item) => item.sourceType === 'summary').length,
-    ruleCount: corpus.filter((item) => item.knowledgeKind === 'rule').length,
-    caseCount: corpus.filter((item) => item.knowledgeKind === 'case').length,
-    doctrineCount: corpus.filter((item) => item.knowledgeKind === 'doctrine').length,
-    vectorReady: Boolean(vectorIndex?.vectors),
-    vectorModel: vectorIndex?.meta?.model || '',
-    ready: corpus.length > 0,
-  }));
-  ipcMain.handle('corpus:rebuild-vectors', async (event) => {
-    if (vectorBuildPromise) return { ok: false, error: structuredError(new Error('向量索引正在构建，请勿重复提交。'), 'VECTOR_INDEX_IN_PROGRESS') };
-    let buildTask = null;
-    try {
-      const apiKey = getApiKey('alibaba');
-      if (!apiKey) throw new Error('请先保存阿里云 API 密钥。');
-      buildTask = buildVectorIndex({ apiKey, onProgress: (done, total) => event.sender.send('corpus:index-progress', { done, total }) });
-      vectorBuildPromise = buildTask;
-      const result = await buildTask;
-      return { ok: true, result };
-    } catch (error) { return { ok: false, error: structuredError(error, 'VECTOR_INDEX_FAILED') }; }
-    finally { if (vectorBuildPromise === buildTask) vectorBuildPromise = null; }
+  ipcMain.handle('corpus:status', () => {
+    const aiStatus = aiRuntime.getStatus();
+    return {
+      count: corpus.length,
+      bookCount: new Set(corpus.map((item) => item.source)).size,
+      originalCount: corpus.filter((item) => item.sourceType === 'original').length,
+      summaryCount: corpus.filter((item) => item.sourceType === 'summary').length,
+      ruleCount: corpus.filter((item) => item.knowledgeKind === 'rule').length,
+      caseCount: corpus.filter((item) => item.knowledgeKind === 'case').length,
+      doctrineCount: corpus.filter((item) => item.knowledgeKind === 'doctrine').length,
+      vectorReady: Boolean(aiStatus.activeFingerprint),
+      vectorModel: aiStatus.activeCapabilities?.embedding?.model || '',
+      ready: corpus.length > 0,
+    };
   });
+  ipcMain.handle('corpus:rebuild-vectors', () => aiRuntime.buildAndActivate());
 
-  ipcMain.handle('retrieval:search', (_event, payload) => searchCorpus(payload));
-
+  ipcMain.handle('retrieval:search', async (_event, payload) => aiRuntime.search(payload));
   ipcMain.handle('ai:analyze', async (_event, payload) => {
     const allowed = new Set(corpus.map((item) => item.id));
     const evidence = (payload.evidence || []).filter((item) => allowed.has(item.id));
-    try {
-      const settings = store.getRawSettings();
-      const apiKey = getApiKey('deepseek');
-      const report = await analyzeCloud({ ...payload, evidence, baseUrl: validateBaseUrl(settings.deepseekBaseUrl), model: settings.deepseekModel, apiKey, provider: 'deepseek', signal: AbortSignal.timeout(180000) });
-      return { ok: true, report };
-    } catch (error) { return { ok: false, error: structuredError(error, 'AI_ANALYSIS_FAILED') }; }
+    try { return { ok: true, report: await aiRuntime.analyze({ ...payload, evidence }) }; }
+    catch (error) { return { ok: false, error: structuredProviderError(error, 'AI_ANALYSIS_FAILED') }; }
   });
-
   ipcMain.handle('ai:follow-up', async (_event, payload) => {
     const allowed = new Set(corpus.map((item) => item.id));
     const evidence = (payload.evidence || []).filter((item) => allowed.has(item.id));
-    try {
-      const settings = store.getRawSettings();
-      const apiKey = getApiKey('deepseek');
-      const answer = await followUpCloud({ ...payload, evidence, baseUrl: validateBaseUrl(settings.deepseekBaseUrl), model: settings.deepseekModel, apiKey, provider: 'deepseek', signal: AbortSignal.timeout(180000) });
-      return { ok: true, answer };
-    } catch (error) { return { ok: false, error: structuredError(error, 'AI_FOLLOW_UP_FAILED') }; }
+    try { return { ok: true, answer: await aiRuntime.followUp({ ...payload, evidence }) }; }
+    catch (error) { return { ok: false, error: structuredProviderError(error, 'AI_FOLLOW_UP_FAILED') }; }
   });
 }
 
-if (startup.shouldStart) {
-  if (!startup.commandMode) {
-    app.on('second-instance', () => {
-      if (!mainWindow || mainWindow.isDestroyed()) return;
-      if (mainWindow.isMinimized()) mainWindow.restore();
-      mainWindow.show();
-      mainWindow.focus();
+async function runCommandMode() {
+  if (process.argv.includes('--configure-api-keys-env')) {
+    if (!oneTimeSiliconFlowKey) throw new Error('未收到 WENYAO_SILICONFLOW_KEY');
+    aiRuntime.saveDraft({
+      presetId: 'siliconflow-cn-quality',
+      apiKey: oneTimeSiliconFlowKey,
+      consentAccepted: true,
     });
+    process.stdout.write('SiliconFlow 访问密钥已由 Windows DPAPI 加密保存为待验证配置。\n');
+    return;
   }
-
-  app.whenReady().then(() => {
-    store = new JsonStore(dataPath());
-    corpus = loadCorpus();
-    corpusHash = hashCorpus(corpus);
-    vectorIndex = loadVectorIndex(store.getRawSettings().embeddingModel);
-    if (process.argv.includes('--configure-api-keys-env')) {
-      try {
-        if (!oneTimeSetupKeys || (!oneTimeSetupKeys.alibaba && !oneTimeSetupKeys.deepseek)) throw new Error('未收到 API 密钥');
-        if (!safeStorage.isEncryptionAvailable()) throw new Error('当前 Windows 环境无法启用 DPAPI 密钥保护');
-        const settings = {
-          alibabaBaseUrl: alibabaConfig.baseUrl,
-          alibabaModel: alibabaConfig.model,
-          embeddingModel: alibabaConfig.embeddingModel,
-          embeddingDimensions: alibabaConfig.embeddingDimensions,
-          rerankModel: alibabaConfig.rerankModel,
-          rerankUrl: alibabaConfig.rerankUrl,
-          deepseekBaseUrl: deepseekConfig.baseUrl,
-          deepseekModel: deepseekConfig.model,
-        };
-        const configuredProviders = [];
-        if (oneTimeSetupKeys.alibaba) {
-          settings.encryptedAlibabaApiKey = safeStorage.encryptString(oneTimeSetupKeys.alibaba).toString('base64');
-          configuredProviders.push('阿里云');
-        }
-        if (oneTimeSetupKeys.deepseek) {
-          settings.encryptedDeepSeekApiKey = safeStorage.encryptString(oneTimeSetupKeys.deepseek).toString('base64');
-          configuredProviders.push('DeepSeek');
-        }
-        store.saveSettings(settings);
-        process.stdout.write(`${configuredProviders.join('、')} API 密钥已由 Windows DPAPI 加密保存。\n`);
-        app.quit();
-      } catch (error) { process.stderr.write(`${error.message}\n`); app.exit(1); }
+  if (process.argv.includes('--verify-model-stack')) {
+    const status = aiRuntime.getStatus();
+    if (!status.draft) {
+      if (status.status !== 'ready') throw new Error(status.message);
+      process.stdout.write(`${JSON.stringify(status)}\n`);
       return;
     }
-    if (process.argv.includes('--build-vector-index')) {
-      const apiKey = getApiKey('alibaba');
-      if (!apiKey) { process.stderr.write('尚未配置阿里云 API 密钥。\n'); app.exit(1); return; }
-      void buildVectorIndex({ apiKey, onProgress: (done, total) => process.stdout.write(`向量索引 ${done}/${total}\n`) })
-        .then(() => { process.stdout.write('向量索引构建完成。\n'); app.quit(); })
-        .catch((error) => { process.stderr.write(`${error.message}\n`); app.exit(1); });
-      return;
-    }
-    if (process.argv.includes('--verify-model-stack')) {
-      void verifyModelStack()
-        .then((result) => { process.stdout.write(`${JSON.stringify(result)}\n`); if (result.alibabaChatReady && result.deepseekChatReady && result.embeddingReady) app.quit(); else app.exit(1); })
-        .catch((error) => { process.stderr.write(`${error.message}\n`); app.exit(1); });
-      return;
-    }
-    if (process.argv.includes('--verify-hybrid-retrieval')) {
-      void searchCorpus({ query: '近期事业升迁是否有机会', domainTerms: ['事业', '功名', '官鬼', '世爻'], limit: 8 })
-        .then((result) => {
-          process.stdout.write(`${JSON.stringify({ diagnostics: result.diagnostics, evidence: result.evidence.map((item) => ({ id: item.id, source: item.source, kind: item.knowledgeKind })) })}\n`);
-          app.quit();
-        })
-        .catch((error) => { process.stderr.write(`${error.message}\n`); app.exit(1); });
-      return;
-    }
-    if (process.argv.includes('--verify-analysis')) {
-      const apiKey = getApiKey('deepseek');
-      const settings = store.getRawSettings();
-      const plate = {
+    const result = await aiRuntime.testDraft();
+    process.stdout.write(`${JSON.stringify(result)}\n`);
+    if (!result.ok) throw new Error(result.error?.message || '三项能力检测失败');
+    return;
+  }
+  if (process.argv.includes('--build-vector-index')) {
+    const result = await aiRuntime.buildAndActivate();
+    process.stdout.write(`${JSON.stringify(result)}\n`);
+    if (!result.ok) throw new Error(result.error?.message || '向量索引构建失败');
+    return;
+  }
+  if (process.argv.includes('--verify-hybrid-retrieval')) {
+    const result = await aiRuntime.search({ query: '近期事业升迁是否有机会', domainTerms: ['事业', '功名', '官鬼', '世爻'], limit: 8 });
+    process.stdout.write(`${JSON.stringify({ diagnostics: result.diagnostics, evidence: result.evidence.map((item) => ({ id: item.id, source: item.source, kind: item.knowledgeKind })) })}\n`);
+    return;
+  }
+  if (process.argv.includes('--verify-analysis')) {
+    const plate = {
       baseHexagram: { name: '泽雷随', shortName: '随', palace: '震', palaceElement: '木', shiLine: 3, yingLine: 6 },
       changedHexagram: { name: '泽雷随', shortName: '随', palace: '震', palaceElement: '木', shiLine: 3, yingLine: 6 },
       movingLines: [], monthGanZhi: '乙未', monthBranch: '未', dayGanZhi: '戊子', voidBranches: ['午', '未'],
@@ -404,46 +249,71 @@ if (startup.shouldStart) {
       ],
       fuShen: [{ lineIndex: 4, relation: '子孙', ganZhi: '庚午', branch: '午', element: '火', flyRelation: '父母', flyGanZhi: '丁亥', flyElement: '水', flyEffect: '飞克伏', status: '受制倾向', void: true, monthBreak: false, dayClash: true }],
     };
-      void searchCorpus({ query: '学业会好吗', domainTerms: ['学业', '父母', '官鬼', '用神两现'], limit: 8 })
-      .then(async ({ evidence, diagnostics }) => {
-        const report = await analyzeCloud({ baseUrl: validateBaseUrl(settings.deepseekBaseUrl), model: settings.deepseekModel, apiKey, provider: 'deepseek', question: '学业会好吗？', category: 'study', plate, evidence, retrievalDiagnostics: diagnostics, signal: AbortSignal.timeout(180000) });
-        const answer = await followUpCloud({
-          baseUrl: validateBaseUrl(settings.deepseekBaseUrl),
-          model: settings.deepseekModel,
-          apiKey,
-          provider: 'deepseek',
-          question: '应期能否判断？',
-          session: { question: '学业会好吗？', category: 'study', plate, analysis: report, messages: [] },
-          evidence,
-          signal: AbortSignal.timeout(180000),
-        });
-        return { report, answer };
-      })
-      .then(({ report, answer }) => {
-        const basisCount = (report.markdown.match(/\*\*依据：\*\*/g) || []).length;
-        const followUpBasisCount = (answer.content.match(/\*\*依据：\*\*/g) || []).length;
-        const result = {
-          mode: report.mode,
-          markdownLength: report.markdown.length,
-          hasMarkdownHeading: /^#{1,6}\s+/m.test(report.markdown),
-          basisCount,
-          hasJsonEnvelope: /^\s*\{/.test(report.markdown),
-          followUpMarkdownLength: answer.content.length,
-          followUpBasisCount,
-          followUpHasJsonEnvelope: /^\s*\{/.test(answer.content),
-          pipeline: report.pipeline,
-        };
-        process.stdout.write(`${JSON.stringify(result)}\n`);
-        if (result.markdownLength > 0
-          && basisCount > 0
-          && !result.hasJsonEnvelope
-          && result.followUpMarkdownLength > 0
-          && followUpBasisCount > 0
-          && !result.followUpHasJsonEnvelope) app.quit(); else app.exit(1);
-      })
-      .catch((error) => { process.stderr.write(`${error.message}\n`); app.exit(1); });
+    const retrieval = await aiRuntime.search({ query: '学业会好吗', domainTerms: ['学业', '父母', '官鬼', '用神两现'], limit: 8 });
+    const report = await aiRuntime.analyze({
+      question: '学业会好吗？', category: 'study', plate,
+      evidence: retrieval.evidence, retrievalDiagnostics: retrieval.diagnostics,
+    });
+    const answer = await aiRuntime.followUp({
+      question: '应期能否判断？',
+      session: { question: '学业会好吗？', category: 'study', plate, analysis: report, messages: [] },
+      evidence: retrieval.evidence,
+    });
+    const result = {
+      mode: report.mode,
+      markdownLength: report.markdown.length,
+      hasMarkdownHeading: /^#{1,6}\s+/m.test(report.markdown),
+      basisCount: (report.markdown.match(/\]\(#(?:plate-facts|evidence-[^)]+)\)/g) || []).length,
+      hasJsonEnvelope: /^\s*\{/.test(report.markdown),
+      followUpMarkdownLength: answer.content.length,
+      followUpBasisCount: (answer.content.match(/\]\(#(?:plate-facts|evidence-[^)]+)\)/g) || []).length,
+      followUpHasJsonEnvelope: /^\s*\{/.test(answer.content),
+      retrieval: retrieval.diagnostics,
+      provider: report.provider,
+    };
+    process.stdout.write(`${JSON.stringify(result)}\n`);
+    if (!result.markdownLength || !result.hasMarkdownHeading || !result.basisCount || result.hasJsonEnvelope
+      || !result.followUpMarkdownLength || !result.followUpBasisCount || result.followUpHasJsonEnvelope) {
+      throw new Error('真实 AI 解读验收未满足 Markdown 与引用契约');
+    }
+    return;
+  }
+}
+
+if (startup.shouldStart) {
+  if (!startup.commandMode) {
+    app.on('second-instance', () => {
+      if (!mainWindow || mainWindow.isDestroyed()) return;
+      if (mainWindow.isMinimized()) mainWindow.restore();
+      mainWindow.show();
+      mainWindow.focus();
+    });
+  }
+
+  app.whenReady().then(async () => {
+    store = new JsonStore(dataPath());
+    corpus = loadCorpus();
+    const corpusHash = hashCorpus(corpus);
+    aiRuntime = new AIRuntime({
+      store,
+      safeStorage,
+      corpus,
+      corpusHash,
+      indexRoot: path.join(app.getPath('userData'), 'vector-indexes'),
+      legacyIndexBases: [
+        path.join(app.getPath('userData'), 'corpus-vectors'),
+        resourcePath('corpus-vectors.f32').replace(/\.f32$/, ''),
+      ],
+      onStatus: broadcastAIStatus,
+    });
+    aiRuntime.initialize();
+
+    if (startup.commandMode) {
+      try { await runCommandMode(); app.quit(); }
+      catch (error) { process.stderr.write(`${error.message}\n`); app.exit(1); }
       return;
     }
+
     updateManager = createUpdateManager({
       updater: app.isPackaged && process.platform === 'win32' ? autoUpdater : null,
       currentVersion: app.getVersion(),

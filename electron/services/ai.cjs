@@ -4,7 +4,6 @@ const {
   buildFollowUpSystemPrompt,
 } = require('./system-prompt.cjs');
 const { buildProfessionalContext, QUESTION_SUBJECTS } = require('./liuyao-domain.cjs');
-const { createDeepSeekClient } = require('./deepseek.cjs');
 
 const REASONING_STAGES = ['锁定排盘事实', '确定用神与问题域', '分析日月动变', '对照规则与占例', '综合判断'];
 
@@ -910,29 +909,22 @@ function requireAIResponse(value, label = 'AI 解读') {
   return value;
 }
 
-function assertCloudAnalysisConfigured({ apiKey, model }) {
-  if (
-    typeof apiKey === 'string'
-    && apiKey.trim()
-    && typeof model === 'string'
-    && model.trim()
-  ) return;
-  const error = new Error('尚未配置 DeepSeek AI 解读服务。');
+function assertCloudAnalysisConfigured({ chat }) {
+  if (typeof chat === 'function') return;
+  const error = new Error('尚未完成 AI 解读、向量与重排服务配置。');
   error.publicCode = 'AI_NOT_CONFIGURED';
-  error.publicNextAction = '请先在“设置”中填写 DeepSeek API 密钥和模型，并完成连接测试。';
+  error.publicNextAction = '请先连接 AI 服务并完成三项能力检测与向量索引构建。';
   throw error;
 }
 
-async function postChat({ baseUrl, model, apiKey, messages, provider = 'deepseek', signal }) {
-  assertCloudAnalysisConfigured({ apiKey, model });
-  if (provider !== 'deepseek') throw new Error(`不支持的解读 provider：${provider}`);
-  const client = createDeepSeekClient({ apiKey, baseUrl });
-  const { content } = await client.chat({ model, messages, responseFormat: null, signal });
+async function postChat({ chat, messages, signal }) {
+  assertCloudAnalysisConfigured({ chat });
+  const { content } = await chat({ messages, signal, maxTokens: 8192, temperature: 0 });
   return requireAIResponse(content);
 }
 
-async function analyzeCloud({ baseUrl, model, apiKey, provider = 'deepseek', question, category, plate, evidence = [], retrievalDiagnostics, signal }) {
-  assertCloudAnalysisConfigured({ apiKey, model });
+async function analyzeCloud({ chat, question, category, plate, evidence = [], retrievalDiagnostics, signal }) {
+  assertCloudAnalysisConfigured({ chat });
   const plan = reasoningPlan(category, plate);
   const payload = {
     responseFormat: 'markdown',
@@ -949,10 +941,7 @@ async function analyzeCloud({ baseUrl, model, apiKey, provider = 'deepseek', que
     ],
   };
   const markdown = await postChat({
-    baseUrl,
-    model,
-    apiKey,
-    provider,
+    chat,
     signal,
     messages: [
       { role: 'system', content: buildAnalysisSystemPrompt(plate) },
@@ -967,8 +956,8 @@ async function analyzeCloud({ baseUrl, model, apiKey, provider = 'deepseek', que
   };
 }
 
-async function followUpCloud({ baseUrl, model, apiKey, provider = 'deepseek', question, session, evidence = [], signal }) {
-  assertCloudAnalysisConfigured({ apiKey, model });
+async function followUpCloud({ chat, question, session, evidence = [], signal }) {
+  assertCloudAnalysisConfigured({ chat });
   const originalReport = session?.analysis?.markdown;
   if (!session?.plate || typeof originalReport !== 'string' || !originalReport.trim()) {
     throw new Error('原报告没有可用于追问的文本内容，请先生成主报告');
@@ -995,10 +984,7 @@ async function followUpCloud({ baseUrl, model, apiKey, provider = 'deepseek', qu
     evidence: evidencePayload(evidence),
   };
   const content = await postChat({
-    baseUrl,
-    model,
-    apiKey,
-    provider,
+    chat,
     signal,
     messages: [
       { role: 'system', content: buildFollowUpSystemPrompt() },

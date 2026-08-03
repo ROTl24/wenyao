@@ -1,0 +1,100 @@
+{
+  "version": 1,
+  "defaultPresetId": "siliconflow-cn-quality",
+  "presets": [
+    {
+      "id": "siliconflow-cn-quality",
+      "providerId": "siliconflow",
+      "name": "SiliconFlow",
+      "region": "中国大陆",
+      "description": "一把访问密钥同时完成高质量解读、向量召回与重排。",
+      "recommended": true,
+      "baseUrl": "https://api.siliconflow.cn/v1",
+      "setup": {
+        "homeUrl": "https://cloud.siliconflow.cn",
+        "apiKeyUrl": "https://cloud.siliconflow.cn/account/ak",
+        "billingUrl": "https://cloud.siliconflow.cn/account/charge"
+      },
+      "capabilities": {
+        "generation": {
+          "protocol": "openai-chat",
+          "model": "deepseek-ai/DeepSeek-V4-Pro"
+        },
+        "embedding": {
+          "protocol": "openai-embeddings",
+          "model": "Qwen/Qwen3-Embedding-4B",
+          "dimensions": 1024,
+          "batchSize": 10
+        },
+        "rerank": {
+          "protocol": "cohere-rerank",
+          "model": "Qwen/Qwen3-Reranker-8B",
+          "path": "/rerank"
+        }
+      }
+    },
+    {
+      "id": "alibaba-cn-quality",
+      "providerId": "alibaba",
+      "name": "阿里云百炼",
+      "region": "华北2（北京）",
+      "description": "千问解读、text-embedding-v4 与 qwen3-rerank 完整套装。",
+      "recommended": false,
+      "baseUrl": "https://dashscope.aliyuncs.com/compatible-mode/v1",
+      "setup": {
+        "homeUrl": "https://bailian.console.aliyun.com/",
+        "apiKeyUrl": "https://bailian.console.aliyun.com/?tab=model#/api-key",
+        "billingUrl": "https://usercenter2.aliyun.com/home"
+      },
+      "requiredFields": [
+        {
+          "id": "workspaceId",
+          "label": "业务空间 ID",
+          "description": "qwen3-rerank 官方接口需要北京地域业务空间 ID。"
+        }
+      ],
+      "capabilities": {
+        "generation": {
+          "protocol": "openai-chat",
+          "model": "qwen3.7-plus"
+        },
+        "embedding": {
+          "protocol": "openai-embeddings",
+          "model": "text-embedding-v4",
+          "dimensions": 1024,
+          "batchSize": 10
+        },
+        "rerank": {
+          "protocol": "alibaba-rerank",
+          "model": "qwen3-rerank",
+          "urlTemplate": "https://{workspaceId}.cn-beijing.maas.aliyuncs.com/compatible-api/v1/reranks"
+        }
+      }
+    },
+    {
+      "id": "deepseek-cn-generation",
+      "providerId": "deepseek",
+      "name": "DeepSeek 官方",
+      "region": "中国大陆",
+      "description": "仅提供解读能力，需在高级模式中搭配向量与重排服务。",
+      "recommended": false,
+      "baseUrl": "https://api.deepseek.com",
+      "setup": {
+        "homeUrl": "https://platform.deepseek.com/",
+        "apiKeyUrl": "https://platform.deepseek.com/api_keys",
+        "billingUrl": "https://platform.deepseek.com/usage"
+      },
+      "capabilities": {
+        "generation": {
+          "protocol": "openai-chat",
+          "model": "deepseek-v4-pro"
+        }
+      }
+    }
+  ],
+  "customProtocols": {
+    "generation": ["openai-chat"],
+    "embedding": ["openai-embeddings"],
+    "rerank": ["cohere-rerank", "alibaba-rerank"]
+  }
+}

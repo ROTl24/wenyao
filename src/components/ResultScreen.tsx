@@ -1,8 +1,10 @@
 import { ArrowLeft, ArrowRight, RefreshCw, Send, Sparkles } from 'lucide-react';
 import { Fragment, useMemo, useState } from 'react';
 import type { ActionEffect, ActiveActionFact, HexagramDynamics, PlateLine, ShenSha, TransformationReturnFact } from '../lib/divination';
+import { isAIUsable } from '../lib/aiStatus';
 import type { EvidenceEntry, RetrievalDiagnostics } from '../lib/retrieval';
 import type { DivinationSession } from '../lib/session';
+import type { AIConfigStatus } from '../types/desktop';
 import { CASTING_METHOD_LABELS } from '../lib/session';
 import { formatShanghaiDateTime } from '../lib/shanghaiTime';
 import { HexagramLines } from './HexagramLines';
@@ -14,6 +16,7 @@ interface Props {
   session: DivinationSession;
   evidence: EvidenceEntry[];
   retrievalDiagnostics: RetrievalDiagnostics | null;
+  aiStatus: AIConfigStatus;
   sessionSaveStatus: 'idle' | 'saving' | 'saved' | 'error';
   sessionSaveError: string;
   analyzing: boolean;
@@ -29,7 +32,7 @@ interface Props {
   onBack(): void;
 }
 
-export function ResultScreen({ session, evidence, retrievalDiagnostics, sessionSaveStatus, sessionSaveError, analyzing, analysisError, analysisSaveStatus, analysisSaveError, chatting, chatError, onRetrySessionSave, onAnalyze, onRetryAnalysisSave, onFollowUp, onBack }: Props) {
+export function ResultScreen({ session, evidence, retrievalDiagnostics, aiStatus, sessionSaveStatus, sessionSaveError, analyzing, analysisError, analysisSaveStatus, analysisSaveError, chatting, chatError, onRetrySessionSave, onAnalyze, onRetryAnalysisSave, onFollowUp, onBack }: Props) {
   const [followUp, setFollowUp] = useState('');
   const plate = session.plate!;
   const evidenceSourceCount = useMemo(() => new Set(evidence.map((item) => item.source)).size, [evidence]);
@@ -45,8 +48,11 @@ export function ResultScreen({ session, evidence, retrievalDiagnostics, sessionS
     : null;
   const legacyAnalysis = Boolean(session.analysis && !markdownAnalysis);
   const sessionReady = sessionSaveStatus !== 'saving' && sessionSaveStatus !== 'error';
+  const aiReady = isAIUsable(aiStatus);
+  const aiPreparing = !aiReady && (aiStatus.status === 'testing' || aiStatus.status === 'building' || aiStatus.status === 'paused');
+  const aiProgress = aiStatus.draft?.indexTask?.progress ?? 0;
   const submit = () => {
-    if (!followUp.trim() || chatting || !sessionReady) return;
+    if (!followUp.trim() || chatting || !sessionReady || !aiReady) return;
     onFollowUp(followUp.trim());
     setFollowUp('');
   };
@@ -122,7 +128,7 @@ export function ResultScreen({ session, evidence, retrievalDiagnostics, sessionS
               {markdownAnalysis ? (
                 <button className="analysis-reanalyze" type="button" onClick={onAnalyze} disabled={analyzing || !sessionReady}>
                   <RefreshCw className={analyzing ? 'is-spinning' : undefined} size={15} aria-hidden="true" />
-                  {analyzing ? '解析中' : '重新解析'}
+                  {analyzing ? '解析中' : aiReady ? '重新解析' : '连接 AI 服务'}
                 </button>
               ) : null}
             </div>
@@ -145,7 +151,7 @@ export function ResultScreen({ session, evidence, retrievalDiagnostics, sessionS
               <div className="analysis-error"><strong>这份历史解读不是当前 Markdown 格式</strong><p>旧版结构化结果不再解析，请重新分析生成 Markdown 解读。</p><button type="button" onClick={onAnalyze} disabled={!sessionReady}><RefreshCw size={16} />重新分析</button></div>
             ) : null}
             {!analyzing && !markdownAnalysis && !legacyAnalysis && !analysisError ? (
-              <div className="analysis-error"><strong>{sessionReady ? '这条历史记录没有已保存的 AI 解读' : '排盘保存完成后才能开始解读'}</strong><p>{sessionReady ? '打开历史记录不会自动发起新的 AI 请求，如需解读请手动开始。' : '请等待自动保存完成，或先重试保存本次排盘。'}</p><button type="button" onClick={onAnalyze} disabled={!sessionReady}><Sparkles size={16} />开始解读</button></div>
+              <div className="analysis-error"><strong>{!sessionReady ? '排盘保存完成后才能开始解读' : aiReady ? '这条历史记录没有已保存的 AI 解读' : aiPreparing ? 'AI 服务正在准备中' : '需要先连接 AI 服务'}</strong><p>{!sessionReady ? '请等待自动保存完成，或先重试保存本次排盘。' : aiReady ? '打开历史记录不会自动发起新的 AI 请求，如需解读请手动开始。' : aiPreparing ? `向量索引当前完成 ${aiProgress.toFixed(1)}%，完成后才能生成解读。` : '连接向导只需选择服务商、粘贴访问密钥；模型与接口由问爻自动配置。'}</p><button type="button" onClick={onAnalyze} disabled={!sessionReady || aiPreparing}><Sparkles size={16} />{aiReady ? '开始解读' : aiPreparing ? '准备中' : '连接 AI 服务'}</button></div>
             ) : null}
             {!analyzing && markdownAnalysis ? (
               <article className="analysis-report">
@@ -322,10 +328,10 @@ export function ResultScreen({ session, evidence, retrievalDiagnostics, sessionS
           <div className="chat-composer">
             <label className="chat-composer-label" htmlFor="follow-up">你的追问</label>
             <div className="chat-input">
-              <input id="follow-up" aria-describedby="follow-up-hint" value={followUp} disabled={!sessionReady} onChange={(event) => setFollowUp(event.target.value)} onKeyDown={(event) => { if (event.key === 'Enter') submit(); }} placeholder="基于本次卦象，继续问一个相关问题…" />
-              <button type="button" onClick={submit} disabled={!followUp.trim() || chatting || !sessionReady}>{chatting ? <span className="small-loader" /> : <Send size={17} />}<span>继续追问</span></button>
+              <input id="follow-up" aria-describedby="follow-up-hint" value={followUp} disabled={!sessionReady || !aiReady} onChange={(event) => setFollowUp(event.target.value)} onKeyDown={(event) => { if (event.key === 'Enter') submit(); }} placeholder={aiReady ? '基于本次卦象，继续问一个相关问题…' : '连接并准备好 AI 服务后可以继续追问'} />
+              <button type="button" onClick={submit} disabled={!followUp.trim() || chatting || !sessionReady || !aiReady}>{chatting ? <span className="small-loader" /> : <Send size={17} />}<span>继续追问</span></button>
             </div>
-            <p id="follow-up-hint">按 Enter 发送，回答会继续沿用本次排盘。</p>
+            <p id="follow-up-hint">{aiReady ? '按 Enter 发送，回答会继续沿用本次排盘。' : 'AI 解读、向量召回与重排全部就绪后才会发送。'}</p>
           </div>
         </section>
       </div>

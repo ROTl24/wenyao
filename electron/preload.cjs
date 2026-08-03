@@ -114,11 +114,30 @@ contextBridge.exposeInMainWorld('wenyao', {
     save: (session) => ipcRenderer.invoke('sessions:save', sanitizeRendererSession(session)),
     delete: (id) => ipcRenderer.invoke('sessions:delete', id),
   },
-  settings: {
-    get: () => ipcRenderer.invoke('settings:get'),
-    save: (payload) => ipcRenderer.invoke('settings:save', payload),
-    clearKey: () => ipcRenderer.invoke('settings:clear-key'),
-    test: () => ipcRenderer.invoke('settings:test'),
+  aiConfig: {
+    getCatalog: () => ipcRenderer.invoke('ai-config:get-catalog'),
+    getStatus: () => ipcRenderer.invoke('ai-config:get-status'),
+    saveDraft: (payload) => ipcRenderer.invoke('ai-config:save-draft', pickOwn(payload, [
+      'presetId',
+      'fields',
+      'connection',
+      'pipeline',
+      'apiKey',
+      'consentAccepted',
+    ])),
+    testDraft: () => ipcRenderer.invoke('ai-config:test-draft'),
+    buildAndActivate: () => ipcRenderer.invoke('ai-config:build-and-activate'),
+    pauseBuild: () => ipcRenderer.invoke('ai-config:pause-build'),
+    resumeBuild: () => ipcRenderer.invoke('ai-config:resume-build'),
+    cancelBuild: () => ipcRenderer.invoke('ai-config:cancel-build'),
+    removeConnection: (id) => ipcRenderer.invoke('ai-config:remove-connection', safeText(id, '', 100)),
+    openExternal: (url) => ipcRenderer.invoke('ai-config:open-external', safeText(url, '', 500)),
+    onStatus: (listener) => {
+      if (typeof listener !== 'function') return () => {};
+      const subscription = (_event, status) => listener(structuredClone(status));
+      ipcRenderer.on('ai-config:status', subscription);
+      return () => ipcRenderer.removeListener('ai-config:status', subscription);
+    },
   },
   corpus: {
     list: () => ipcRenderer.invoke('corpus:list'),

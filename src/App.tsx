@@ -7,8 +7,10 @@ import { PhysicalReviewScreen } from './components/PhysicalReviewScreen';
 import { ResultScreen } from './components/ResultScreen';
 import { RitualScreen } from './components/RitualScreen';
 import { SettingsPanel } from './components/SettingsPanel';
+import { AISetupWizard } from './components/AISetupWizard';
 import { UpdatePrompt, type PromptUpdateState } from './components/UpdatePrompt';
 import { desktop } from './lib/desktop';
+import { isAIUsable } from './lib/aiStatus';
 import { randomToss, upgradePlate } from './lib/divination';
 import { isValidQuestion } from './lib/question';
 import type { EvidenceEntry, RetrievalDiagnostics } from './lib/retrieval';
@@ -37,11 +39,25 @@ import {
   type SessionCategory,
 } from './lib/session';
 import type { LineValue } from './lib/divination';
-import type { UpdateState } from './types/desktop';
+import type { AIConfigStatus, AIProviderCatalog, UpdateState } from './types/desktop';
 
 type Screen = 'home' | 'casting' | 'physical-casting' | 'physical-review' | 'result';
 type AnalysisSaveStatus = 'idle' | 'saving' | 'saved' | 'error';
 type SessionSaveStatus = 'idle' | 'saving' | 'saved' | 'error';
+
+const emptyAICatalog: AIProviderCatalog = { version: 1, defaultPresetId: '', presets: [], customProtocols: { generation: ['openai-chat'], embedding: ['openai-embeddings'], rerank: ['cohere-rerank', 'alibaba-rerank'] } };
+const emptyAIStatus: AIConfigStatus = {
+  status: 'unconfigured',
+  message: '尚未连接 AI 服务',
+  activeCapabilities: null,
+  activeFingerprint: '',
+  corpusCount: 0,
+  consentAcceptedAt: '',
+  connections: [],
+  activePipeline: null,
+  draft: null,
+  usage: [],
+};
 
 const categoryTerms: Record<SessionCategory, string[]> = {
   career: ['事业', '功名', '官禄', '仕宦', '求名', '官鬼', '世爻', '父母'],
@@ -105,6 +121,10 @@ export function App() {
   const [retrievalDiagnostics, setRetrievalDiagnostics] = useState<RetrievalDiagnostics | null>(null);
   const [historyOpen, setHistoryOpen] = useState(false);
   const [settingsOpen, setSettingsOpen] = useState(false);
+  const [aiCatalog, setAICatalog] = useState<AIProviderCatalog>(emptyAICatalog);
+  const [aiStatus, setAIStatus] = useState<AIConfigStatus>(emptyAIStatus);
+  const [aiSetupOpen, setAISetupOpen] = useState(false);
+  const [aiSetupIntent, setAISetupIntent] = useState<'settings' | 'analysis'>('settings');
   const [updateState, setUpdateState] = useState<UpdateState>({
     status: 'unsupported',
     currentVersion: '',
@@ -123,7 +143,12 @@ export function App() {
   const sessionSaveQueuesRef = useRef(new Map<string, Promise<void>>());
   const analysisEpochsRef = useRef(new Map<string, symbol>());
   const analysisRunRef = useRef<{ sessionId: string; token: symbol } | null>(null);
+  const aiStatusRef = useRef<AIConfigStatus>(emptyAIStatus);
   const dismissedUpdateVersionRef = useRef('');
+  const updateAIStatus = (next: AIConfigStatus) => {
+    aiStatusRef.current = next;
+    setAIStatus(next);
+  };
   const physicalTimeError = useMemo(
     () => shanghaiDateTimeError(physicalTimeInput),
     [physicalTimeInput],
@@ -166,6 +191,21 @@ export function App() {
       active = false;
       unsubscribe();
     };
+  }, []);
+
+  useEffect(() => {
+    let active = true;
+    const acceptAIStatus = (next: AIConfigStatus) => {
+      if (!active) return;
+      updateAIStatus(next);
+    };
+    const unsubscribe = desktop.aiConfig.onStatus(acceptAIStatus);
+    void Promise.all([desktop.aiConfig.getCatalog(), desktop.aiConfig.getStatus()]).then(([catalog, status]) => {
+      if (!active) return;
+      setAICatalog(catalog);
+      acceptAIStatus(status);
+    });
+    return () => { active = false; unsubscribe(); };
   }, []);
 
   const checkForUpdate = async () => {
@@ -319,8 +359,15 @@ export function App() {
     return { evidence: result.evidence, diagnostics: result.diagnostics };
   };
 
-  const runAnalysis = async (target: DivinationSession) => {
+  const runAnalysis = async (target: DivinationSession, explicit = false, forceReady = false) => {
     if (!target.plate || deletedSessionIdsRef.current.has(target.id)) return;
+    if (!forceReady && !isAIUsable(aiStatusRef.current)) {
+      if (explicit) {
+        setAISetupIntent('analysis');
+        setAISetupOpen(true);
+      }
+      return;
+    }
     const runToken = Symbol(target.id);
     analysisEpochsRef.current.set(target.id, runToken);
     const ownsAnalysisUi = () => (
@@ -534,6 +581,12 @@ export function App() {
 
   const followUp = async (followQuestion: string) => {
     if (!session || !session.plate) return;
+    if (!isAIUsable(aiStatus)) {
+      setAISetupIntent('analysis');
+      setAISetupOpen(true);
+      setChatError('请先完成 AI 解读、向量与重排服务配置。');
+      return;
+    }
     const targetId = session.id;
     setChatting(true);
     setChatError('');
@@ -661,16 +714,34 @@ export function App() {
           onCancel={discardPhysicalDraft}
         />
       )}
-      {screen === 'result' && session?.plate && <ResultScreen session={session} evidence={evidence} retrievalDiagnostics={retrievalDiagnostics} sessionSaveStatus={sessionSaveStatus} sessionSaveError={sessionSaveError} analyzing={analyzing} analysisError={analysisError} analysisSaveStatus={analysisSaveStatus} analysisSaveError={analysisSaveError} chatting={chatting} chatError={chatError} onRetrySessionSave={() => void retrySessionSave()} onAnalyze={() => void runAnalysis(session)} onRetryAnalysisSave={() => void retryAnalysisSave()} onFollowUp={followUp} onBack={returnHome} />}
+      {screen === 'result' && session?.plate && <ResultScreen session={session} evidence={evidence} retrievalDiagnostics={retrievalDiagnostics} aiStatus={aiStatus} sessionSaveStatus={sessionSaveStatus} sessionSaveError={sessionSaveError} analyzing={analyzing} analysisError={analysisError} analysisSaveStatus={analysisSaveStatus} analysisSaveError={analysisSaveError} chatting={chatting} chatError={chatError} onRetrySessionSave={() => void retrySessionSave()} onAnalyze={() => void runAnalysis(session, true)} onRetryAnalysisSave={() => void retryAnalysisSave()} onFollowUp={followUp} onBack={returnHome} />}
       {historyOpen && <HistoryPanel sessions={history} onClose={() => setHistoryOpen(false)} onOpen={(saved) => void openSession(saved)} onDelete={(id) => void deleteSession(id)} />}
       {settingsOpen && (
         <SettingsPanel
           updateState={updateState}
+          aiStatus={aiStatus}
+          aiCatalog={aiCatalog}
+          onAIStatus={updateAIStatus}
+          onConfigureAI={() => { setAISetupIntent('settings'); setAISetupOpen(true); }}
           onCheckUpdate={() => void checkForUpdate()}
           onOpenUpdate={openUpdatePrompt}
           onClose={() => setSettingsOpen(false)}
         />
       )}
+      {aiSetupOpen && aiCatalog.presets.length ? (
+        <AISetupWizard
+          catalog={aiCatalog}
+          status={aiStatus}
+          onStatus={updateAIStatus}
+          onClose={() => setAISetupOpen(false)}
+          onReady={() => {
+            setAISetupOpen(false);
+            if (aiSetupIntent === 'analysis' && activeSessionRef.current?.status === 'complete') {
+              void runAnalysis(activeSessionRef.current, true, true);
+            }
+          }}
+        />
+      ) : null}
       {updatePromptOpen && ['available', 'downloading', 'downloaded', 'error'].includes(updateState.status) && (
         <UpdatePrompt
           state={updateState as PromptUpdateState}

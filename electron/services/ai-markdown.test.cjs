@@ -1,9 +1,9 @@
 const assert = require('node:assert/strict');
 const test = require('node:test');
 const {
-  analyzeCloud,
-  followUpCloud,
-  postChat: requestAIResponse,
+  analyzeCloud: analyzeCloudCore,
+  followUpCloud: followUpCloudCore,
+  postChat: requestAIResponseCore,
   reasoningPlan,
   validateMarkdownReport,
 } = require('./ai.cjs');
@@ -102,20 +102,32 @@ const strictMarkdown = [
   `- 前提是补充完整排盘与占问背景后，才能进一步判断学业结果。${evidenceCitation}`,
 ].join('\n');
 
+let activeChat = null;
+
+function withMockChat(options) {
+  return {
+    ...options,
+    chat: options.chat || (options.apiKey && options.model ? activeChat : undefined),
+  };
+}
+
+const requestAIResponse = (options) => requestAIResponseCore(withMockChat(options));
+const analyzeCloud = (options) => analyzeCloudCore(withMockChat(options));
+const followUpCloud = (options) => followUpCloudCore(withMockChat(options));
+
 function mockDeepSeek(content, inspect) {
-  const originalFetch = global.fetch;
+  const previousChat = activeChat;
   const responses = Array.isArray(content) ? content : [content];
   let callIndex = 0;
-  global.fetch = async (url, options) => {
-    inspect?.(url, options, callIndex);
+  activeChat = async ({ messages, maxTokens, temperature }) => {
+    inspect?.('https://provider.test/chat/completions', {
+      body: JSON.stringify({ model: 'test-generation', messages, max_tokens: maxTokens, temperature }),
+    }, callIndex);
     const responseContent = responses[Math.min(callIndex, responses.length - 1)];
     callIndex += 1;
-    return {
-      ok: true,
-      json: async () => ({ choices: [{ message: { content: responseContent } }] }),
-    };
+    return { content: responseContent };
   };
-  return () => { global.fetch = originalFetch; };
+  return () => { activeChat = previousChat; };
 }
 
 async function validateRequestedMarkdown(options) {
@@ -209,8 +221,8 @@ test('cloud analysis refuses missing provider configuration before any network r
         }),
         (error) => {
           assert.equal(error.publicCode, 'AI_NOT_CONFIGURED');
-          assert.match(error.message, /尚未配置 DeepSeek AI 解读服务/);
-          assert.match(error.publicNextAction, /设置/);
+          assert.match(error.message, /尚未完成 AI 解读、向量与重排服务配置/);
+          assert.match(error.publicNextAction, /连接 AI 服务/);
           return true;
         },
       );

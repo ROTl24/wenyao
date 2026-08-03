@@ -4,6 +4,24 @@ import { App } from './App';
 import { desktop } from './lib/desktop';
 import { buildPlate, createTossFromValue } from './lib/divination';
 import type { DivinationSession } from './lib/session';
+import type { AIConfigStatus } from './types/desktop';
+
+const readyAIStatus: AIConfigStatus = {
+  status: 'ready',
+  message: 'AI 服务已就绪',
+  activeCapabilities: {
+    generation: { connectionId: 'test', providerId: 'test', label: '测试服务', model: 'chat-test' },
+    embedding: { connectionId: 'test', providerId: 'test', label: '测试服务', model: 'embedding-test' },
+    rerank: { connectionId: 'test', providerId: 'test', label: '测试服务', model: 'rerank-test' },
+  },
+  activeFingerprint: 'test-index',
+  corpusCount: 2,
+  consentAcceptedAt: new Date('2026-07-14T08:00:00.000Z').toISOString(),
+  connections: [],
+  activePipeline: null,
+  draft: null,
+  usage: [],
+};
 
 function completedHistorySession(question: string): DivinationSession {
   const castAt = new Date('2026-07-14T08:00:00.000Z');
@@ -42,6 +60,7 @@ function reachPhysicalReview(question = '线下事业如何发展') {
 
 beforeEach(() => {
   vi.restoreAllMocks();
+  vi.spyOn(desktop.aiConfig, 'getStatus').mockResolvedValue(structuredClone(readyAIStatus));
   localStorage.clear();
   Object.defineProperty(window, 'wenyao', { value: undefined, configurable: true });
   Object.defineProperty(window, 'matchMedia', {
