@@ -1,3 +1,9 @@
+!macro customInstallMode
+  !ifndef BUILD_UNINSTALLER
+    StrCpy $isForceCurrentInstall "1"
+  !endif
+!macroend
+
 !macro customRemoveFiles
   StrCpy $R9 "$INSTDIR.__wenyao_data_preserved__"
 

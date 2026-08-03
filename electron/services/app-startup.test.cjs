@@ -2,9 +2,8 @@ const assert = require('node:assert/strict');
 const test = require('node:test');
 const { prepareApplicationStartup } = require('./app-startup.cjs');
 
-test('a secondary GUI instance exits before touching an active data migration', () => {
+test('a secondary GUI instance exits before configuring installation data paths', () => {
   let lockHeld = false;
-  let migrationOwner = null;
   let configureCount = 0;
 
   function fakeApp(name) {
@@ -24,10 +23,7 @@ test('a secondary GUI instance exits before touching an active data migration', 
 
   function configureDataPaths(app) {
     configureCount += 1;
-    if (migrationOwner && migrationOwner !== app.name) {
-      throw new Error('发现未完成的数据迁移暂存目录');
-    }
-    migrationOwner = app.name;
+    assert.equal(app.name, 'primary');
   }
 
   const primaryApp = fakeApp('primary');
