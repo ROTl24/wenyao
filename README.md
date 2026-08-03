@@ -4,6 +4,7 @@
 
 ## 近期更新
 
+- v0.4.0 新增一站式多供应商 AI 连接向导，并将打包版数据直接保存在安装目录的 `data\`；不再读取或迁移旧 `%APPDATA%` 数据，安装器固定为当前用户模式。
 - v0.3.0 起支持应用内在线更新：启动时及每 6 小时检查 GitHub Releases，发现稳定版后先征得确认，再下载并在重启或正常退出时安装。
 - 首页新增“在线起卦 / 线下起卦”分流。线下路线按“字面 2、背面 3”逐爻录入，六爻终审时可修改任意钱象和北京时间；终审前不写入历史，确认后才生成完整排盘。
 - 结果页重构为“当代卦书”：卷首并列本卦与变卦，正文以 AI 解读和完整排盘组成双页阅读区，并在窄屏下切换为解读优先的单页长卷。
@@ -63,7 +64,7 @@ npm.cmd run build
 
 三条 `verify:*` 命令会使用桌面应用中已启用的真实配置并可能产生服务商费用；普通开发检查使用 `npm.cmd test` 与 `npm.cmd run typecheck` 即可。
 
-安装包生成到 `release/WenYao-0.3.0-Setup.exe`；`npm.cmd run verify:release` 会校验安装包、更新元数据、blockmap 与内置 GitHub 更新源是否一致。
+安装包生成到 `release/WenYao-0.4.0-Setup.exe`；`npm.cmd run verify:release` 会校验安装包、更新元数据、blockmap 与内置 GitHub 更新源是否一致。
 
 ## 古籍证据包
 
