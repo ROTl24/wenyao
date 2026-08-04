@@ -42,47 +42,99 @@ jobs:
       - name: Run TypeScript checks
         run: npm run typecheck
 
-      - name: Build and upload draft release
-        run: npm run release:windows
+      - name: Build Windows release artifacts
+        run: npm run build
         env:
-          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           WIN_CSC_LINK: ${{ secrets.WIN_CSC_LINK }}
           WIN_CSC_KEY_PASSWORD: ${{ secrets.WIN_CSC_KEY_PASSWORD }}
-
-      - name: Upload update blockmap to draft release
-        shell: pwsh
-        env:
-          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-        run: |
-          $packageVersion = node -p "require('./package.json').version"
-          gh release upload "$env:GITHUB_REF_NAME" "release/WenYao-$packageVersion-Setup.exe.blockmap" --clobber
 
       - name: Verify local release artifacts
         run: npm run verify:release
 
-      - name: Verify assets and publish stable release
+      - name: Ensure draft release exists
         shell: pwsh
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
-          $release = gh release view "$env:GITHUB_REF_NAME" --json isDraft,isPrerelease,assets | ConvertFrom-Json
-          if (-not $release.isDraft) {
-            throw "Release must remain a draft until all assets pass verification"
-          }
-          if ($release.isPrerelease) {
-            throw "Stable update tags must not create prereleases"
+          $releaseJson = gh release view "$env:GITHUB_REF_NAME" --json isDraft,isPrerelease 2>$null
+          if ($LASTEXITCODE -eq 0) {
+            $release = $releaseJson | ConvertFrom-Json
+            if (-not $release.isDraft) {
+              throw "Existing release must remain a draft until all assets pass verification"
+            }
+            if ($release.isPrerelease) {
+              throw "Stable update tags must not create prereleases"
+            }
+          } else {
+            $packageVersion = node -p "require('./package.json').version"
+            gh release create "$env:GITHUB_REF_NAME" --draft --title "$packageVersion"
           }
 
+      - name: Upload verified release assets
+        shell: pwsh
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
           $packageVersion = node -p "require('./package.json').version"
-          $requiredAssets = @(
-            "WenYao-$packageVersion-Setup.exe",
-            "WenYao-$packageVersion-Setup.exe.blockmap",
-            "latest.yml"
+          $assetPaths = @(
+            "release/WenYao-$packageVersion-Setup.exe",
+            "release/WenYao-$packageVersion-Setup.exe.blockmap",
+            "release/latest.yml"
           )
-          $assetNames = @($release.assets | ForEach-Object { $_.name })
-          $missingAssets = @($requiredAssets | Where-Object { $_ -notin $assetNames })
-          if ($missingAssets.Count -gt 0) {
-            throw "Draft release is missing assets: $($missingAssets -join ', ')"
+          gh release upload "$env:GITHUB_REF_NAME" @assetPaths --clobber
+
+      - name: Verify uploaded assets and publish stable release
+        shell: pwsh
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          $packageVersion = node -p "require('./package.json').version"
+          $assetPaths = [ordered]@{
+            "WenYao-$packageVersion-Setup.exe" = "release/WenYao-$packageVersion-Setup.exe"
+            "WenYao-$packageVersion-Setup.exe.blockmap" = "release/WenYao-$packageVersion-Setup.exe.blockmap"
+            "latest.yml" = "release/latest.yml"
+          }
+          $maxAttempts = 12
+          $retryDelaySeconds = 10
+
+          for ($attempt = 1; $attempt -le $maxAttempts; $attempt++) {
+            $release = gh release view "$env:GITHUB_REF_NAME" --json isDraft,isPrerelease,assets | ConvertFrom-Json
+            if (-not $release.isDraft) {
+              throw "Release must remain a draft until all assets pass verification"
+            }
+            if ($release.isPrerelease) {
+              throw "Stable update tags must not create prereleases"
+            }
+
+            $assetsByName = @{}
+            foreach ($asset in @($release.assets)) {
+              $assetsByName[$asset.name] = $asset
+            }
+
+            $invalidAssets = @()
+            foreach ($assetName in $assetPaths.Keys) {
+              if (-not $assetsByName.ContainsKey($assetName)) {
+                $invalidAssets += "$assetName (missing)"
+                continue
+              }
+
+              $localFile = Get-Item -LiteralPath $assetPaths[$assetName]
+              $localDigest = "sha256:$((Get-FileHash -Algorithm SHA256 -LiteralPath $localFile.FullName).Hash.ToLowerInvariant())"
+              $remoteAsset = $assetsByName[$assetName]
+              if ([int64]$remoteAsset.size -ne [int64]$localFile.Length -or [string]$remoteAsset.digest -ne $localDigest) {
+                $invalidAssets += "$assetName (size or digest mismatch)"
+              }
+            }
+
+            if ($invalidAssets.Count -eq 0) {
+              break
+            }
+            if ($attempt -eq $maxAttempts) {
+              throw "Draft release assets did not converge: $($invalidAssets -join ', ')"
+            }
+
+            Write-Host "Draft assets are not ready (attempt $attempt/$maxAttempts): $($invalidAssets -join ', '). Retrying in $retryDelaySeconds seconds."
+            Start-Sleep -Seconds $retryDelaySeconds
           }
 
           gh release edit "$env:GITHUB_REF_NAME" --draft=false --prerelease=false --latest
