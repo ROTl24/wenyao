@@ -1,5 +1,6 @@
-import { History, Settings2 } from 'lucide-react';
+import { CalendarDays, History, Settings2 } from 'lucide-react';
 import { useEffect, useMemo, useRef, useState } from 'react';
+import { CalendarScreen } from './components/CalendarScreen';
 import { HistoryPanel } from './components/HistoryPanel';
 import { HomeScreen } from './components/HomeScreen';
 import { PhysicalCastingScreen } from './components/PhysicalCastingScreen';
@@ -10,6 +11,7 @@ import { SettingsPanel } from './components/SettingsPanel';
 import { AISetupWizard } from './components/AISetupWizard';
 import { UpdatePrompt, type PromptUpdateState } from './components/UpdatePrompt';
 import { desktop } from './lib/desktop';
+import { currentAlmanacSelection, type AlmanacSelection } from './lib/almanac';
 import { isAIUsable } from './lib/aiStatus';
 import { randomToss, upgradePlate } from './lib/divination';
 import { isValidQuestion } from './lib/question';
@@ -121,6 +123,8 @@ export function App() {
   const [retrievalDiagnostics, setRetrievalDiagnostics] = useState<RetrievalDiagnostics | null>(null);
   const [historyOpen, setHistoryOpen] = useState(false);
   const [settingsOpen, setSettingsOpen] = useState(false);
+  const [calendarOpen, setCalendarOpen] = useState(false);
+  const [calendarSelection, setCalendarSelection] = useState<AlmanacSelection>(() => currentAlmanacSelection());
   const [aiCatalog, setAICatalog] = useState<AIProviderCatalog>(emptyAICatalog);
   const [aiStatus, setAIStatus] = useState<AIConfigStatus>(emptyAIStatus);
   const [aiSetupOpen, setAISetupOpen] = useState(false);
@@ -664,57 +668,76 @@ export function App() {
   };
 
   const appTitle = useMemo(() => {
+    if (calendarOpen) return '问爻 · 日历';
     if (screen === 'home') return '问爻';
     if (screen === 'casting') return '六爻起卦';
     if (screen === 'physical-casting') return '线下起卦';
     if (screen === 'physical-review') return '六爻终审';
     return '排盘与解读';
-  }, [screen]);
+  }, [calendarOpen, screen]);
+
+  const openCalendar = () => {
+    setHistoryOpen(false);
+    setSettingsOpen(false);
+    setCalendarOpen(true);
+  };
+
   return (
     <div className="app-shell">
       <header className="app-chrome">
         <div className="chrome-brand"><span>爻</span><strong>{appTitle}</strong></div>
         <nav>
+          <button type="button" aria-label="日历" aria-current={calendarOpen ? 'page' : undefined} disabled={physicalFinalizing} onClick={openCalendar}><CalendarDays size={17} /><span>日历</span></button>
           <button type="button" aria-label="历史记录" disabled={physicalFinalizing} onClick={() => setHistoryOpen(true)}><History size={17} /><span>历史</span></button>
           <button type="button" aria-label="应用设置" disabled={physicalFinalizing} onClick={() => setSettingsOpen(true)}><Settings2 size={17} /><span>设置</span></button>
         </nav>
       </header>
-      {screen === 'home' && (
-        <HomeScreen
-          question={question}
-          category={category}
-          castingMethod={castingMethod}
-          physicalTimeInput={physicalTimeInput}
-          physicalTimeError={physicalTimeError}
-          onQuestionChange={setQuestion}
-          onCategoryChange={setCategory}
-          onCastingMethodChange={changeCastingMethod}
-          onPhysicalTimeChange={changePhysicalTime}
-          onStart={start}
+      {calendarOpen ? (
+        <CalendarScreen
+          selection={calendarSelection}
+          onSelectionChange={setCalendarSelection}
+          onClose={() => setCalendarOpen(false)}
         />
+      ) : (
+        <>
+          {screen === 'home' && (
+            <HomeScreen
+              question={question}
+              category={category}
+              castingMethod={castingMethod}
+              physicalTimeInput={physicalTimeInput}
+              physicalTimeError={physicalTimeError}
+              onQuestionChange={setQuestion}
+              onCategoryChange={setCategory}
+              onCastingMethodChange={changeCastingMethod}
+              onPhysicalTimeChange={changePhysicalTime}
+              onStart={start}
+            />
+          )}
+          {screen === 'casting' && session?.currentToss && <RitualScreen session={session} onConfirm={confirm} />}
+          {screen === 'physical-casting' && physicalDraft && (
+            <PhysicalCastingScreen
+              draft={physicalDraft}
+              onConfirm={confirmPhysicalLine}
+              onCancel={discardPhysicalDraft}
+            />
+          )}
+          {screen === 'physical-review' && physicalDraft && (
+            <PhysicalReviewScreen
+              draft={physicalDraft}
+              timeInput={physicalTimeInput}
+              timeError={physicalTimeError}
+              finalizing={physicalFinalizing}
+              finalizeError={physicalFinalizeError}
+              onTimeChange={changePhysicalTime}
+              onChangeLine={changePhysicalLine}
+              onConfirm={() => void finalizePhysical()}
+              onCancel={discardPhysicalDraft}
+            />
+          )}
+          {screen === 'result' && session?.plate && <ResultScreen session={session} evidence={evidence} retrievalDiagnostics={retrievalDiagnostics} aiStatus={aiStatus} sessionSaveStatus={sessionSaveStatus} sessionSaveError={sessionSaveError} analyzing={analyzing} analysisError={analysisError} analysisSaveStatus={analysisSaveStatus} analysisSaveError={analysisSaveError} chatting={chatting} chatError={chatError} onRetrySessionSave={() => void retrySessionSave()} onAnalyze={() => void runAnalysis(session, true)} onRetryAnalysisSave={() => void retryAnalysisSave()} onFollowUp={followUp} onBack={returnHome} />}
+        </>
       )}
-      {screen === 'casting' && session?.currentToss && <RitualScreen session={session} onConfirm={confirm} />}
-      {screen === 'physical-casting' && physicalDraft && (
-        <PhysicalCastingScreen
-          draft={physicalDraft}
-          onConfirm={confirmPhysicalLine}
-          onCancel={discardPhysicalDraft}
-        />
-      )}
-      {screen === 'physical-review' && physicalDraft && (
-        <PhysicalReviewScreen
-          draft={physicalDraft}
-          timeInput={physicalTimeInput}
-          timeError={physicalTimeError}
-          finalizing={physicalFinalizing}
-          finalizeError={physicalFinalizeError}
-          onTimeChange={changePhysicalTime}
-          onChangeLine={changePhysicalLine}
-          onConfirm={() => void finalizePhysical()}
-          onCancel={discardPhysicalDraft}
-        />
-      )}
-      {screen === 'result' && session?.plate && <ResultScreen session={session} evidence={evidence} retrievalDiagnostics={retrievalDiagnostics} aiStatus={aiStatus} sessionSaveStatus={sessionSaveStatus} sessionSaveError={sessionSaveError} analyzing={analyzing} analysisError={analysisError} analysisSaveStatus={analysisSaveStatus} analysisSaveError={analysisSaveError} chatting={chatting} chatError={chatError} onRetrySessionSave={() => void retrySessionSave()} onAnalyze={() => void runAnalysis(session, true)} onRetryAnalysisSave={() => void retryAnalysisSave()} onFollowUp={followUp} onBack={returnHome} />}
       {historyOpen && <HistoryPanel sessions={history} onClose={() => setHistoryOpen(false)} onOpen={(saved) => void openSession(saved)} onDelete={(id) => void deleteSession(id)} />}
       {settingsOpen && (
         <SettingsPanel

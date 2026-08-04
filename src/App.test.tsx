@@ -123,13 +123,32 @@ describe('问爻桌面体验', () => {
     expect(completeSaves[1].id).toBe(completeSaves[0].id);
   });
 
-  it('opens history and settings from the desktop chrome', async () => {
+  it('opens calendar, history and settings from the desktop chrome', async () => {
     render(<App />);
+    fireEvent.click(screen.getByRole('button', { name: '日历' }));
+    expect(await screen.findByRole('main', { name: '问爻日历' })).toBeVisible();
+    fireEvent.click(screen.getByRole('button', { name: '返回' }));
     fireEvent.click(screen.getByRole('button', { name: '历史记录' }));
     expect(await screen.findByRole('heading', { name: '问爻占簿' })).toBeVisible();
     fireEvent.click(screen.getByRole('button', { name: '关闭历史记录' }));
     fireEvent.click(screen.getByRole('button', { name: '应用设置' }));
     expect(await screen.findByRole('heading', { name: '应用设置' })).toBeVisible();
+  });
+
+  it('keeps an in-progress casting intact while consulting the calendar', async () => {
+    render(<App />);
+    fireEvent.change(screen.getByLabelText('所占之事'), { target: { value: '日历往返不应丢失起卦' } });
+    fireEvent.click(screen.getByRole('button', { name: '事业工作' }));
+    fireEvent.click(screen.getByRole('button', { name: /在线起卦/ }));
+    fireEvent.click(screen.getByRole('button', { name: '开始起卦' }));
+    expect(await screen.findByRole('heading', { name: '第一爻' })).toBeVisible();
+
+    fireEvent.click(screen.getByRole('button', { name: '日历' }));
+    expect(screen.getByRole('main', { name: '问爻日历' })).toBeVisible();
+    fireEvent.click(screen.getByRole('button', { name: '返回' }));
+
+    expect(screen.getByRole('heading', { name: '第一爻' })).toBeVisible();
+    expect(screen.getAllByLabelText(/乾隆古币/)).toHaveLength(3);
   });
 
   it('prompts before downloading an available desktop update and cleans up the subscription', async () => {

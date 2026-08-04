@@ -7,16 +7,32 @@ declare module 'lunar-javascript' {
   }
 
   export class Lunar {
+    getAnimal(): string;
+    getDayChongDesc(): string;
+    getDayPositionCaiDesc(): string;
+    getDayPositionFuDesc(sect?: number): string;
+    getDayPositionXiDesc(): string;
+    getDayPositionYangGuiDesc(): string;
+    getDayPositionYinGuiDesc(): string;
+    getDaySha(): string;
+    getDayTianShen(): string;
+    getDayTianShenLuck(): string;
+    getDayTianShenType(): string;
     getDayInGanZhiExact(): string;
     getDayInChinese(): string;
     getDayGanExact(): string;
     getDayZhiExact(): string;
+    getJieQi(): string;
     getMonthInGanZhiExact(): string;
     getMonthInChinese(): string;
     getMonthZhiExact(): string;
     getYearInGanZhi(): string;
     getYearInGanZhiExact(): string;
     getTimeInGanZhi(): string;
+    getXiu(): string;
+    getXiuLuck(): string;
+    getZheng(): string;
+    getZhiXing(): string;
     getEightChar(): EightChar;
   }
 
