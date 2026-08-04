@@ -1,5 +1,4 @@
-import { Solar } from 'lunar-javascript';
-import { shanghaiDateTimeParts } from './shanghaiTime';
+import { lunarFromShanghaiInstant } from './lunarCalendar';
 
 export type CoinFace = 'text' | 'reverse';
 export type LineValue = 6 | 7 | 8 | 9;
@@ -876,30 +875,8 @@ function commonShenSha(dayGanZhi: string, lines: PlateLine[]): ShenSha[] {
   }));
 }
 
-function shanghaiSolar(castAt: Date) {
-  const parts = shanghaiDateTimeParts(castAt);
-  const solarFactory = Solar as unknown as {
-    fromYmdHms(
-      year: number,
-      month: number,
-      day: number,
-      hour: number,
-      minute: number,
-      second: number,
-    ): ReturnType<typeof Solar.fromDate>;
-  };
-  return solarFactory.fromYmdHms(
-    parts.year,
-    parts.month,
-    parts.day,
-    parts.hour,
-    parts.minute,
-    parts.second,
-  );
-}
-
 function calendarFields(castAt: Date) {
-  const lunar = shanghaiSolar(castAt).getLunar();
+  const lunar = lunarFromShanghaiInstant(castAt);
   const yearGanZhi = lunar.getYearInGanZhiExact();
   const monthGanZhi = lunar.getMonthInGanZhiExact();
   const dayGanZhi = lunar.getDayInGanZhiExact();

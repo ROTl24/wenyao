@@ -40,6 +40,32 @@ describe('BeijingDateTimeField', () => {
     expect(onChange).toHaveBeenLastCalledWith('2026-07-13T12:34');
   });
 
+  it('labels the selected Gregorian date with its derived lunar date', () => {
+    const { rerender } = render(<BeijingDateTimeField {...baseProps} onChange={vi.fn()} />);
+
+    expect(screen.getByText('农历丙午年五月廿八')).toBeVisible();
+    expect(screen.getByLabelText('日期')).toHaveAccessibleDescription(/农历丙午年五月廿八/);
+
+    rerender(
+      <BeijingDateTimeField
+        {...baseProps}
+        value="2026-08-04T12:00"
+        onChange={vi.fn()}
+      />,
+    );
+    expect(screen.queryByText('农历丙午年五月廿八')).not.toBeInTheDocument();
+    expect(screen.getByText('农历丙午年六月廿二')).toBeVisible();
+
+    rerender(
+      <BeijingDateTimeField
+        {...baseProps}
+        value="T12:00"
+        onChange={vi.fn()}
+      />,
+    );
+    expect(screen.queryByText('农历丙午年六月廿二')).not.toBeInTheDocument();
+  });
+
   it('preserves an explicitly incomplete value when either segment is cleared', () => {
     const onChange = vi.fn();
     const { rerender } = render(<BeijingDateTimeField {...baseProps} onChange={onChange} />);

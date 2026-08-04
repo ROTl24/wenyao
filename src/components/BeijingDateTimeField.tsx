@@ -1,5 +1,6 @@
 import { CalendarDays, Clock3 } from 'lucide-react';
 import { useEffect, useRef, useState } from 'react';
+import { formatLunarDateLabel } from '../lib/lunarCalendar';
 import { formatShanghaiDateTimeInput } from '../lib/shanghaiTime';
 import { BeijingDatePicker } from './BeijingDatePicker';
 import { BeijingTimePicker } from './BeijingTimePicker';
@@ -41,7 +42,12 @@ export function BeijingDateTimeField({
   const timeTriggerRef = useRef<HTMLButtonElement>(null);
   const noteId = `${id}-note`;
   const errorId = `${id}-error`;
+  const lunarDateId = `${id}-lunar-date`;
   const describedBy = error ? errorId : helperText ? noteId : undefined;
+  const lunarDateLabel = formatLunarDateLabel(date);
+  const dateDescribedBy = error
+    ? errorId
+    : [describedBy, lunarDateLabel ? lunarDateId : null].filter(Boolean).join(' ') || undefined;
   const nowValue = formatShanghaiDateTimeInput();
   const { date: today, time: nowTime } = splitDateTime(nowValue);
 
@@ -126,7 +132,7 @@ export function BeijingDateTimeField({
               value={date}
               disabled={disabled}
               aria-invalid={Boolean(error)}
-              aria-describedby={describedBy}
+              aria-describedby={dateDescribedBy}
               onFocus={() => setOpenPicker(null)}
               onKeyDown={(event) => openFromKeyboard(event, 'date')}
               onChange={(event) => onChange(`${event.target.value}T${time}`)}
@@ -145,6 +151,15 @@ export function BeijingDateTimeField({
               <CalendarDays size={17} aria-hidden="true" />
             </button>
           </div>
+          {lunarDateLabel ? (
+            <span
+              id={lunarDateId}
+              className="beijing-date-time-field__lunar-date"
+              aria-live="polite"
+            >
+              {lunarDateLabel}
+            </span>
+          ) : null}
         </div>
         <div className="beijing-date-time-field__segment">
           <label htmlFor={`${id}-time`}>时刻</label>

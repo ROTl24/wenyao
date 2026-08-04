@@ -371,6 +371,7 @@ button:focus-visible, input:focus-visible, textarea:focus-visible { outline: 2px
 .beijing-date-time-field__input-wrap input { position: relative; z-index: 1; width: 100%; min-width: 0; height: 56px; padding: 14px 34px 0 0; border: 0; outline: 0; background: transparent; color: var(--ink); font: 14px/1 var(--ui); font-variant-numeric: tabular-nums; letter-spacing: .025em; color-scheme: light; }
 .beijing-date-time-field__input-wrap input:focus-visible { outline: 0; box-shadow: none; }
 .beijing-date-time-field__input-wrap input::-webkit-calendar-picker-indicator { display: none; }
+.beijing-date-time-field__lunar-date { display: block; min-height: 16px; margin: -6px 34px 7px 0; color: var(--muted); font: 10px/1.6 var(--serif); letter-spacing: .06em; white-space: nowrap; }
 .beijing-date-time-field__picker-trigger { position: absolute; z-index: 3; top: 6px; right: -3px; width: 44px; height: 44px; display: grid; place-items: center; padding: 0; border: 0; background: transparent; color: rgba(140,113,70,.86); cursor: pointer; transition: color var(--motion-fast) ease, background-color var(--motion-fast) ease; }
 .beijing-date-time-field__picker-trigger:hover:not(:disabled), .beijing-date-time-field__picker-trigger[aria-expanded="true"] { color: var(--cinnabar); background: rgba(152,43,36,.055); }
 .beijing-date-time-field__support { grid-area: support; min-width: 0; min-height: 15px; }
