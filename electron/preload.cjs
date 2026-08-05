@@ -1,4 +1,4 @@
-const { contextBridge, ipcRenderer } = require('electron');
+const { contextBridge, ipcRenderer, webUtils } = require('electron');
 
 const UPDATE_STATUSES = new Set([
   'idle',
@@ -95,6 +95,20 @@ function sanitizeRendererSession(value) {
   return session;
 }
 
+function importMetadata(value) {
+  return pickOwn(value, ['draftId', 'title', 'author', 'edition']);
+}
+
+function droppedFilePaths(files) {
+  if (!files || typeof files[Symbol.iterator] !== 'function') return [];
+  // Keep one item beyond the accepted limit so the main process can reject
+  // an oversized batch instead of silently dropping the remaining files.
+  return Array.from(files).slice(0, 21).map((file) => {
+    try { return webUtils.getPathForFile(file); }
+    catch { return ''; }
+  }).filter(Boolean);
+}
+
 contextBridge.exposeInMainWorld('wenyao', {
   updates: {
     getState: () => ipcRenderer.invoke('updates:get-state').then(sanitizeUpdateState),
@@ -140,9 +154,32 @@ contextBridge.exposeInMainWorld('wenyao', {
     },
   },
   corpus: {
-    list: () => ipcRenderer.invoke('corpus:list'),
     status: () => ipcRenderer.invoke('corpus:status'),
+    books: (payload = {}) => ipcRenderer.invoke('corpus:books', pickOwn(payload, ['includeDeleted', 'query', 'offset', 'limit'])),
+    book: (id) => ipcRenderer.invoke('corpus:book', safeText(id, '', 100)),
+    bookEntries: (payload) => ipcRenderer.invoke('corpus:book-entries', pickOwn(payload, ['bookId', 'query', 'offset', 'limit'])),
+    selectImportFiles: () => ipcRenderer.invoke('corpus:select-import-files'),
+    previewDroppedFiles: (files) => ipcRenderer.invoke('corpus:preview-import-files', droppedFilePaths(files)),
+    commitImport: (payload) => ipcRenderer.invoke('corpus:commit-import', {
+      batchId: safeText(payload?.batchId, '', 100),
+      sendForIndex: Boolean(payload?.sendForIndex),
+      books: Array.isArray(payload?.books) ? payload.books.slice(0, 20).map(importMetadata) : [],
+    }),
+    setEnabled: (id, enabled, requestIndex = false) => ipcRenderer.invoke('corpus:set-enabled', { id: safeText(id, '', 100), enabled: Boolean(enabled), requestIndex: Boolean(requestIndex) }),
+    updateMetadata: (payload) => ipcRenderer.invoke('corpus:update-metadata', pickOwn(payload, ['id', 'title', 'author', 'edition'])),
+    trash: (id) => ipcRenderer.invoke('corpus:trash', safeText(id, '', 100)),
+    restore: (id) => ipcRenderer.invoke('corpus:restore', safeText(id, '', 100)),
+    purge: (id) => ipcRenderer.invoke('corpus:purge', safeText(id, '', 100)),
+    pauseIndex: () => ipcRenderer.invoke('corpus:pause-index'),
+    resumeIndex: () => ipcRenderer.invoke('corpus:resume-index'),
+    cancelIndex: () => ipcRenderer.invoke('corpus:cancel-index'),
     rebuildVectors: () => ipcRenderer.invoke('corpus:rebuild-vectors'),
+    onState: (listener) => {
+      if (typeof listener !== 'function') return () => {};
+      const subscription = (_event, state) => listener(structuredClone(state));
+      ipcRenderer.on('corpus:state', subscription);
+      return () => ipcRenderer.removeListener('corpus:state', subscription);
+    },
   },
   retrieval: {
     search: (payload) => ipcRenderer.invoke('retrieval:search', payload),

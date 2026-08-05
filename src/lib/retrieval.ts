@@ -4,6 +4,10 @@ export interface EvidenceEntry {
   id: string;
   title: string;
   source: string;
+  author?: string;
+  edition?: string;
+  origin?: 'builtin' | 'user';
+  bookId?: string;
   location: string;
   text: string;
   tags: string[];

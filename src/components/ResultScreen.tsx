@@ -280,7 +280,7 @@ export function ResultScreen({ session, evidence, retrievalDiagnostics, aiStatus
                         <h3 id={`evidence-title-${item.id}`}>{item.title}</h3>
                         <span className="evidence-source-mark" aria-label={item.sourceType === 'original' ? '古籍原文' : '古籍摘录'}>{item.sourceType === 'original' ? '原' : '摘'}</span>
                       </div>
-                      <span className="evidence-meta">{item.source} · {item.location} · {item.knowledgeKind === 'rule' ? '规则' : item.knowledgeKind === 'case' ? '占例' : '义理'}</span>
+                      <span className="evidence-meta"><i className={`evidence-origin-label evidence-origin-label--${item.origin === 'user' ? 'user' : 'builtin'}`}>{item.origin === 'user' ? '用户导入' : '内置'}</i>{item.source}{item.edition ? `（${item.edition}）` : ''} · {item.location} · {item.knowledgeKind === 'rule' ? '规则' : item.knowledgeKind === 'case' ? '占例' : '义理'}</span>
                       <p className="evidence-text">{item.text}</p>
                     </div>
                   </article>

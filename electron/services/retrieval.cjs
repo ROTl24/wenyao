@@ -52,8 +52,10 @@ function diversify(items, limit) {
   return selected;
 }
 
-async function hybridSearch({ corpus, query, domainTerms = [], limit = 8, vectorSearch, rerank }) {
-  const lexical = lexicalSearch(corpus, query, domainTerms, 40);
+async function hybridSearch({ corpus = null, lexicalSearch: lexicalSearchProvider = null, hydrate = null, query, domainTerms = [], limit = 8, vectorSearch, rerank }) {
+  const lexical = lexicalSearchProvider
+    ? await lexicalSearchProvider(query, domainTerms, 40)
+    : lexicalSearch(corpus || [], query, domainTerms, 40);
   const warnings = [];
   let vector = [];
   if (vectorSearch) {
@@ -62,9 +64,11 @@ async function hybridSearch({ corpus, query, domainTerms = [], limit = 8, vector
   } else warnings.push('本地向量索引尚未构建，当前仅使用关键词召回。');
 
   const fused = reciprocalRankFusion([lexical.map((item) => item.id), vector.map((item) => item.id)]);
-  const byId = new Map(corpus.map((entry) => [entry.id, entry]));
   const lexicalById = new Map(lexical.map((item) => [item.id, item]));
   const vectorById = new Map(vector.map((item) => [item.id, item]));
+  const candidateIds = fused.slice(0, 30).map(([id]) => id);
+  const hydrated = hydrate ? await hydrate(candidateIds) : (corpus || []).filter((entry) => candidateIds.includes(entry.id));
+  const byId = new Map(hydrated.map((entry) => [entry.id, entry]));
   let candidates = fused.slice(0, 30).map(([id, fusionScore]) => ({
     ...byId.get(id),
     score: fusionScore,

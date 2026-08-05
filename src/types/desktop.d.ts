@@ -85,7 +85,68 @@ export interface AIConfigStatus {
 }
 
 export interface DesktopError { code: string; message: string; dataSafe: boolean; nextAction: string; technicalDetails?: string }
-interface CorpusStatus { count: number; bookCount: number; originalCount: number; summaryCount: number; ruleCount: number; caseCount: number; doctrineCount: number; vectorReady: boolean; vectorModel: string; ready: boolean }
+
+export type CorpusBookOrigin = 'builtin' | 'user';
+export type CorpusIndexState = 'local-only' | 'pending' | 'building' | 'paused' | 'ready' | 'error';
+export interface CorpusBookSummary {
+  id: string;
+  origin: CorpusBookOrigin;
+  title: string;
+  author: string;
+  edition: string;
+  fileName: string;
+  extension: string;
+  encoding: string;
+  contentHash: string;
+  charCount: number;
+  chapterCount: number;
+  chunkCount: number;
+  createdAt: string;
+  updatedAt: string;
+  enabled: boolean;
+  deletedAt: string | null;
+  purgeAt: string | null;
+  indexRequested: boolean;
+  indexState: CorpusIndexState;
+  indexProgress: number;
+  indexError: DesktopError | null;
+}
+export interface CorpusBookDetail extends CorpusBookSummary { samples: { first: string; last: string } }
+export interface CorpusImportPreview {
+  draftId: string;
+  fileName: string;
+  extension: string;
+  bytes: number;
+  suggestedTitle: string;
+  encoding?: string;
+  contentHash?: string;
+  charCount?: number;
+  chapterCount?: number;
+  chunkCount?: number;
+  samples?: { first: string; last: string };
+  error: { code: string; message: string; nextAction: string } | null;
+}
+export interface CorpusImportBatch { batchId: string; totalBytes: number; previews: CorpusImportPreview[] }
+export interface CorpusEntryPreview { id: string; title: string; location: string; text: string; tags: string[]; knowledgeKind: 'rule' | 'case' | 'doctrine' }
+export interface CorpusStatus {
+  count: number;
+  bookCount: number;
+  builtInBookCount: number;
+  userBookCount: number;
+  enabledBookCount: number;
+  chunkCount: number;
+  deletedBookCount: number;
+  pendingIndexCount: number;
+  originalCount: number;
+  summaryCount: number;
+  ruleCount: number;
+  caseCount: number;
+  doctrineCount: number;
+  vectorReady: boolean;
+  vectorModel: string;
+  readyShardIds: string[];
+  ready: boolean;
+}
 
 export type UpdateState =
   | { status: 'idle' | 'upToDate' | 'unsupported'; currentVersion: string }
@@ -123,9 +184,23 @@ export interface DesktopApi {
     onStatus(listener: (status: AIConfigStatus) => void): () => void;
   };
   corpus: {
-    list(): Promise<EvidenceEntry[]>;
     status(): Promise<CorpusStatus>;
+    books(payload?: { includeDeleted?: boolean; query?: string; offset?: number; limit?: number }): Promise<{ items: CorpusBookSummary[]; total: number }>;
+    book(id: string): Promise<CorpusBookDetail | null>;
+    bookEntries(payload: { bookId: string; query?: string; offset?: number; limit?: number }): Promise<{ items: CorpusEntryPreview[]; total: number }>;
+    selectImportFiles(): Promise<{ ok: boolean; canceled?: boolean; batch?: CorpusImportBatch; error?: DesktopError }>;
+    previewDroppedFiles(files: FileList | File[]): Promise<{ ok: boolean; batch?: CorpusImportBatch; error?: DesktopError }>;
+    commitImport(payload: { batchId: string; sendForIndex: boolean; books: Array<{ draftId: string; title: string; author: string; edition: string }> }): Promise<{ ok: boolean; results?: Array<{ draftId: string; ok: boolean; book?: CorpusBookSummary; error?: DesktopError }>; error?: DesktopError }>;
+    setEnabled(id: string, enabled: boolean, requestIndex?: boolean): Promise<{ ok: boolean; book?: CorpusBookSummary; error?: DesktopError }>;
+    updateMetadata(payload: { id: string; title: string; author: string; edition: string }): Promise<{ ok: boolean; book?: CorpusBookSummary; requiresIndex?: boolean; error?: DesktopError }>;
+    trash(id: string): Promise<{ ok: boolean; book?: CorpusBookSummary; error?: DesktopError }>;
+    restore(id: string): Promise<{ ok: boolean; book?: CorpusBookSummary; error?: DesktopError }>;
+    purge(id: string): Promise<{ ok: boolean; error?: DesktopError }>;
+    pauseIndex(): Promise<CorpusStatus>;
+    resumeIndex(): Promise<CorpusStatus>;
+    cancelIndex(): Promise<CorpusStatus>;
     rebuildVectors(): Promise<{ ok: boolean; status?: AIConfigStatus; error?: DesktopError }>;
+    onState(listener: (status: CorpusStatus) => void): () => void;
   };
   retrieval: {
     search(payload: { query: string; domainTerms: string[]; limit?: number }): Promise<{ evidence: EvidenceEntry[]; diagnostics: RetrievalDiagnostics }>;

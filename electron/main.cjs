@@ -4,9 +4,11 @@ const crypto = require('node:crypto');
 const fs = require('node:fs');
 const path = require('node:path');
 const { pathToFileURL } = require('node:url');
-const { AIRuntime } = require('./services/ai-runtime.cjs');
+const { AIRuntime, runtimeError } = require('./services/ai-runtime.cjs');
 const { structuredProviderError } = require('./services/ai-provider.cjs');
 const { configureInstallDataPaths } = require('./services/install-data.cjs');
+const { CorpusIndexCoordinator } = require('./services/corpus-index.cjs');
+const { CorpusLibrary } = require('./services/corpus-library.cjs');
 const { sanitizeRendererSession } = require('./services/ipc-payload.cjs');
 const { prepareApplicationStartup } = require('./services/app-startup.cjs');
 const { JsonStore } = require('./services/store.cjs');
@@ -37,6 +39,8 @@ try {
 let mainWindow;
 let store;
 let corpus = [];
+let corpusLibrary;
+let corpusIndex;
 let aiRuntime;
 let updateManager;
 
@@ -71,6 +75,15 @@ function loadCorpus() {
   }
 }
 
+function loadCorpusManifest() {
+  try {
+    const parsed = JSON.parse(fs.readFileSync(resourcePath('corpus-manifest.json'), 'utf8'));
+    return parsed && typeof parsed === 'object' ? parsed : {};
+  } catch {
+    return {};
+  }
+}
+
 function hashCorpus(entries) {
   return crypto.createHash('sha256')
     .update(entries.map((entry) => `${entry.id}:${entry.title}:${entry.text}`).join('\n'))
@@ -85,6 +98,20 @@ function broadcastUpdateState(state) {
 function broadcastAIStatus(status) {
   if (!mainWindow || mainWindow.isDestroyed() || mainWindow.webContents.isDestroyed()) return;
   mainWindow.webContents.send('ai-config:status', status);
+}
+
+function broadcastCorpusState() {
+  if (!mainWindow || mainWindow.isDestroyed() || mainWindow.webContents.isDestroyed() || !aiRuntime) return;
+  mainWindow.webContents.send('corpus:state', aiRuntime.getCorpusStatus());
+}
+
+function corpusFailure(error, fallbackCode = 'CORPUS_ACTION_FAILED') {
+  return { ok: false, error: {
+    code: error?.publicCode || error?.code || fallbackCode,
+    message: error instanceof Error ? error.message : '古籍书库操作失败。',
+    dataSafe: true,
+    nextAction: error?.publicNextAction || error?.nextAction || '本地书库数据未被修改，请检查后重试。',
+  } };
 }
 
 function createWindow() {
@@ -167,35 +194,92 @@ function registerIpc() {
     return true;
   });
 
-  ipcMain.handle('corpus:list', () => structuredClone(corpus));
-  ipcMain.handle('corpus:status', () => {
-    const aiStatus = aiRuntime.getStatus();
-    return {
-      count: corpus.length,
-      bookCount: new Set(corpus.map((item) => item.source)).size,
-      originalCount: corpus.filter((item) => item.sourceType === 'original').length,
-      summaryCount: corpus.filter((item) => item.sourceType === 'summary').length,
-      ruleCount: corpus.filter((item) => item.knowledgeKind === 'rule').length,
-      caseCount: corpus.filter((item) => item.knowledgeKind === 'case').length,
-      doctrineCount: corpus.filter((item) => item.knowledgeKind === 'doctrine').length,
-      vectorReady: Boolean(aiStatus.activeFingerprint),
-      vectorModel: aiStatus.activeCapabilities?.embedding?.model || '',
-      ready: corpus.length > 0,
-    };
+  ipcMain.handle('corpus:status', () => aiRuntime.getCorpusStatus());
+  ipcMain.handle('corpus:books', (_event, payload) => corpusLibrary.listBooks(payload));
+  ipcMain.handle('corpus:book', (_event, id) => corpusLibrary.getBook(String(id || '')));
+  ipcMain.handle('corpus:book-entries', (_event, payload) => corpusLibrary.searchBookEntries(payload));
+  ipcMain.handle('corpus:select-import-files', async () => {
+    try {
+      const selected = await dialog.showOpenDialog(mainWindow, {
+        title: '导入古籍',
+        properties: ['openFile', 'multiSelections'],
+        filters: [{ name: '古籍文本', extensions: ['txt', 'md'] }],
+      });
+      if (selected.canceled) return { ok: true, canceled: true };
+      return { ok: true, batch: corpusLibrary.previewFiles(selected.filePaths) };
+    } catch (error) {
+      return corpusFailure(error, 'CORPUS_PREVIEW_FAILED');
+    }
   });
+  ipcMain.handle('corpus:preview-import-files', (_event, filePaths) => {
+    try { return { ok: true, batch: corpusLibrary.previewFiles(filePaths) }; }
+    catch (error) { return corpusFailure(error, 'CORPUS_PREVIEW_FAILED'); }
+  });
+  ipcMain.handle('corpus:commit-import', (_event, payload) => {
+    try {
+      if (payload?.sendForIndex && !aiRuntime.getStatus().activeFingerprint) {
+        throw runtimeError('AI 向量服务尚未就绪', 'AI_INDEX_REQUIRED', '可先仅保存到本地，或完成 AI 设置后再启用。');
+      }
+      const result = corpusLibrary.commitImport(payload || {});
+      const bookIds = result.results.filter((item) => item.ok && item.book.indexRequested).map((item) => item.book.id);
+      broadcastCorpusState();
+      if (bookIds.length) void aiRuntime.indexBooks(bookIds).then(broadcastCorpusState, broadcastCorpusState);
+      return { ok: true, ...result };
+    } catch (error) {
+      return corpusFailure(error, 'CORPUS_IMPORT_FAILED');
+    }
+  });
+  ipcMain.handle('corpus:set-enabled', (_event, payload) => {
+    try {
+      const book = corpusLibrary.setEnabled(String(payload?.id || ''), Boolean(payload?.enabled), { requestIndex: Boolean(payload?.requestIndex) });
+      broadcastCorpusState();
+      if (book.origin === 'user' && book.enabled && book.indexState !== 'ready') void aiRuntime.indexBooks([book.id]).then(broadcastCorpusState, broadcastCorpusState);
+      return { ok: true, book };
+    } catch (error) { return corpusFailure(error); }
+  });
+  ipcMain.handle('corpus:update-metadata', (_event, payload) => {
+    try {
+      const result = corpusLibrary.updateMetadata(String(payload?.id || ''), payload || {});
+      broadcastCorpusState();
+      if (result.requiresIndex && result.book.enabled) void aiRuntime.indexBooks([result.book.id]).then(broadcastCorpusState, broadcastCorpusState);
+      return { ok: true, ...result };
+    } catch (error) { return corpusFailure(error); }
+  });
+  ipcMain.handle('corpus:trash', (_event, id) => {
+    try { const book = corpusLibrary.moveToTrash(String(id || '')); broadcastCorpusState(); return { ok: true, book }; }
+    catch (error) { return corpusFailure(error); }
+  });
+  ipcMain.handle('corpus:restore', (_event, id) => {
+    try { const book = corpusLibrary.restore(String(id || '')); broadcastCorpusState(); return { ok: true, book }; }
+    catch (error) { return corpusFailure(error); }
+  });
+  ipcMain.handle('corpus:purge', (_event, id) => {
+    try {
+      const bookId = String(id || '');
+      corpusLibrary.purge(bookId);
+      corpusIndex.purgeBook(bookId);
+      broadcastCorpusState();
+      return { ok: true };
+    } catch (error) { return corpusFailure(error); }
+  });
+  ipcMain.handle('corpus:pause-index', () => aiRuntime.pauseLibraryBuild());
+  ipcMain.handle('corpus:resume-index', () => aiRuntime.resumeLibraryBuild());
+  ipcMain.handle('corpus:cancel-index', () => aiRuntime.cancelLibraryBuild());
   ipcMain.handle('corpus:rebuild-vectors', () => aiRuntime.buildAndActivate());
 
   ipcMain.handle('retrieval:search', async (_event, payload) => aiRuntime.search(payload));
   ipcMain.handle('ai:analyze', async (_event, payload) => {
-    const allowed = new Set(corpus.map((item) => item.id));
-    const evidence = (payload.evidence || []).filter((item) => allowed.has(item.id));
-    try { return { ok: true, report: await aiRuntime.analyze({ ...payload, evidence }) }; }
+    try {
+      const evidence = aiRuntime.filterEvidence(payload.evidence);
+      return { ok: true, report: await aiRuntime.analyze({ ...payload, evidence }) };
+    }
     catch (error) { return { ok: false, error: structuredProviderError(error, 'AI_ANALYSIS_FAILED') }; }
   });
   ipcMain.handle('ai:follow-up', async (_event, payload) => {
-    const allowed = new Set(corpus.map((item) => item.id));
-    const evidence = (payload.evidence || []).filter((item) => allowed.has(item.id));
-    try { return { ok: true, answer: await aiRuntime.followUp({ ...payload, evidence }) }; }
+    try {
+      const evidence = aiRuntime.filterEvidence(payload.evidence);
+      return { ok: true, answer: await aiRuntime.followUp({ ...payload, evidence }) };
+    }
     catch (error) { return { ok: false, error: structuredProviderError(error, 'AI_FOLLOW_UP_FAILED') }; }
   });
 }
@@ -294,17 +378,29 @@ if (startup.shouldStart) {
     store = new JsonStore(dataPath());
     corpus = loadCorpus();
     const corpusHash = hashCorpus(corpus);
+    corpusLibrary = new CorpusLibrary({
+      rootPath: path.join(app.getPath('userData'), 'corpus-library'),
+      builtInCorpus: corpus,
+      builtInManifest: loadCorpusManifest(),
+    });
+    corpusLibrary.initialize();
+    corpusIndex = new CorpusIndexCoordinator({ indexRoot: path.join(app.getPath('userData'), 'vector-indexes') });
+    for (const bookId of corpusLibrary.consumePurgedBookIds()) corpusIndex.purgeBook(bookId);
     aiRuntime = new AIRuntime({
       store,
       safeStorage,
-      corpus,
+      corpusLibrary,
+      corpusIndex,
       corpusHash,
       indexRoot: path.join(app.getPath('userData'), 'vector-indexes'),
       legacyIndexBases: [
         path.join(app.getPath('userData'), 'corpus-vectors'),
         resourcePath('corpus-vectors.f32').replace(/\.f32$/, ''),
       ],
-      onStatus: broadcastAIStatus,
+      onStatus: (status) => {
+        broadcastAIStatus(status);
+        broadcastCorpusState();
+      },
     });
     aiRuntime.initialize();
 

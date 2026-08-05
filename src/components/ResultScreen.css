@@ -1067,6 +1067,20 @@
   font: 12px/1.55 var(--ui);
 }
 
+.evidence-origin-label {
+  display: inline-flex;
+  margin-right: 7px;
+  padding: 1px 5px;
+  border: 1px solid currentColor;
+  font: 9px/1.35 var(--ui);
+  font-style: normal;
+  letter-spacing: .06em;
+  vertical-align: 1px;
+}
+
+.evidence-origin-label--builtin { color: #78623e; }
+.evidence-origin-label--user { color: var(--result-cinnabar); }
+
 .evidence-text {
   margin: 12px 0 0;
   color: #3f4038;

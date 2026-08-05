@@ -1,7 +1,7 @@
 import { Database, ExternalLink, RefreshCw, ShieldCheck, X } from 'lucide-react';
 import { useEffect, useMemo, useState } from 'react';
 import { desktop } from '../lib/desktop';
-import type { AIConfigStatus, AIProviderCatalog, UpdateState } from '../types/desktop';
+import type { AIConfigStatus, AIProviderCatalog, CorpusStatus, UpdateState } from '../types/desktop';
 import { AIAdvancedSettings } from './AIAdvancedSettings';
 import { AIStatusCard } from './AIStatusCard';
 
@@ -13,6 +13,7 @@ interface Props {
   onConfigureAI(): void;
   onCheckUpdate(): void;
   onOpenUpdate(): void;
+  onOpenCorpus(): void;
   onClose(): void;
 }
 
@@ -37,10 +38,11 @@ export function SettingsPanel({
   onConfigureAI,
   onCheckUpdate,
   onOpenUpdate,
+  onOpenCorpus,
   onClose,
 }: Props) {
   const [advancedOpen, setAdvancedOpen] = useState(false);
-  const [corpus, setCorpus] = useState({ count: 0, bookCount: 0, originalCount: 0, summaryCount: 0, ruleCount: 0, caseCount: 0, doctrineCount: 0, vectorReady: false, vectorModel: '', ready: false });
+  const [corpus, setCorpus] = useState<CorpusStatus>({ count: 0, bookCount: 0, builtInBookCount: 0, userBookCount: 0, enabledBookCount: 0, chunkCount: 0, deletedBookCount: 0, pendingIndexCount: 0, originalCount: 0, summaryCount: 0, ruleCount: 0, caseCount: 0, doctrineCount: 0, vectorReady: false, vectorModel: '', readyShardIds: [], ready: false });
   useEffect(() => { void desktop.corpus.status().then(setCorpus); }, [aiStatus.status, aiStatus.activeFingerprint]);
   const usage = useMemo(() => aiStatus.usage.reduce((total, item) => total + item.totalTokens, 0), [aiStatus.usage]);
   const activePresetIds = new Set(aiStatus.connections.filter((connection) => aiStatus.activeCapabilities && Object.values(aiStatus.activeCapabilities).some((capability) => capability.connectionId === connection.id)).map((connection) => connection.presetId));
@@ -72,6 +74,7 @@ export function SettingsPanel({
           <div className="settings-heading"><Database /><div><strong>本地结构化古籍库</strong><span>{corpus.vectorReady ? `${corpus.vectorModel} 向量索引已就绪` : '向量索引尚未完成'}</span></div></div>
           <div className="corpus-stats corpus-stats--knowledge"><span><b>{corpus.bookCount}</b>本古籍</span><span><b>{corpus.ruleCount}</b>条规则</span><span><b>{corpus.caseCount}</b>条占例</span><span><b>{corpus.doctrineCount}</b>条义理</span></div>
           {corpus.vectorReady ? <p className="corpus-ready">严格检索已启用：关键词候选 + 向量召回 + 专用模型重排。</p> : <p className="corpus-warning">AI 解读必须等待向量召回和重排均可用，不会退回关键词检索生成报告。</p>}
+          <button className="index-button" type="button" onClick={onOpenCorpus}>打开古籍书库</button>
         </section>
 
         <div className="security-note"><ShieldCheck /><p><strong>隐私边界</strong>访问密钥由 Windows DPAPI 加密，历史和向量索引留在本机。设置中可以随时查看当前问题、排盘、证据与追问分别发送给哪一家服务商。</p></div>

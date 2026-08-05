@@ -61,15 +61,16 @@ class LocalVectorIndex {
     }
   }
 
-  search(queryVector, limit = 40) {
+  search(queryVector, limit = 40, allowedIds = null) {
     if (!this.vectors || queryVector.length !== this.dimensions) return [];
     const query = normalized(queryVector);
     const scores = this.ids.map((id, row) => {
+      if (allowedIds && !allowedIds.has(id)) return null;
       let score = 0;
       const offset = row * this.dimensions;
       for (let index = 0; index < this.dimensions; index += 1) score += query[index] * this.vectors[offset + index];
       return { id, score };
-    });
+    }).filter(Boolean);
     return scores.sort((left, right) => right.score - left.score || left.id.localeCompare(right.id)).slice(0, limit);
   }
 }

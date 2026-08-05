@@ -1,6 +1,6 @@
 import corpus from '../../resources/corpus.json';
 import aiProviderCatalog from '../../config/ai-providers.json';
-import type { AIConfigStatus, AIProviderCatalog, DesktopApi } from '../types/desktop';
+import type { AIConfigStatus, AIProviderCatalog, CorpusBookSummary, CorpusStatus, DesktopApi } from '../types/desktop';
 import type { UpdateState } from '../types/desktop';
 import type { DivinationSession } from './session';
 import { searchEvidence } from './retrieval';
@@ -27,6 +27,52 @@ const browserAIStatus: AIConfigStatus = {
   draft: null,
   usage: [],
 };
+const browserCorpusBooks: CorpusBookSummary[] = [...new Set(corpus.map((entry) => entry.source))].map((title, index) => {
+  const entries = corpus.filter((entry) => entry.source === title);
+  return {
+    id: `browser-builtin-${index + 1}`,
+    origin: 'builtin',
+    title,
+    author: '',
+    edition: '',
+    fileName: '',
+    extension: '.json',
+    encoding: 'utf-8',
+    contentHash: '',
+    charCount: entries.reduce((sum, entry) => sum + entry.text.length, 0),
+    chapterCount: new Set(entries.map((entry) => entry.title)).size,
+    chunkCount: entries.length,
+    createdAt: '',
+    updatedAt: '',
+    enabled: true,
+    deletedAt: null,
+    purgeAt: null,
+    indexRequested: true,
+    indexState: 'local-only',
+    indexProgress: 0,
+    indexError: null,
+  };
+});
+const browserCorpusStatus: CorpusStatus = {
+  count: corpus.length,
+  bookCount: browserCorpusBooks.length,
+  builtInBookCount: browserCorpusBooks.length,
+  userBookCount: 0,
+  enabledBookCount: browserCorpusBooks.length,
+  chunkCount: corpus.length,
+  deletedBookCount: 0,
+  pendingIndexCount: 0,
+  originalCount: corpus.filter((entry) => entry.sourceType === 'original').length,
+  summaryCount: corpus.filter((entry) => entry.sourceType === 'summary').length,
+  ruleCount: 0,
+  caseCount: 0,
+  doctrineCount: corpus.length,
+  vectorReady: false,
+  vectorModel: '',
+  readyShardIds: [],
+  ready: true,
+};
+const desktopOnlyCorpusError = { code: 'DESKTOP_ONLY', message: '浏览器预览不支持用户古籍书库。', dataSafe: true, nextAction: '请启动 Electron 桌面应用。' };
 
 function storedBrowserSessions(): unknown[] {
   try {
@@ -93,9 +139,37 @@ const browserFallback: DesktopApi = {
     onStatus() { return () => {}; },
   },
   corpus: {
-    async list() { return corpus as import('./retrieval').EvidenceEntry[]; },
-    async status() { return { count: corpus.length, bookCount: new Set(corpus.map((entry) => entry.source)).size, originalCount: corpus.filter((entry) => entry.sourceType === 'original').length, summaryCount: corpus.filter((entry) => entry.sourceType === 'summary').length, ruleCount: 0, caseCount: 0, doctrineCount: corpus.length, vectorReady: false, vectorModel: '', ready: true }; },
+    async status() { return structuredClone(browserCorpusStatus); },
+    async books(payload = {}) {
+      const query = String(payload.query || '').toLowerCase();
+      const items = browserCorpusBooks.filter((book) => !query || book.title.toLowerCase().includes(query));
+      return { items: structuredClone(items), total: items.length };
+    },
+    async book(id) {
+      const book = browserCorpusBooks.find((item) => item.id === id);
+      if (!book) return null;
+      const entries = corpus.filter((entry) => entry.source === book.title);
+      return { ...structuredClone(book), samples: { first: entries[0]?.text.slice(0, 500) || '', last: entries.at(-1)?.text.slice(-500) || '' } };
+    },
+    async bookEntries(payload) {
+      const book = browserCorpusBooks.find((item) => item.id === payload.bookId);
+      const query = String(payload.query || '').toLowerCase();
+      const entries = book ? corpus.filter((entry) => entry.source === book.title && (!query || `${entry.title}${entry.text}`.toLowerCase().includes(query))) : [];
+      return { items: entries.slice(0, payload.limit || 30).map((entry) => ({ id: entry.id, title: entry.title, location: entry.location, text: entry.text, tags: entry.tags, knowledgeKind: 'doctrine' as const })), total: entries.length };
+    },
+    async selectImportFiles() { return { ok: false, error: desktopOnlyCorpusError }; },
+    async previewDroppedFiles() { return { ok: false, error: desktopOnlyCorpusError }; },
+    async commitImport() { return { ok: false, error: desktopOnlyCorpusError }; },
+    async setEnabled() { return { ok: false, error: desktopOnlyCorpusError }; },
+    async updateMetadata() { return { ok: false, error: desktopOnlyCorpusError }; },
+    async trash() { return { ok: false, error: desktopOnlyCorpusError }; },
+    async restore() { return { ok: false, error: desktopOnlyCorpusError }; },
+    async purge() { return { ok: false, error: desktopOnlyCorpusError }; },
+    async pauseIndex() { return structuredClone(browserCorpusStatus); },
+    async resumeIndex() { return structuredClone(browserCorpusStatus); },
+    async cancelIndex() { return structuredClone(browserCorpusStatus); },
     async rebuildVectors() { return { ok: false, error: { code: 'DESKTOP_ONLY', message: '请在桌面应用中构建向量索引。', dataSafe: true, nextAction: '启动 Electron 桌面窗口。' } }; },
+    onState() { return () => {}; },
   },
   retrieval: {
     async search(payload) {

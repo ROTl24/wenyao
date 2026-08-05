@@ -1,6 +1,7 @@
 const assert = require('node:assert/strict');
 const test = require('node:test');
 const {
+  embeddingFingerprint,
   expandPreset,
   getProviderCatalog,
   migrateLegacySettings,
@@ -63,4 +64,20 @@ test('vector fingerprint changes for provider, endpoint, model, dimensions or co
     assert.notEqual(pipelineFingerprint({ connection: changed, corpusHash: 'corpus-a' }), baseline);
   }
   assert.notEqual(pipelineFingerprint({ connection, corpusHash: 'corpus-b' }), baseline);
+});
+
+test('embedding fingerprint is stable across corpus shards', () => {
+  const connection = {
+    providerId: 'custom',
+    baseUrl: 'https://api.example.com/v1',
+    capabilities: { embedding: { protocol: 'openai-embeddings', model: 'embed-a', dimensions: 1024 } },
+  };
+  assert.equal(
+    embeddingFingerprint({ connection, corpusHash: 'ignored-a' }),
+    embeddingFingerprint({ connection, corpusHash: 'ignored-b' }),
+  );
+  assert.notEqual(
+    embeddingFingerprint({ connection }),
+    embeddingFingerprint({ connection: { ...connection, baseUrl: 'https://api.other.com/v1' } }),
+  );
 });

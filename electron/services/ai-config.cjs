@@ -282,12 +282,26 @@ function pipelineFingerprint({ connection, capability = 'embedding', corpusHash 
   return crypto.createHash('sha256').update(identity).digest('hex');
 }
 
+function embeddingFingerprint({ connection, capability = 'embedding' }) {
+  const definition = connection?.capabilities?.[capability];
+  if (!connection || !definition) throw new Error(`缺少 ${capability} 能力配置`);
+  const identity = JSON.stringify({
+    providerId: connection.providerId,
+    baseUrl: connection.baseUrl,
+    protocol: definition.protocol,
+    model: definition.model,
+    dimensions: definition.dimensions || null,
+  });
+  return crypto.createHash('sha256').update(identity).digest('hex');
+}
+
 module.exports = {
   AI_SCHEMA_VERSION,
   CAPABILITIES,
   LEGACY_AI_FIELDS,
   assertCatalog,
   emptyAIState,
+  embeddingFingerprint,
   expandPreset,
   getPreset,
   getProviderCatalog,

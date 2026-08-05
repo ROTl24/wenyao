@@ -4,6 +4,7 @@ const path = require('node:path');
 const { analyzeCloud, followUpCloud } = require('./ai.cjs');
 const {
   CAPABILITIES,
+  embeddingFingerprint,
   expandPreset,
   getProviderCatalog,
   normalizeConnection,
@@ -17,7 +18,7 @@ const {
   withTransientRetry,
 } = require('./ai-provider.cjs');
 const { hybridSearch } = require('./retrieval.cjs');
-const { LocalVectorIndex, ResumableVectorBuilder } = require('./vector-index.cjs');
+const { CorpusIndexCoordinator } = require('./corpus-index.cjs');
 
 function runtimeError(message, code, nextAction) {
   const error = new Error(message);
@@ -35,12 +36,37 @@ function uniqueConnections(resolved) {
   return [...new Map(Object.values(resolved).map((item) => [item.connection.id, item.connection])).values()];
 }
 
+function staticCorpusLibrary(corpus, corpusHash) {
+  const entries = Array.isArray(corpus) ? corpus : [];
+  const shard = {
+    id: 'builtin',
+    origin: 'builtin',
+    title: '内置古籍',
+    contentHash: corpusHash,
+    entries,
+    enabledEntryIds: new Set(entries.map((entry) => entry.id)),
+  };
+  return {
+    getOverview: () => ({ chunkCount: entries.length }),
+    getShardDescriptors: () => [shard],
+    lexicalSearch: ({ query, domainTerms, limit }) => require('./retrieval.cjs').lexicalSearch(entries, query, domainTerms, limit),
+    hydrateEntries: (ids) => {
+      const wanted = new Set(ids);
+      return entries.filter((entry) => wanted.has(entry.id));
+    },
+    listBooks: () => ({ items: [], total: 0 }),
+    markIndexState: () => null,
+  };
+}
+
 class AIRuntime {
   constructor({
     store,
     safeStorage,
-    corpus,
-    corpusHash,
+    corpus = [],
+    corpusHash = '',
+    corpusLibrary = null,
+    corpusIndex = null,
     indexRoot,
     legacyIndexBases = [],
     fetchImpl = fetch,
@@ -48,16 +74,19 @@ class AIRuntime {
   }) {
     this.store = store;
     this.safeStorage = safeStorage;
-    this.corpus = corpus;
+    this.corpusLibrary = corpusLibrary || staticCorpusLibrary(corpus, corpusHash);
     this.corpusHash = corpusHash;
     this.indexRoot = indexRoot;
+    this.corpusIndex = corpusIndex || new CorpusIndexCoordinator({ indexRoot });
     this.legacyIndexBases = legacyIndexBases;
     this.fetchImpl = fetchImpl;
     this.onStatus = onStatus;
-    this.activeIndex = null;
     this.activeFingerprint = '';
     this.vectorBuildPromise = null;
     this.vectorBuildControl = null;
+    this.libraryBuildPromise = null;
+    this.libraryBuildControl = null;
+    this.libraryBuildQueue = new Set();
   }
 
   initialize() {
@@ -73,11 +102,23 @@ class AIRuntime {
       this.store.saveAIState(state);
     }
     this.#loadActiveIndex();
+    for (const book of this.#allLibraryBooks()) {
+      if (book.origin === 'user' && book.indexState === 'building') this.corpusLibrary.markIndexState(book.id, 'paused', { progress: book.indexProgress });
+    }
     return this.getStatus();
   }
 
   getCatalog() {
     return getProviderCatalog();
+  }
+
+  #allLibraryBooks() {
+    const books = [];
+    for (let offset = 0; ; offset += 100) {
+      const page = this.corpusLibrary.listBooks({ offset, limit: 100 });
+      books.push(...(page?.items || []));
+      if (books.length >= Number(page?.total || 0) || !(page?.items || []).length) return books;
+    }
   }
 
   #emit() {
@@ -150,72 +191,36 @@ class AIRuntime {
     });
   }
 
-  #indexBase(fingerprint) {
-    return path.join(this.indexRoot, fingerprint, 'corpus-vectors');
+  #embeddingIdentity(embedding) {
+    return {
+      fingerprint: embeddingFingerprint({ connection: embedding.connection, capability: 'embedding' }),
+      providerId: embedding.connection.providerId,
+      baseUrl: embedding.connection.baseUrl,
+      model: embedding.definition.model,
+      dimensions: embedding.definition.dimensions,
+      batchSize: embedding.definition.batchSize,
+    };
   }
 
   #loadActiveIndex() {
-    this.activeIndex = null;
     this.activeFingerprint = '';
     const state = this.store.getRawAIState();
     let resolved;
     try { resolved = this.#resolvePipeline(state, state.activePipeline); }
     catch { return; }
     const embedding = resolved.embedding;
-    const fingerprint = pipelineFingerprint({
-      connection: embedding.connection,
-      capability: 'embedding',
-      corpusHash: this.corpusHash,
-    });
-    const targetBase = this.#indexBase(fingerprint);
-    const index = new LocalVectorIndex(targetBase);
-    if (index.load({
-      model: embedding.definition.model,
-      corpusHash: this.corpusHash,
-      fingerprint,
-    })) {
-      this.activeIndex = index;
-      this.activeFingerprint = fingerprint;
-      return;
+    const identity = this.#embeddingIdentity(embedding);
+    const shards = this.corpusLibrary.getShardDescriptors({ enabledOnly: true, indexRequestedOnly: true });
+    const builtIn = shards.find((shard) => shard.id === 'builtin');
+    if (builtIn && !this.corpusIndex.hasShard(identity, builtIn)) {
+      const legacyFingerprint = pipelineFingerprint({ connection: embedding.connection, capability: 'embedding', corpusHash: builtIn.contentHash });
+      this.corpusIndex.migrateLegacyBuiltIn({
+        identity,
+        shard: builtIn,
+        legacyBases: [path.join(this.indexRoot, legacyFingerprint, 'corpus-vectors'), ...this.legacyIndexBases],
+      });
     }
-    const migrated = this.#migrateLegacyIndex(embedding, fingerprint, targetBase);
-    if (migrated) {
-      this.activeIndex = migrated;
-      this.activeFingerprint = fingerprint;
-    }
-  }
-
-  #migrateLegacyIndex(embedding, fingerprint, targetBase) {
-    if (embedding.connection.providerId !== 'alibaba') return null;
-    for (const legacyBase of this.legacyIndexBases) {
-      const legacy = new LocalVectorIndex(legacyBase);
-      if (!legacy.load({ model: embedding.definition.model, corpusHash: this.corpusHash })) continue;
-      if (legacy.dimensions !== embedding.definition.dimensions) continue;
-      fs.mkdirSync(path.dirname(targetBase), { recursive: true });
-      const dataTemp = `${targetBase}.f32.tmp`;
-      const metaTemp = `${targetBase}.json.tmp`;
-      fs.copyFileSync(legacy.dataPath, dataTemp);
-      fs.writeFileSync(metaTemp, JSON.stringify({
-        version: 2,
-        fingerprint,
-        providerId: embedding.connection.providerId,
-        baseUrl: embedding.connection.baseUrl,
-        model: embedding.definition.model,
-        corpusHash: this.corpusHash,
-        dimensions: legacy.dimensions,
-        ids: legacy.ids,
-        completedAt: new Date().toISOString(),
-        migratedFromLegacy: true,
-      }, null, 2));
-      for (const target of [`${targetBase}.f32`, `${targetBase}.json`]) {
-        try { fs.unlinkSync(target); } catch (error) { if (error.code !== 'ENOENT') throw error; }
-      }
-      fs.renameSync(dataTemp, `${targetBase}.f32`);
-      fs.renameSync(metaTemp, `${targetBase}.json`);
-      const migrated = new LocalVectorIndex(targetBase);
-      if (migrated.load({ model: embedding.definition.model, corpusHash: this.corpusHash, fingerprint })) return migrated;
-    }
-    return null;
+    if (this.corpusIndex.readyShards(identity, shards).length > 0) this.activeFingerprint = identity.fingerprint;
   }
 
   getStatus() {
@@ -235,7 +240,12 @@ class AIRuntime {
       if (!raw.consentAcceptedAt) {
         status = 'needs-consent';
         message = '需要确认 AI 数据发送范围';
-      } else if (!this.activeIndex) {
+      } else if (!this.activeFingerprint
+        || this.#embeddingIdentity(resolved.embedding).fingerprint !== this.activeFingerprint
+        || this.corpusIndex.readyShards(
+          this.#embeddingIdentity(resolved.embedding),
+          this.corpusLibrary.getShardDescriptors({ enabledOnly: true, indexRequestedOnly: true }),
+        ).length === 0) {
         status = 'index-required';
         message = '需要构建向量索引';
       } else {
@@ -270,7 +280,7 @@ class AIRuntime {
       message,
       activeCapabilities,
       activeFingerprint: this.activeFingerprint,
-      corpusCount: this.corpus.length,
+      corpusCount: Number(this.corpusLibrary.getOverview()?.chunkCount || 0),
       consentAcceptedAt: state.consentAcceptedAt,
       connections: state.connections,
       activePipeline: state.activePipeline,
@@ -425,56 +435,45 @@ class AIRuntime {
   async #buildAndActivate(initial, control) {
     const resolved = this.#resolvePipeline(initial, initial.draft.pipeline, initial.draft.connection);
     const embedding = resolved.embedding;
-    const fingerprint = pipelineFingerprint({ connection: embedding.connection, capability: 'embedding', corpusHash: this.corpusHash });
-    const basePath = this.#indexBase(fingerprint);
-    const existingIndex = new LocalVectorIndex(basePath);
-    if (existingIndex.load({ model: embedding.definition.model, corpusHash: this.corpusHash, fingerprint })) {
-      this.#activateDraft(initial, existingIndex, fingerprint);
-      return { ok: true, status: this.getStatus() };
-    }
-    const builder = new ResumableVectorBuilder(basePath, {
-      fingerprint,
-      providerId: embedding.connection.providerId,
-      baseUrl: embedding.connection.baseUrl,
-      model: embedding.definition.model,
-      corpusHash: this.corpusHash,
-      dimensions: embedding.definition.dimensions,
-      ids: this.corpus.map((entry) => entry.id),
-    });
+    const identity = this.#embeddingIdentity(embedding);
+    const shards = this.corpusLibrary.getShardDescriptors({ enabledOnly: true, indexRequestedOnly: true });
+    if (!shards.length) throw runtimeError('没有已启用的古籍可建立索引', 'CORPUS_EMPTY', '请先启用至少一本古籍。');
     const client = this.#client(embedding.connection, embedding.apiKey);
-    const batchSize = Math.min(32, Math.max(1, Number(embedding.definition.batchSize) || 10));
-    this.#updateDraftTask({ stage: 'building', fingerprint, ...builder.status(), error: null });
+    this.#updateDraftTask({ stage: 'building', fingerprint: identity.fingerprint, completed: 0, total: shards.reduce((sum, shard) => sum + shard.entries.length, 0), progress: 0, error: null });
     try {
-      while (builder.completed < this.corpus.length) {
-        if (control.cancelled) {
-          this.#updateDraftTask({ stage: 'paused', ...builder.status() });
-          return { ok: false, error: structuredProviderError(runtimeError('向量构建已暂停', 'AI_INDEX_PAUSED', '可稍后从当前进度继续。')) };
-        }
-        if (control.paused) this.#updateDraftTask({ stage: 'paused', ...builder.status() });
-        while (control.paused) {
-          await new Promise((resolve) => setTimeout(resolve, 250));
-          if (control.cancelled) break;
-        }
-        if (control.cancelled) continue;
-        const batch = this.corpus.slice(builder.completed, builder.completed + batchSize)
-          .map((entry) => `${entry.title}\n${entry.text}`);
-        const vectors = await withTransientRetry(
+      const result = await this.corpusIndex.buildShards({
+        identity,
+        shards,
+        control,
+        embed: (batch) => withTransientRetry(
           () => client.embed(batch, { signal: AbortSignal.timeout(60000) }),
           { retries: 2 },
-        );
-        builder.append(vectors);
-        this.#updateDraftTask({ stage: 'building', fingerprint, ...builder.status(), error: null });
+        ),
+        onProgress: (progress) => this.#updateDraftTask({
+          stage: progress.paused ? 'paused' : 'building',
+          fingerprint: identity.fingerprint,
+          completed: progress.completed,
+          total: progress.total,
+          progress: Math.round(progress.progress * 10) / 10,
+          error: null,
+        }),
+      });
+      if (!result.ok) {
+        this.#updateDraftTask({ stage: 'paused', completed: result.completed, total: result.total, progress: result.total ? result.completed / result.total * 100 : 0 });
+        return { ok: false, error: structuredProviderError(runtimeError('向量构建已暂停', 'AI_INDEX_PAUSED', '可稍后从当前进度继续。')) };
       }
-      const index = builder.finalize();
-      this.#activateDraft(this.store.getRawAIState(), index, fingerprint);
+      for (const shard of shards) {
+        if (shard.origin === 'user') this.corpusLibrary.markIndexState(shard.id, 'ready', { progress: 100 });
+      }
+      this.#activateDraft(this.store.getRawAIState(), identity.fingerprint);
       return { ok: true, status: this.getStatus() };
     } catch (error) {
-      this.#updateDraftTask({ stage: 'error', fingerprint, ...builder.status(), error: structuredProviderError(error, 'VECTOR_INDEX_FAILED') });
+      this.#updateDraftTask({ stage: 'error', fingerprint: identity.fingerprint, error: structuredProviderError(error, 'VECTOR_INDEX_FAILED') });
       return { ok: false, error: structuredProviderError(error, 'VECTOR_INDEX_FAILED'), status: this.getStatus() };
     }
   }
 
-  #activateDraft(state, index, fingerprint) {
+  #activateDraft(state, fingerprint) {
     if (!state.draft) throw new Error('AI 配置草稿已不存在');
     const draftConnection = state.draft.connection;
     state.connections = [
@@ -484,7 +483,6 @@ class AIRuntime {
     state.activePipeline = state.draft.pipeline;
     state.draft = null;
     this.store.saveAIState(state);
-    this.activeIndex = index;
     this.activeFingerprint = fingerprint;
     this.#emit();
   }
@@ -513,6 +511,152 @@ class AIRuntime {
     return this.getStatus();
   }
 
+  async indexBooks(bookIds) {
+    if (this.vectorBuildPromise) throw runtimeError('正在切换 AI 向量方案', 'AI_INDEX_BUSY', '请等待当前完整索引任务结束。');
+    for (const id of Array.isArray(bookIds) ? bookIds : []) this.libraryBuildQueue.add(String(id));
+    if (this.libraryBuildPromise) {
+      return this.libraryBuildPromise;
+    }
+    const { state } = this.#activeRuntime();
+    if (!state.consentAcceptedAt) throw runtimeError('尚未确认 AI 数据发送范围', 'AI_CONSENT_REQUIRED', '请先确认后再建立用户古籍索引。');
+    if (!this.libraryBuildQueue.size) {
+      for (const book of this.#allLibraryBooks()) {
+        if (book.origin === 'user' && book.enabled && ['pending', 'paused', 'error'].includes(book.indexState)) this.libraryBuildQueue.add(book.id);
+      }
+    }
+    if (!this.libraryBuildQueue.size) return { ok: true, indexedBookIds: [], status: this.getStatus() };
+    const control = { paused: false, cancelled: false };
+    this.libraryBuildControl = control;
+    const operation = this.#drainLibraryQueue(control)
+      .finally(() => {
+        if (this.libraryBuildPromise === operation) this.libraryBuildPromise = null;
+        if (this.libraryBuildControl === control) this.libraryBuildControl = null;
+        this.#emit();
+      });
+    this.libraryBuildPromise = operation;
+    this.#emit();
+    return operation;
+  }
+
+  async #drainLibraryQueue(control) {
+    const indexedBookIds = [];
+    while (this.libraryBuildQueue.size && !control.cancelled) {
+      const wanted = new Set(this.libraryBuildQueue);
+      this.libraryBuildQueue.clear();
+      const { resolved } = this.#activeRuntime();
+      const shards = this.corpusLibrary.getShardDescriptors({ enabledOnly: true, indexRequestedOnly: true })
+        .filter((shard) => shard.origin === 'user' && wanted.has(shard.id));
+      if (!shards.length) continue;
+      for (const shard of shards) this.corpusLibrary.markIndexState(shard.id, 'building', { progress: 0 });
+      const result = await this.#buildLibraryShards({ resolved, shards, control });
+      indexedBookIds.push(...(result.indexedBookIds || []));
+      if (!result.ok) return { ...result, indexedBookIds, status: this.getStatus() };
+    }
+    return { ok: !control.cancelled, paused: control.cancelled, indexedBookIds, status: this.getStatus() };
+  }
+
+  async #buildLibraryShards({ resolved, shards, control }) {
+    const embedding = resolved.embedding;
+    const identity = this.#embeddingIdentity(embedding);
+    if (identity.fingerprint !== this.activeFingerprint) {
+      throw runtimeError('当前向量方案已变化', 'AI_INDEX_STALE', '请刷新书库状态后重新建立索引。');
+    }
+    const client = this.#client(embedding.connection, embedding.apiKey);
+    let currentShardId = shards[0]?.id || '';
+    try {
+      const result = await this.corpusIndex.buildShards({
+        identity,
+        shards,
+        control,
+        embed: (batch) => withTransientRetry(
+          () => client.embed(batch, { signal: AbortSignal.timeout(60000) }),
+          { retries: 2 },
+        ),
+        onProgress: (progress) => {
+          currentShardId = progress.shardId;
+          this.corpusLibrary.markIndexState(
+            progress.shardId,
+            progress.paused ? 'paused' : 'building',
+            { progress: progress.shardProgress },
+          );
+          this.#emit();
+        },
+      });
+      if (!result.ok) {
+        for (const shard of shards) {
+          const book = this.corpusLibrary.getBook(shard.id);
+          if (book?.indexState === 'building') this.corpusLibrary.markIndexState(shard.id, 'paused', { progress: book.indexProgress });
+        }
+        return { ok: false, paused: true, indexedBookIds: [], status: this.getStatus() };
+      }
+      for (const shard of shards) this.corpusLibrary.markIndexState(shard.id, 'ready', { progress: 100 });
+      return { ok: true, indexedBookIds: shards.map((shard) => shard.id), status: this.getStatus() };
+    } catch (error) {
+      const indexedBookIds = [];
+      const structuredError = structuredProviderError(error, 'VECTOR_INDEX_FAILED');
+      for (const shard of shards) {
+        if (this.corpusIndex.hasShard(identity, shard)) {
+          this.corpusLibrary.markIndexState(shard.id, 'ready', { progress: 100 });
+          indexedBookIds.push(shard.id);
+        } else if (shard.id === currentShardId) {
+          this.corpusLibrary.markIndexState(shard.id, 'error', { progress: this.corpusLibrary.getBook(shard.id)?.indexProgress || 0, error: structuredError });
+        } else if (this.corpusLibrary.getBook(shard.id)?.indexState === 'building') {
+          this.corpusLibrary.markIndexState(shard.id, 'pending', { progress: 0 });
+        }
+      }
+      return { ok: false, indexedBookIds, error: structuredError, status: this.getStatus() };
+    }
+  }
+
+  pauseLibraryBuild() {
+    if (this.libraryBuildControl) this.libraryBuildControl.paused = true;
+    return this.getCorpusStatus();
+  }
+
+  resumeLibraryBuild() {
+    if (this.libraryBuildControl) {
+      this.libraryBuildControl.paused = false;
+      return this.getCorpusStatus();
+    }
+    const ids = this.#allLibraryBooks()
+      .filter((book) => book.origin === 'user' && book.enabled && ['pending', 'paused', 'error'].includes(book.indexState))
+      .map((book) => book.id);
+    if (ids.length) void this.indexBooks(ids);
+    return this.getCorpusStatus();
+  }
+
+  cancelLibraryBuild() {
+    if (this.libraryBuildControl) this.libraryBuildControl.cancelled = true;
+    return this.getCorpusStatus();
+  }
+
+  getCorpusStatus() {
+    const overview = this.corpusLibrary.getOverview();
+    const shards = this.corpusLibrary.getShardDescriptors({ enabledOnly: false, indexRequestedOnly: false });
+    const entries = shards.flatMap((shard) => shard.entries);
+    let readyShardIds = [];
+    let vectorModel = '';
+    try {
+      const { resolved } = this.#activeRuntime();
+      const identity = this.#embeddingIdentity(resolved.embedding);
+      readyShardIds = this.corpusIndex.readyShards(identity, shards).map((shard) => shard.id);
+      vectorModel = identity.model;
+    } catch {}
+    return {
+      ...overview,
+      count: entries.length,
+      originalCount: entries.filter((entry) => entry.sourceType === 'original').length,
+      summaryCount: entries.filter((entry) => entry.sourceType === 'summary').length,
+      ruleCount: entries.filter((entry) => entry.knowledgeKind === 'rule').length,
+      caseCount: entries.filter((entry) => entry.knowledgeKind === 'case').length,
+      doctrineCount: entries.filter((entry) => entry.knowledgeKind === 'doctrine').length,
+      vectorReady: Boolean(this.activeFingerprint),
+      vectorModel,
+      readyShardIds,
+      ready: entries.length > 0,
+    };
+  }
+
   removeConnection(id) {
     const state = this.store.getRawAIState();
     if (CAPABILITIES.some((capability) => state.activePipeline?.[capability]?.connectionId === id)) {
@@ -529,16 +673,22 @@ class AIRuntime {
     const state = this.store.getRawAIState();
     const resolved = this.#resolvePipeline(state, state.activePipeline);
     if (!state.consentAcceptedAt) throw runtimeError('尚未确认 AI 数据发送范围', 'AI_CONSENT_REQUIRED', '请在设置中确认后继续。');
-    if (!this.activeIndex) throw runtimeError('向量索引尚未就绪', 'AI_INDEX_REQUIRED', '请先完成向量索引构建。');
-    return { state, resolved };
+    if (!this.activeFingerprint) throw runtimeError('向量索引尚未就绪', 'AI_INDEX_REQUIRED', '请先完成向量索引构建。');
+    const identity = this.#embeddingIdentity(resolved.embedding);
+    if (identity.fingerprint !== this.activeFingerprint) throw runtimeError('当前向量索引与 AI 配置不一致', 'AI_INDEX_REQUIRED', '请重新建立向量索引。');
+    const requestedShards = this.corpusLibrary.getShardDescriptors({ enabledOnly: true, indexRequestedOnly: true });
+    const shards = this.corpusIndex.readyShards(identity, requestedShards);
+    if (!shards.length) throw runtimeError('没有可用的严格检索分片', 'AI_INDEX_REQUIRED', '请至少完成一本已启用古籍的向量索引。');
+    return { state, resolved, identity, shards };
   }
 
   async search(payload) {
-    const { resolved } = this.#activeRuntime();
+    const { resolved, identity, shards } = this.#activeRuntime();
     const embeddingClient = this.#client(resolved.embedding.connection, resolved.embedding.apiKey);
     const rerankClient = this.#client(resolved.rerank.connection, resolved.rerank.apiKey);
     const result = await hybridSearch({
-      corpus: this.corpus,
+      lexicalSearch: (query, domainTerms, limit) => this.corpusLibrary.lexicalSearch({ shards, query, domainTerms, limit }),
+      hydrate: (ids) => this.corpusLibrary.hydrateEntries(ids, shards),
       query: String(payload.query || ''),
       domainTerms: Array.isArray(payload.domainTerms) ? payload.domainTerms : [],
       limit: Math.min(12, Math.max(1, Number(payload.limit) || 8)),
@@ -547,7 +697,7 @@ class AIRuntime {
           () => embeddingClient.embed([query], { signal: AbortSignal.timeout(30000) }),
           { retries: 2 },
         );
-        return this.activeIndex.search(vector, 40);
+        return this.corpusIndex.search(identity, shards, vector, 40);
       },
       rerank: (query, documents) => withTransientRetry(
         () => rerankClient.rerank(query, documents, { topN: 12, signal: AbortSignal.timeout(60000) }),
@@ -563,6 +713,12 @@ class AIRuntime {
       );
     }
     return result;
+  }
+
+  filterEvidence(items) {
+    const { shards } = this.#activeRuntime();
+    const allowed = new Set(shards.flatMap((shard) => [...shard.enabledEntryIds]));
+    return (Array.isArray(items) ? items : []).filter((item) => allowed.has(item?.id));
   }
 
   async analyze(payload) {

@@ -1,6 +1,7 @@
-import { CalendarDays, History, Settings2 } from 'lucide-react';
+import { BookOpen, CalendarDays, History, Settings2 } from 'lucide-react';
 import { useEffect, useMemo, useRef, useState } from 'react';
 import { CalendarScreen } from './components/CalendarScreen';
+import { CorpusLibraryPanel } from './components/CorpusLibraryPanel';
 import { HistoryPanel } from './components/HistoryPanel';
 import { HomeScreen } from './components/HomeScreen';
 import { PhysicalCastingScreen } from './components/PhysicalCastingScreen';
@@ -122,6 +123,7 @@ export function App() {
   const [evidence, setEvidence] = useState<EvidenceEntry[]>([]);
   const [retrievalDiagnostics, setRetrievalDiagnostics] = useState<RetrievalDiagnostics | null>(null);
   const [historyOpen, setHistoryOpen] = useState(false);
+  const [libraryOpen, setLibraryOpen] = useState(false);
   const [settingsOpen, setSettingsOpen] = useState(false);
   const [calendarOpen, setCalendarOpen] = useState(false);
   const [calendarSelection, setCalendarSelection] = useState<AlmanacSelection>(() => currentAlmanacSelection());
@@ -678,6 +680,7 @@ export function App() {
 
   const openCalendar = () => {
     setHistoryOpen(false);
+    setLibraryOpen(false);
     setSettingsOpen(false);
     setCalendarOpen(true);
   };
@@ -688,8 +691,9 @@ export function App() {
         <div className="chrome-brand"><span>爻</span><strong>{appTitle}</strong></div>
         <nav>
           <button type="button" aria-label="日历" aria-current={calendarOpen ? 'page' : undefined} disabled={physicalFinalizing} onClick={openCalendar}><CalendarDays size={17} /><span>日历</span></button>
-          <button type="button" aria-label="历史记录" disabled={physicalFinalizing} onClick={() => setHistoryOpen(true)}><History size={17} /><span>历史</span></button>
-          <button type="button" aria-label="应用设置" disabled={physicalFinalizing} onClick={() => setSettingsOpen(true)}><Settings2 size={17} /><span>设置</span></button>
+          <button type="button" aria-label="古籍书库" disabled={physicalFinalizing} onClick={() => { setHistoryOpen(false); setSettingsOpen(false); setLibraryOpen(true); }}><BookOpen size={17} /><span>古籍</span></button>
+          <button type="button" aria-label="历史记录" disabled={physicalFinalizing} onClick={() => { setLibraryOpen(false); setSettingsOpen(false); setHistoryOpen(true); }}><History size={17} /><span>历史</span></button>
+          <button type="button" aria-label="应用设置" disabled={physicalFinalizing} onClick={() => { setLibraryOpen(false); setHistoryOpen(false); setSettingsOpen(true); }}><Settings2 size={17} /><span>设置</span></button>
         </nav>
       </header>
       {calendarOpen ? (
@@ -739,6 +743,7 @@ export function App() {
         </>
       )}
       {historyOpen && <HistoryPanel sessions={history} onClose={() => setHistoryOpen(false)} onOpen={(saved) => void openSession(saved)} onDelete={(id) => void deleteSession(id)} />}
+      {libraryOpen && <CorpusLibraryPanel aiStatus={aiStatus} onClose={() => setLibraryOpen(false)} />}
       {settingsOpen && (
         <SettingsPanel
           updateState={updateState}
@@ -748,6 +753,7 @@ export function App() {
           onConfigureAI={() => { setAISetupIntent('settings'); setAISetupOpen(true); }}
           onCheckUpdate={() => void checkForUpdate()}
           onOpenUpdate={openUpdatePrompt}
+          onOpenCorpus={() => { setSettingsOpen(false); setLibraryOpen(true); }}
           onClose={() => setSettingsOpen(false)}
         />
       )}
