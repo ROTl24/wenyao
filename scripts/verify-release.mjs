@@ -68,11 +68,19 @@ for (const expectedLine of ['provider: github', 'owner: ROTl24', 'repo: wenyao']
     throw new Error(`app-update.yml 缺少 ${expectedLine}`);
   }
 }
-if (!packageJson.scripts?.build?.includes('scripts/build-windows-installer.mjs')) {
+const buildCommand = packageJson.scripts?.build || '';
+const releaseCommand = packageJson.scripts?.['release:windows'] || '';
+if (!buildCommand.includes('scripts/build-windows-installer.mjs')) {
   throw new Error('默认构建未接入问爻安装器构建脚本');
 }
-if (!packageJson.scripts?.['release:windows']?.includes('scripts/build-windows-installer.mjs')) {
+if (!/(?:^|\s)--publish(?:=|\s+)never(?:\s|$)/.test(buildCommand)) {
+  throw new Error('默认构建必须显式禁用发布，避免标签构建触发 electron-builder 隐式上传');
+}
+if (!releaseCommand.includes('scripts/build-windows-installer.mjs')) {
   throw new Error('Windows 发布构建未接入问爻安装器构建脚本');
+}
+if (!/(?:^|\s)--publish(?:=|\s+)always(?:\s|$)/.test(releaseCommand)) {
+  throw new Error('Windows 发布构建必须显式启用发布');
 }
 if (packageJson.build?.electronDist != null) {
   throw new Error('标准 Electron 构建不应配置自定义 electronDist；应由 electron-builder 获取匹配版本');

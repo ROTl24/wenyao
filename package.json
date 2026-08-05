@@ -21,7 +21,7 @@
     "verify:analysis": "node scripts/verify-analysis.cjs",
     "typecheck": "tsc -b",
     "build:renderer": "tsc -b && vite build",
-    "build": "npm run build:renderer && node scripts/build-windows-installer.mjs",
+    "build": "npm run build:renderer && node scripts/build-windows-installer.mjs --publish never",
     "release:windows": "npm run build:renderer && node scripts/build-windows-installer.mjs --publish always",
     "verify:release": "node scripts/verify-release.mjs",
     "start": "electron ."
