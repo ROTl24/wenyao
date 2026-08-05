@@ -184,6 +184,12 @@ test('preload independently sanitizes session save payloads', async () => {
     }],
   }]);
 
+  assert.equal(await exposed.externalLinks.open('repository'), true);
+  assert.deepEqual(calls.at(-1), {
+    channel: 'external-links:open',
+    args: ['repository'],
+  });
+
   const updateStates = [];
   const currentUpdateState = await exposed.updates.getState();
   assert.deepEqual(currentUpdateState, {

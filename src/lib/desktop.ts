@@ -1,5 +1,6 @@
 import corpus from '../../resources/corpus.json';
 import aiProviderCatalog from '../../config/ai-providers.json';
+import publicLinks from '../../config/public-links.json';
 import type { AIConfigStatus, AIProviderCatalog, CorpusBookSummary, CorpusStatus, DesktopApi } from '../types/desktop';
 import type { UpdateState } from '../types/desktop';
 import type { DivinationSession } from './session';
@@ -94,6 +95,17 @@ function storedSessionId(value: unknown): unknown {
 }
 
 const browserFallback: DesktopApi = {
+  externalLinks: {
+    async open(id) {
+      const url = publicLinks[id]?.url;
+      if (!url) return false;
+      try {
+        return window.open(url, '_blank', 'noopener,noreferrer') !== null;
+      } catch {
+        return false;
+      }
+    },
+  },
   updates: {
     async getState() { return structuredClone(browserUpdateState); },
     async check() { return structuredClone(browserUpdateState); },

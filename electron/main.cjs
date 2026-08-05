@@ -14,6 +14,7 @@ const { prepareApplicationStartup } = require('./services/app-startup.cjs');
 const { JsonStore } = require('./services/store.cjs');
 const { createUpdateManager } = require('./services/update-manager.cjs');
 const { sanitizeUpdateState } = require('./services/update-state.cjs');
+const { allowedExternalUrl, openPublicLink } = require('./services/external-links.cjs');
 
 const oneTimeSiliconFlowKey = process.argv.includes('--configure-api-keys-env')
   ? String(process.env.WENYAO_SILICONFLOW_KEY || '')
@@ -137,7 +138,7 @@ function createWindow() {
   });
   mainWindow.setMenuBarVisibility(false);
   mainWindow.webContents.setWindowOpenHandler(({ url }) => {
-    if (allowedExternalUrl(url)) void shell.openExternal(url).catch((error) => console.error('无法打开外部链接', error));
+    if (allowedExternalUrl(url, aiRuntime.getCatalog())) void shell.openExternal(url).catch((error) => console.error('无法打开外部链接', error));
     return { action: 'deny' };
   });
   mainWindow.webContents.on('will-navigate', (event, url) => {
@@ -153,12 +154,6 @@ function createWindow() {
   else mainWindow.loadURL('http://127.0.0.1:5173');
 }
 
-function allowedExternalUrl(value) {
-  const catalog = aiRuntime.getCatalog();
-  const allowed = new Set(catalog.presets.flatMap((preset) => Object.values(preset.setup || {})));
-  return allowed.has(value);
-}
-
 function registerIpc() {
   ipcMain.handle('updates:get-state', () => sanitizeUpdateState(updateManager.getState()));
   ipcMain.handle('updates:check', async () => sanitizeUpdateState(await updateManager.check('manual')));
@@ -169,6 +164,8 @@ function registerIpc() {
   ipcMain.handle('sessions:get', (_event, id) => store.getSession(id));
   ipcMain.handle('sessions:save', (_event, session) => store.saveSession(sanitizeRendererSession(session)));
   ipcMain.handle('sessions:delete', (_event, id) => store.deleteSession(id));
+
+  ipcMain.handle('external-links:open', (_event, id) => openPublicLink(id, (url) => shell.openExternal(url)));
 
   ipcMain.handle('ai-config:get-catalog', () => aiRuntime.getCatalog());
   ipcMain.handle('ai-config:get-status', () => aiRuntime.getStatus());
@@ -189,7 +186,7 @@ function registerIpc() {
     catch (error) { return { ok: false, error: structuredProviderError(error, 'AI_CONNECTION_REMOVE_FAILED') }; }
   });
   ipcMain.handle('ai-config:open-external', async (_event, url) => {
-    if (!allowedExternalUrl(url)) return false;
+    if (!allowedExternalUrl(url, aiRuntime.getCatalog())) return false;
     await shell.openExternal(url);
     return true;
   });

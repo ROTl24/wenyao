@@ -1,4 +1,4 @@
-import { beforeEach, describe, expect, it } from 'vitest';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { createTossFromValue } from './divination';
 import { desktop } from './desktop';
 import {
@@ -47,6 +47,24 @@ function completedPhysicalSession(id = 'physical-session'): DivinationSession {
 
 beforeEach(() => {
   localStorage.clear();
+});
+
+afterEach(() => vi.restoreAllMocks());
+
+describe('浏览器公共外链', () => {
+  it('opens predefined links in a safe new tab and reports popup blocking', async () => {
+    const open = vi.spyOn(window, 'open').mockReturnValue({} as Window);
+
+    await expect(desktop.externalLinks.open('repository')).resolves.toBe(true);
+    expect(open).toHaveBeenCalledWith(
+      'https://github.com/ROTl24/wenyao',
+      '_blank',
+      'noopener,noreferrer',
+    );
+
+    open.mockReturnValueOnce(null);
+    await expect(desktop.externalLinks.open('xiaohongshu')).resolves.toBe(false);
+  });
 });
 
 describe('浏览器会话存储', () => {

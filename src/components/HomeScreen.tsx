@@ -2,6 +2,7 @@ import { isValidQuestion, QUESTION_LENGTH } from '../lib/question';
 import { CASTING_METHOD_LABELS, type CastingMethod, type SessionCategory } from '../lib/session';
 import { SESSION_CATEGORY_LABELS } from '../lib/sessionCategories';
 import { BeijingDateTimeField } from './BeijingDateTimeField';
+import { CreatorLinks } from './CreatorLinks';
 
 const categories: Array<{ id: SessionCategory; mark: string }> = [
   { id: 'career', mark: '事' },
@@ -111,6 +112,7 @@ export function HomeScreen({
         )}
         <button className="primary-ink-button" type="button" disabled={!valid} onClick={onStart}>开始起卦</button>
         <p className="ritual-note">静心片刻，专注于一件事</p>
+        <CreatorLinks variant="compact" />
       </section>
     </main>
   );

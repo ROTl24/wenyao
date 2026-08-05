@@ -125,6 +125,7 @@ describe('问爻桌面体验', () => {
 
   it('opens calendar, history and settings from the desktop chrome', async () => {
     render(<App />);
+    expect(screen.getByRole('region', { name: '作者链接' })).toHaveTextContent('孤独的数字游民');
     fireEvent.click(screen.getByRole('button', { name: '日历' }));
     expect(await screen.findByRole('main', { name: '问爻日历' })).toBeVisible();
     fireEvent.click(screen.getByRole('button', { name: '返回' }));
@@ -133,6 +134,7 @@ describe('问爻桌面体验', () => {
     fireEvent.click(screen.getByRole('button', { name: '关闭历史记录' }));
     fireEvent.click(screen.getByRole('button', { name: '应用设置' }));
     expect(await screen.findByRole('heading', { name: '应用设置' })).toBeVisible();
+    expect(screen.getByRole('region', { name: '找到作者' })).toHaveTextContent('问爻由「孤独的数字游民」开源制作');
   });
 
   it('keeps an in-progress casting intact while consulting the calendar', async () => {

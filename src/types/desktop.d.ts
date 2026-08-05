@@ -4,6 +4,7 @@ import type { AnalysisReport } from '../lib/types';
 
 export type AICapability = 'generation' | 'embedding' | 'rerank';
 export type AIProtocol = 'openai-chat' | 'openai-embeddings' | 'cohere-rerank' | 'alibaba-rerank';
+export type PublicLinkId = 'repository' | 'xiaohongshu';
 
 export interface AICapabilityDefinition {
   protocol: AIProtocol;
@@ -157,6 +158,9 @@ export type UpdateState =
   | { status: 'error'; currentVersion: string; availableVersion?: string; operation: 'check' | 'download'; manual: boolean; message: string };
 
 export interface DesktopApi {
+  externalLinks: {
+    open(id: PublicLinkId): Promise<boolean>;
+  };
   updates: {
     getState(): Promise<UpdateState>;
     check(): Promise<UpdateState>;

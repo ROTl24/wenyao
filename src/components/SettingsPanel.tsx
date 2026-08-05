@@ -4,6 +4,7 @@ import { desktop } from '../lib/desktop';
 import type { AIConfigStatus, AIProviderCatalog, CorpusStatus, UpdateState } from '../types/desktop';
 import { AIAdvancedSettings } from './AIAdvancedSettings';
 import { AIStatusCard } from './AIStatusCard';
+import { CreatorLinks } from './CreatorLinks';
 
 interface Props {
   updateState: UpdateState;
@@ -76,6 +77,8 @@ export function SettingsPanel({
           {corpus.vectorReady ? <p className="corpus-ready">严格检索已启用：关键词候选 + 向量召回 + 专用模型重排。</p> : <p className="corpus-warning">AI 解读必须等待向量召回和重排均可用，不会退回关键词检索生成报告。</p>}
           <button className="index-button" type="button" onClick={onOpenCorpus}>打开古籍书库</button>
         </section>
+
+        <CreatorLinks variant="panel" />
 
         <div className="security-note"><ShieldCheck /><p><strong>隐私边界</strong>访问密钥由 Windows DPAPI 加密，历史和向量索引留在本机。设置中可以随时查看当前问题、排盘、证据与追问分别发送给哪一家服务商。</p></div>
       </aside>

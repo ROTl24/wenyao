@@ -110,6 +110,9 @@ function droppedFilePaths(files) {
 }
 
 contextBridge.exposeInMainWorld('wenyao', {
+  externalLinks: {
+    open: (id) => ipcRenderer.invoke('external-links:open', safeText(id, '', 32)).then(Boolean),
+  },
   updates: {
     getState: () => ipcRenderer.invoke('updates:get-state').then(sanitizeUpdateState),
     check: () => ipcRenderer.invoke('updates:check').then(sanitizeUpdateState),
