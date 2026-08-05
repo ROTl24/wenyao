@@ -78,9 +78,13 @@ if (packageJson.build?.electronDist != null) {
   throw new Error('标准 Electron 构建不应配置自定义 electronDist；应由 electron-builder 获取匹配版本');
 }
 for (const expectedLine of [
-  'Upload update blockmap to draft release',
+  'gh release create "$env:GITHUB_REF_NAME" --draft --title "$packageVersion" --generate-notes',
   'gh release upload',
+  'release/WenYao-$packageVersion-Setup.exe',
   'release/WenYao-$packageVersion-Setup.exe.blockmap',
+  'release/latest.yml',
+  '$remoteAsset.digest',
+  'gh release edit "$env:GITHUB_REF_NAME" --draft=false --prerelease=false --latest',
 ]) {
   if (!releaseWorkflow.includes(expectedLine)) {
     throw new Error(`Windows 发布工作流缺少 ${expectedLine}`);

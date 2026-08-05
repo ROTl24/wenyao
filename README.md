@@ -64,7 +64,7 @@ npm.cmd run build
 
 三条 `verify:*` 命令会使用桌面应用中已启用的真实配置并可能产生服务商费用；普通开发检查使用 `npm.cmd test` 与 `npm.cmd run typecheck` 即可。
 
-安装包生成到 `release/WenYao-0.4.0-Setup.exe`；`npm.cmd run verify:release` 会校验安装包、更新元数据、blockmap 与内置 GitHub 更新源是否一致。
+安装包生成到 `release/WenYao-<version>-Setup.exe`（`<version>` 与 `package.json` 一致）；`npm.cmd run verify:release` 会校验安装包、更新元数据、blockmap 与内置 GitHub 更新源是否一致。
 
 ## 古籍证据包
 

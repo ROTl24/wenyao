@@ -67,7 +67,7 @@ jobs:
             }
           } else {
             $packageVersion = node -p "require('./package.json').version"
-            gh release create "$env:GITHUB_REF_NAME" --draft --title "$packageVersion"
+            gh release create "$env:GITHUB_REF_NAME" --draft --title "$packageVersion" --generate-notes
           }
 
       - name: Upload verified release assets
