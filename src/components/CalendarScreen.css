@@ -394,7 +394,7 @@
 .calendar-hour-grid span {
   min-height: 30px;
   color: var(--muted);
-  font: 10px/1.45 var(--ui);
+  font: var(--text-caption)/1.5 var(--font-ui);
 }
 
 .calendar-hour-grid em {
