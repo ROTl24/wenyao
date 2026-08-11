@@ -8,27 +8,31 @@ import { HistoryPanel } from './HistoryPanel';
 const castAt = new Date('2026-07-14T08:00:00.000Z');
 
 const completeSession: DivinationSession = {
+  schemaVersion: 2,
   id: 'complete-session',
   question: '项目能否顺利落地',
   category: 'career',
   castingMethod: 'physical',
+  castingBasis: { kind: 'physical', algorithm: 'three_coin_manual_v1' },
   castAt: castAt.toISOString(),
   updatedAt: castAt.toISOString(),
   status: 'complete',
-  tosses: [],
+  lines: [],
   plate: buildPlate([7, 8, 7, 8, 7, 8], castAt),
   messages: [],
 };
 
 const castingSession: DivinationSession = {
+  schemaVersion: 2,
   id: 'casting-session',
   question: '关系是否适合继续推进',
   category: 'relationship',
   castingMethod: 'digital',
+  castingBasis: { kind: 'digital', algorithm: 'three_coin_secure_v1' },
   castAt: new Date('2026-07-15T08:00:00.000Z').toISOString(),
   updatedAt: new Date('2026-07-15T08:00:00.000Z').toISOString(),
   status: 'casting',
-  tosses: [],
+  lines: [],
   messages: [],
 };
 

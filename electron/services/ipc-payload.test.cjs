@@ -5,33 +5,30 @@ const path = require('node:path');
 const test = require('node:test');
 const { sanitizeRendererSession } = require('./ipc-payload.cjs');
 
-test('session IPC sanitizer uses top-level and toss allowlists while preserving current result fields', () => {
+test('session IPC sanitizer uses top-level and line allowlists while preserving current result fields', () => {
   const plate = { baseHexagram: { name: '乾为天' }, nested: { retained: true } };
   const analysis = { markdown: '# 解读', sections: [{ title: '主题' }] };
   const messages = [{ id: 'message-1', role: 'user', content: '追问', createdAt: '2026-07-30T12:00:00.000Z' }];
   const sanitized = sanitizeRendererSession({
+    schemaVersion: 2,
     id: 'session-1',
     question: '问题',
     category: 'career',
     castingMethod: 'digital',
+    castingBasis: { kind: 'digital', algorithm: 'three_coin_secure_v1', forged: true },
     castAt: '2026-07-12T04:00:00.000Z',
     updatedAt: '2026-07-30T12:00:00.000Z',
     status: 'casting',
-    tosses: [{
-      id: 'toss-1',
+    lines: [{
+      id: 'line-1',
       lineIndex: 1,
-      visualSeed: 'seed-1',
-      confirmedAt: '2026-07-30T12:00:01.000Z',
-      faces: ['text', 'text', 'reverse'],
       value: 7,
-      label: '少阳',
-      moving: false,
-      baseYang: true,
-      changedYang: true,
+      recordedAt: '2026-07-30T12:00:01.000Z',
+      coin: { faces: ['text', 'text', 'reverse'], visualSeed: 'seed-1', forged: true },
       nestedForgery: { accepted: true },
     }],
-    currentToss: {
-      id: 'toss-2',
+    currentLine: {
+      id: 'line-2',
       lineIndex: 2,
       visualSeed: 'seed-2',
       confirmedAt: 'forged-confirmation',
@@ -52,30 +49,27 @@ test('session IPC sanitizer uses top-level and toss allowlists while preserving 
   });
 
   assert.deepEqual(sanitized, {
+    schemaVersion: 2,
     id: 'session-1',
     question: '问题',
     category: 'career',
     castingMethod: 'digital',
+    castingBasis: { kind: 'digital', algorithm: 'three_coin_secure_v1' },
     castAt: '2026-07-12T04:00:00.000Z',
     updatedAt: '2026-07-30T12:00:00.000Z',
     status: 'casting',
     plate,
     analysis,
     messages,
-    tosses: [{
-      id: 'toss-1',
+    lines: [{
+      id: 'line-1',
       lineIndex: 1,
-      visualSeed: 'seed-1',
-      confirmedAt: '2026-07-30T12:00:01.000Z',
-      faces: ['text', 'text', 'reverse'],
       value: 7,
-      label: '少阳',
-      moving: false,
-      baseYang: true,
-      changedYang: true,
+      recordedAt: '2026-07-30T12:00:01.000Z',
+      coin: { faces: ['text', 'text', 'reverse'], visualSeed: 'seed-1' },
     }],
-    currentToss: {
-      id: 'toss-2',
+    currentLine: {
+      id: 'line-2',
       lineIndex: 2,
       visualSeed: 'seed-2',
       faces: ['text', 'reverse', 'reverse'],
@@ -94,9 +88,9 @@ test('session IPC sanitizer uses top-level and toss allowlists while preserving 
 test('sanitizer retains an explicitly supplied physical visualSeed so validation can reject it', () => {
   const sanitized = sanitizeRendererSession({
     castingMethod: 'physical',
-    tosses: [{ id: 'toss-1', visualSeed: undefined }],
+    lines: [{ id: 'line-1', coin: { faces: ['text', 'text', 'reverse'], visualSeed: undefined } }],
   });
-  assert.equal(Object.hasOwn(sanitized.tosses[0], 'visualSeed'), true);
+  assert.equal(Object.hasOwn(sanitized.lines[0].coin, 'visualSeed'), true);
 });
 
 test('preload independently sanitizes session save payloads', async () => {
@@ -139,7 +133,7 @@ test('preload independently sanitizes session save payloads', async () => {
     preloadSource.matchAll(/require\((['"])(.*?)\1\)/g),
     (match) => match[2],
   );
-  assert.deepEqual(requiredModules, ['electron']);
+  assert.deepEqual(requiredModules, ['electron', './services/ipc-payload.cjs']);
   delete require.cache[preloadPath];
   Module._load = function load(request, parent, isMain) {
     if (request === 'electron') return electron;
@@ -153,14 +147,16 @@ test('preload independently sanitizes session save payloads', async () => {
   }
 
   await exposed.sessions.save({
+    schemaVersion: 2,
     id: 'session-1',
     question: '问题',
     category: 'career',
     castingMethod: 'digital',
+    castingBasis: { kind: 'digital', algorithm: 'three_coin_secure_v1' },
     castAt: '2026-07-12T04:00:00.000Z',
     updatedAt: '2026-07-30T12:00:00.000Z',
     status: 'casting',
-    tosses: [],
+    lines: [],
     messages: [],
     plate: { retained: true },
     analysis: { retained: true },
@@ -170,17 +166,19 @@ test('preload independently sanitizes session save payloads', async () => {
   assert.deepEqual(calls, [{
     channel: 'sessions:save',
     args: [{
+      schemaVersion: 2,
       id: 'session-1',
       question: '问题',
       category: 'career',
       castingMethod: 'digital',
+      castingBasis: { kind: 'digital', algorithm: 'three_coin_secure_v1' },
       castAt: '2026-07-12T04:00:00.000Z',
       updatedAt: '2026-07-30T12:00:00.000Z',
       status: 'casting',
       plate: { retained: true },
       analysis: { retained: true },
       messages: [],
-      tosses: [],
+      lines: [],
     }],
   }]);
 

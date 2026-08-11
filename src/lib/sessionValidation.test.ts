@@ -1,11 +1,13 @@
 import { describe, expect, it } from 'vitest';
 import { createTossFromValue } from './divination';
+import { generateRandomCasting } from './casting';
 import {
   confirmCurrentToss,
+  createCompletedSession,
   createSession,
   prepareToss,
   type DivinationSession,
-  type PreparedToss,
+  type PreparedCoinLine,
 } from './session';
 import {
   normalizeStoredSession,
@@ -13,6 +15,7 @@ import {
   storedCastingMethod,
   validateSessionForSave,
 } from './sessionValidation';
+import { deriveTimeCasting } from './timeCasting';
 
 function completedDigitalSession(): DivinationSession {
   let session = createSession(
@@ -34,7 +37,11 @@ function completedPhysicalSession(): DivinationSession {
     ...digital,
     id: 'physical-session',
     castingMethod: 'physical',
-    tosses: digital.tosses.map(({ visualSeed: _visualSeed, ...toss }) => toss),
+    castingBasis: { kind: 'physical', algorithm: 'three_coin_manual_v1' },
+    lines: digital.lines.map((line) => ({
+      ...line,
+      coin: line.coin ? { faces: line.coin.faces } : undefined,
+    })),
   };
 }
 
@@ -90,17 +97,17 @@ describe('会话存储契约', () => {
     const input = {
       ...completedDigitalSession(),
       forgedTopLevel: true,
-      tosses: completedDigitalSession().tosses.map((toss) => ({
-        ...toss,
-        forgedTossField: true,
+      lines: completedDigitalSession().lines.map((line) => ({
+        ...line,
+        forgedLineField: true,
       })),
     };
 
     const sanitized = sanitizeRendererSession(input) as Record<string, unknown>;
-    const tosses = sanitized.tosses as Array<Record<string, unknown>>;
+    const lines = sanitized.lines as Array<Record<string, unknown>>;
 
     expect(sanitized).not.toHaveProperty('forgedTopLevel');
-    expect(tosses[0]).not.toHaveProperty('forgedTossField');
+    expect(lines[0]).not.toHaveProperty('forgedLineField');
     expect(sanitized.plate).toEqual(input.plate);
     expect(sanitized.analysis).toEqual(input.analysis);
     expect(sanitized.messages).toEqual(input.messages);
@@ -111,6 +118,37 @@ describe('会话存储契约', () => {
   it('accepts canonical digital and physical session shapes', () => {
     expect(() => validateSessionForSave(completedDigitalSession())).not.toThrow();
     expect(() => validateSessionForSave(completedPhysicalSession())).not.toThrow();
+  });
+
+  it('accepts complete random and replayable time sessions but rejects forged time evidence', () => {
+    const castAt = new Date('2026-08-03T15:00:00.000Z');
+    const random = createCompletedSession(
+      '随机起卦会话校验',
+      'other',
+      castAt,
+      generateRandomCasting(castAt, () => createTossFromValue(7)),
+    );
+    const time = createCompletedSession(
+      '时间起卦会话校验',
+      'other',
+      castAt,
+      deriveTimeCasting(castAt),
+    );
+
+    expect(() => validateSessionForSave(random)).not.toThrow();
+    expect(() => validateSessionForSave(time)).not.toThrow();
+
+    const forgedBasis = structuredClone(time);
+    if (forgedBasis.castingBasis.kind === 'time') forgedBasis.castingBasis.movingLine = 1;
+    expect(() => validateSessionForSave(forgedBasis)).toThrow('时间起卦依据无法重放');
+
+    const forgedCoin = structuredClone(time);
+    forgedCoin.lines[0].coin = { faces: ['text', 'text', 'reverse'] };
+    expect(() => validateSessionForSave(forgedCoin)).toThrow('六爻记录冲突');
+
+    const forgedValue = structuredClone(time);
+    forgedValue.lines[0].value = forgedValue.lines[0].value === 7 ? 8 : 7;
+    expect(() => validateSessionForSave(forgedValue)).toThrow('时间起卦爻值与推导依据不一致');
   });
 
   it('rejects local reports at the persistence seam', () => {
@@ -135,7 +173,7 @@ describe('会话存储契约', () => {
       ['castAt', (session) => { session.castAt = '2026-07-11'; }],
       ['updatedAt', (session) => { session.updatedAt = 'not-a-date'; }],
       ['status', (session) => { session.status = 'draft'; }],
-      ['tosses', (session) => { session.tosses = null; }],
+      ['lines', (session) => { session.lines = null; }],
       ['messages', (session) => { session.messages = null; }],
     ];
 
@@ -146,21 +184,21 @@ describe('会话存储契约', () => {
     }
   });
 
-  it('requires stable toss ids and exact confirmed timestamps', () => {
+  it('requires stable line ids and exact recorded timestamps', () => {
     const emptyId = completedDigitalSession();
-    emptyId.tosses[0].id = ' ';
-    expect(() => validateSessionForSave(emptyId)).toThrow('投币历史冲突');
+    emptyId.lines[0].id = ' ';
+    expect(() => validateSessionForSave(emptyId)).toThrow('六爻记录冲突');
 
-    const invalidConfirmedAt = completedDigitalSession();
-    invalidConfirmedAt.tosses[0].confirmedAt = '2026-07-11';
-    expect(() => validateSessionForSave(invalidConfirmedAt)).toThrow('投币历史冲突');
+    const invalidRecordedAt = completedDigitalSession();
+    invalidRecordedAt.lines[0].recordedAt = '2026-07-11';
+    expect(() => validateSessionForSave(invalidRecordedAt)).toThrow('六爻记录冲突');
 
     const repeatedId = completedDigitalSession();
-    repeatedId.tosses[1].id = repeatedId.tosses[0].id;
-    expect(() => validateSessionForSave(repeatedId)).toThrow('投币历史冲突');
+    repeatedId.lines[1].id = repeatedId.lines[0].id;
+    expect(() => validateSessionForSave(repeatedId)).toThrow('六爻记录冲突');
   });
 
-  it('rejects confirmedAt and repeated ids on the current toss', () => {
+  it('rejects inconsistent derivation and repeated ids on the current toss', () => {
     let session = confirmCurrentToss(prepareToss(
       createSession('当前钱象状态测试', 'other', new Date('2026-07-11T04:00:00.000Z')),
       createTossFromValue(7),
@@ -168,23 +206,22 @@ describe('会话存储契约', () => {
     ));
     session = prepareToss(session, createTossFromValue(8), 'seed-2');
 
-    const withConfirmedAt = structuredClone(session);
-    (withConfirmedAt.currentToss as PreparedToss & { confirmedAt?: string }).confirmedAt =
-      '2026-07-11T04:01:00.000Z';
-    expect(() => validateSessionForSave(withConfirmedAt)).toThrow('当前投币状态冲突');
+    const inconsistent = structuredClone(session);
+    (inconsistent.currentLine as PreparedCoinLine).changedYang = true;
+    expect(() => validateSessionForSave(inconsistent)).toThrow('当前投币状态冲突');
 
     const repeatedId = structuredClone(session);
-    repeatedId.currentToss!.id = repeatedId.tosses[0].id;
+    repeatedId.currentLine!.id = repeatedId.lines[0].id;
     expect(() => validateSessionForSave(repeatedId)).toThrow('当前投币状态冲突');
   });
 
   it('locks digital complete and casting state cardinality', () => {
     const incomplete = completedDigitalSession();
-    incomplete.tosses.pop();
+    incomplete.lines.pop();
     expect(() => validateSessionForSave(incomplete)).toThrow('在线起卦状态冲突');
 
     const completeWithCurrent = completedDigitalSession();
-    completeWithCurrent.currentToss = {
+    completeWithCurrent.currentLine = {
       ...createTossFromValue(7),
       id: 'seventh-toss',
       lineIndex: 7,

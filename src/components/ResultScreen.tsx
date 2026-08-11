@@ -8,6 +8,7 @@ import type { AIConfigStatus } from '../types/desktop';
 import { CASTING_METHOD_LABELS } from '../lib/session';
 import { formatShanghaiDateTime } from '../lib/shanghaiTime';
 import { HexagramLines } from './HexagramLines';
+import { CastingBasisSummary } from './CastingBasisSummary';
 import { MarkdownContent } from './MarkdownContent';
 import './ResultScreen.css';
 import { StemBranchText } from './StemBranchText';
@@ -72,7 +73,9 @@ export function ResultScreen({ session, evidence, retrievalDiagnostics, aiStatus
             </button>
             <div className="result-hero-meta">
               <time dateTime={session.castAt}>{formatShanghaiDateTime(new Date(session.castAt))}</time>
-              <span>文王纳甲 · 字二背三 · {CASTING_METHOD_LABELS[session.castingMethod]}</span>
+              <span>{session.castingMethod === 'time'
+                ? '梅花时间成卦 · 文王纳甲解读 · 时间起卦'
+                : `文王纳甲 · 字二背三 · ${CASTING_METHOD_LABELS[session.castingMethod]}`}</span>
             </div>
           </div>
 
@@ -115,6 +118,7 @@ export function ResultScreen({ session, evidence, retrievalDiagnostics, aiStatus
               )}
             </div>
           </div>
+          <CastingBasisSummary basis={session.castingBasis} />
         </header>
 
         <div className="result-workspace">

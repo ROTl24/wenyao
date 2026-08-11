@@ -1,5 +1,6 @@
 import { Solar, type Lunar } from 'lunar-javascript';
 import { shanghaiDateTimeParts } from './shanghaiTime';
+import { traditionalCalendarAt } from './traditionalCalendar';
 
 export const ALMANAC_MIN_YEAR = 1900;
 export const ALMANAC_MAX_YEAR = 2100;
@@ -135,9 +136,7 @@ function selectedHourId(hour: number): AlmanacHourId {
 
 export function currentAlmanacSelection(now = new Date()): AlmanacSelection {
   const current = shanghaiDateTimeParts(now);
-  const traditionalDate = current.hour === 23
-    ? shiftAlmanacDate(current, 1)
-    : current;
+  const traditionalDate = parseAlmanacDate(traditionalCalendarAt(now).traditionalDate);
   assertSupportedDate(traditionalDate);
   return {
     date: formatAlmanacDate(traditionalDate),

@@ -37,7 +37,7 @@ describe('起卦会话', () => {
     const toss = createToss(['text', 'text', 'reverse']);
     const prepared = prepareToss(session, toss, 'seed-1');
     const preparedAgain = prepareToss(prepared, createToss(['reverse', 'reverse', 'reverse']), 'seed-2');
-    expect(preparedAgain.currentToss).toEqual(prepared.currentToss);
+    expect(preparedAgain.currentLine).toEqual(prepared.currentLine);
   });
 
   it('confirms exactly six lines then creates an immutable plate', () => {
@@ -51,7 +51,7 @@ describe('起卦会话', () => {
       session = confirmCurrentToss(prepareToss(session, createToss(faces), `seed-${index}`));
     }
     expect(session.status).toBe('complete');
-    expect(session.tosses).toHaveLength(6);
+    expect(session.lines).toHaveLength(6);
     expect(session.plate?.movingLines).toEqual([1, 4]);
     const afterSeventh = confirmCurrentToss(prepareToss(session, createToss(['reverse', 'reverse', 'reverse']), 'seed-7'));
     expect(afterSeventh).toEqual(session);

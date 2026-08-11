@@ -1,9 +1,9 @@
-import { buildPlate, createTossFromValue, type LineValue } from './divination';
+import { createTossFromValue, type LineValue } from './divination';
+import { defaultCastingBasis, lineRecordFromToss } from './casting';
 import {
-  createSession,
+  createCompletedSession,
   type DivinationSession,
   type SessionCategory,
-  type TossRecord,
 } from './session';
 
 export interface PhysicalCastLine {
@@ -107,23 +107,14 @@ export function finalizePhysicalCast(
   if (!exactIso(finalizedAt)) throw new TypeError('完成时间无效');
 
   const castAt = new Date(draft.castAt);
-  const session = createSession(
+  const lines = draft.lines.map((line, index) => (
+    lineRecordFromToss(createTossFromValue(line.value), index + 1, line.recordedAt)
+  ));
+  return createCompletedSession(
     draft.question,
     draft.category,
     castAt,
-    'physical',
+    { method: 'physical', basis: defaultCastingBasis('physical'), lines },
+    new Date(finalizedAt),
   );
-  const tosses: TossRecord[] = draft.lines.map((line, index) => ({
-    ...createTossFromValue(line.value),
-    id: crypto.randomUUID(),
-    lineIndex: index + 1,
-    confirmedAt: line.recordedAt,
-  }));
-  return {
-    ...session,
-    status: 'complete',
-    tosses,
-    plate: buildPlate(tosses.map((toss) => toss.value), castAt),
-    updatedAt: finalizedAt,
-  };
 }

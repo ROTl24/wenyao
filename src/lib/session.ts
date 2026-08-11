@@ -1,32 +1,28 @@
-import { buildPlate, type DivinationPlate, type Toss } from './divination';
+import { buildPlate, createToss, type DivinationPlate, type Toss } from './divination';
+import {
+  CASTING_METHOD_LABELS,
+  defaultCastingBasis,
+  lineRecordFromToss,
+  normalizeCastingMethod,
+  type CastingBasis,
+  type CastingMethod,
+  type CompletedCasting,
+  type LineRecord,
+  type PreparedCoinLine,
+} from './casting';
 import type { AnalysisReport } from './types';
+
+export {
+  CASTING_METHOD_LABELS,
+  normalizeCastingMethod,
+  type CastingBasis,
+  type CastingMethod,
+  type LineRecord,
+  type PreparedCoinLine,
+} from './casting';
 
 export type SessionCategory = 'career' | 'wealth' | 'relationship' | 'health' | 'study' | 'lost_item' | 'travel' | 'other';
 export type SessionStatus = 'casting' | 'complete';
-export type CastingMethod = 'digital' | 'physical';
-
-export const CASTING_METHOD_LABELS: Record<CastingMethod, string> = {
-  digital: '在线起卦',
-  physical: '线下起卦',
-};
-
-export function normalizeCastingMethod(value: unknown): CastingMethod {
-  if (value === 'digital' || value === 'physical') return value;
-  throw new TypeError('起卦方式无效');
-}
-
-export interface TossRecord extends Toss {
-  id: string;
-  lineIndex: number;
-  visualSeed?: string;
-  confirmedAt: string;
-}
-
-export interface PreparedToss extends Toss {
-  id: string;
-  lineIndex: number;
-  visualSeed: string;
-}
 
 export interface ChatMessage {
   id: string;
@@ -37,25 +33,72 @@ export interface ChatMessage {
 }
 
 export interface DivinationSession {
+  schemaVersion: 2;
   id: string;
   question: string;
   category: SessionCategory;
   castingMethod: CastingMethod;
+  castingBasis: CastingBasis;
   castAt: string;
   updatedAt: string;
   status: SessionStatus;
-  tosses: TossRecord[];
-  currentToss?: PreparedToss;
+  lines: LineRecord[];
+  currentLine?: PreparedCoinLine;
   plate?: DivinationPlate;
   analysis?: AnalysisReport;
   messages: ChatMessage[];
 }
 
-export function normalizeSession(session: DivinationSession): DivinationSession {
-  const hasCastingMethod = Object.prototype.hasOwnProperty.call(session, 'castingMethod');
+function legacyLine(toss: Record<string, unknown>, index: number): LineRecord {
+  const faces = Array.isArray(toss.faces) ? toss.faces : [];
+  const value = Number(toss.value);
+  const normalizedToss = createToss(faces as Toss['faces']);
+  if (normalizedToss.value !== value) throw new TypeError('投币历史冲突');
   return {
-    ...session,
-    castingMethod: hasCastingMethod ? normalizeCastingMethod(session.castingMethod) : 'digital',
+    id: String(toss.id || ''),
+    lineIndex: Number(toss.lineIndex || index + 1),
+    value: normalizedToss.value,
+    recordedAt: String(toss.confirmedAt || ''),
+    coin: {
+      faces: [...normalizedToss.faces],
+      ...(typeof toss.visualSeed === 'string' ? { visualSeed: toss.visualSeed } : {}),
+    },
+  };
+}
+
+export function normalizeSession(session: DivinationSession | Record<string, unknown>): DivinationSession {
+  const source = structuredClone(session) as Record<string, unknown>;
+  const hasCastingMethod = Object.prototype.hasOwnProperty.call(source, 'castingMethod');
+  const castingMethod = hasCastingMethod ? normalizeCastingMethod(source.castingMethod) : 'digital';
+  if (source.schemaVersion === 2 && Array.isArray(source.lines)) {
+    return {
+      ...(source as unknown as DivinationSession),
+      castingMethod,
+      castingBasis: source.castingBasis as CastingBasis ?? defaultCastingBasis(castingMethod),
+    };
+  }
+
+  const legacyTosses = Array.isArray(source.tosses) ? source.tosses : [];
+  const lines = legacyTosses.map((toss, index) => legacyLine(toss as Record<string, unknown>, index));
+  const currentToss = source.currentToss as Record<string, unknown> | undefined;
+  const currentLine = currentToss ? {
+    ...createToss(currentToss.faces as Toss['faces']),
+    id: String(currentToss.id || ''),
+    lineIndex: Number(currentToss.lineIndex),
+    visualSeed: String(currentToss.visualSeed || ''),
+  } : undefined;
+  const {
+    tosses: _tosses,
+    currentToss: _currentToss,
+    ...canonical
+  } = source;
+  return {
+    ...(canonical as unknown as Omit<DivinationSession, 'schemaVersion' | 'castingMethod' | 'castingBasis' | 'lines'>),
+    schemaVersion: 2,
+    castingMethod,
+    castingBasis: defaultCastingBasis(castingMethod),
+    lines,
+    ...(currentLine ? { currentLine } : {}),
   };
 }
 
@@ -64,17 +107,22 @@ export function createSession(
   category: SessionCategory,
   castAt = new Date(),
   castingMethod: CastingMethod = 'digital',
+  castingBasis?: CastingBasis,
 ): DivinationSession {
   const iso = castAt.toISOString();
+  const basis = castingBasis ?? defaultCastingBasis(castingMethod);
+  if (basis.kind !== castingMethod) throw new TypeError('起卦方式与推导依据不一致');
   return {
+    schemaVersion: 2,
     id: crypto.randomUUID(),
     question: question.trim(),
     category,
     castingMethod,
+    castingBasis: basis,
     castAt: iso,
     updatedAt: iso,
     status: 'casting',
-    tosses: [],
+    lines: [],
     messages: [],
   };
 }
@@ -87,15 +135,15 @@ export function prepareToss(
   if (
     session.castingMethod !== 'digital'
     || session.status === 'complete'
-    || session.tosses.length >= 6
-    || session.currentToss
+    || session.lines.length >= 6
+    || session.currentLine
   ) return session;
   return {
     ...session,
-    currentToss: {
+    currentLine: {
       ...toss,
       id: crypto.randomUUID(),
-      lineIndex: session.tosses.length + 1,
+      lineIndex: session.lines.length + 1,
       visualSeed,
     },
     updatedAt: new Date().toISOString(),
@@ -103,20 +151,41 @@ export function prepareToss(
 }
 
 export function confirmCurrentToss(session: DivinationSession): DivinationSession {
-  if (session.castingMethod !== 'digital' || session.status === 'complete' || !session.currentToss) return session;
-  const confirmed: TossRecord = {
-    ...session.currentToss,
-    confirmedAt: new Date().toISOString(),
-  };
-  const tosses = [...session.tosses, confirmed];
-  const complete = tosses.length === 6;
+  if (session.castingMethod !== 'digital' || session.status === 'complete' || !session.currentLine) return session;
+  const confirmed = lineRecordFromToss(
+    session.currentLine,
+    session.currentLine.lineIndex,
+    new Date().toISOString(),
+    session.currentLine.visualSeed,
+  );
+  const lines = [...session.lines, { ...confirmed, id: session.currentLine.id }];
+  const complete = lines.length === 6;
   return {
     ...session,
-    tosses,
-    currentToss: undefined,
+    lines,
+    currentLine: undefined,
     status: complete ? 'complete' : 'casting',
-    plate: complete ? buildPlate(tosses.map((item) => item.value), new Date(session.castAt)) : undefined,
+    plate: complete ? buildPlate(lines.map((item) => item.value), new Date(session.castAt)) : undefined,
     updatedAt: new Date().toISOString(),
+  };
+}
+
+export function createCompletedSession(
+  question: string,
+  category: SessionCategory,
+  castAt: Date,
+  casting: CompletedCasting,
+  completedAt = new Date(),
+): DivinationSession {
+  if (casting.lines.length !== 6) throw new Error('必须生成完整六爻后才能排盘');
+  const session = createSession(question, category, castAt, casting.method, casting.basis);
+  return {
+    ...session,
+    castingBasis: casting.basis,
+    lines: structuredClone(casting.lines),
+    status: 'complete',
+    plate: buildPlate(casting.lines.map((line) => line.value), castAt),
+    updatedAt: completedAt.toISOString(),
   };
 }
 

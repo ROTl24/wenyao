@@ -1,4 +1,5 @@
 import { lazy, Suspense, useCallback, useEffect, useState } from 'react';
+import { tossForLine } from '../lib/casting';
 import type { DivinationSession } from '../lib/session';
 import { CastingProgress } from './CastingProgress';
 
@@ -16,7 +17,7 @@ interface RitualSequence {
 interface Props { session: DivinationSession; onConfirm(): void }
 
 export function RitualScreen({ session, onConfirm }: Props) {
-  const current = session.currentToss!;
+  const current = session.currentLine!;
   const [sequence, setSequence] = useState<RitualSequence>(() => ({
     tossId: current.id,
     phase: window.matchMedia?.('(prefers-reduced-motion: reduce)').matches ? 'revealed' : 'gathering',
@@ -28,7 +29,7 @@ export function RitualScreen({ session, onConfirm }: Props) {
     setSequence({ tossId: current.id, phase: reducedMotion ? 'revealed' : 'gathering' });
     if (reducedMotion) return;
 
-    const isFirstLine = session.tosses.length === 0;
+    const isFirstLine = session.lines.length === 0;
     const castingTimer = window.setTimeout(() => {
       setSequence((value) => value.tossId === current.id && value.phase === 'gathering'
         ? { ...value, phase: 'casting' }
@@ -37,7 +38,7 @@ export function RitualScreen({ session, onConfirm }: Props) {
     return () => {
       window.clearTimeout(castingTimer);
     };
-  }, [current.id, session.tosses.length]);
+  }, [current.id, session.lines.length]);
 
   const handleSettling = useCallback(() => {
     setSequence((value) => value.tossId === current.id && value.phase === 'casting'
@@ -68,7 +69,7 @@ export function RitualScreen({ session, onConfirm }: Props) {
           <i aria-hidden="true" />
         </div>
         <h1 id="ritual-line-title">{lineNames[current.lineIndex - 1]}</h1>
-        <p>{current.lineIndex === 1 ? '由初爻起，自下而上观六次钱象。' : `已有 ${session.tosses.length} 爻归位，继续向上成卦。`}</p>
+        <p>{current.lineIndex === 1 ? '由初爻起，自下而上观六次钱象。' : `已有 ${session.lines.length} 爻归位，继续向上成卦。`}</p>
       </section>
 
       <section className="ritual-stage" aria-labelledby="ritual-line-title" aria-describedby="ritual-status">
@@ -93,7 +94,7 @@ export function RitualScreen({ session, onConfirm }: Props) {
       </section>
 
       <CastingProgress
-        confirmed={session.tosses}
+        confirmed={session.lines.map(tossForLine)}
         currentLineIndex={current.lineIndex}
         preview={phase === 'revealed' ? current : undefined}
         currentStateLabel={phaseCopy.name}

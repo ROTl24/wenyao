@@ -9,14 +9,16 @@ import { ResultScreen } from './ResultScreen';
 const castAt = new Date('2026-07-13T08:00:00.000Z');
 
 const session: DivinationSession = {
+  schemaVersion: 2,
   id: 'session-1',
   question: '问事业发展',
   category: 'career',
   castingMethod: 'digital',
+  castingBasis: { kind: 'digital', algorithm: 'three_coin_secure_v1' },
   castAt: castAt.toISOString(),
   updatedAt: castAt.toISOString(),
   status: 'complete',
-  tosses: [],
+  lines: [],
   plate: buildPlate([7, 8, 7, 8, 7, 8], castAt),
   messages: [],
 };
@@ -125,7 +127,7 @@ describe('ResultScreen Markdown 解读', () => {
 
     expect(opening).toHaveAttribute('data-state', 'static');
     expect(screen.getByRole('heading', { level: 1, name: '问事业发展' })).toBeVisible();
-    expect(within(opening).getByText(/在线起卦/)).toBeVisible();
+    expect(within(opening).getAllByText(/在线起卦/)).toHaveLength(2);
     expect(within(opening).getByText('静卦')).toBeVisible();
     expect(within(opening).queryByText(/^变卦/)).not.toBeInTheDocument();
     expect(Array.from(workspace?.children || []).map((element) => element.classList[0])).toEqual([
@@ -151,10 +153,14 @@ describe('ResultScreen Markdown 解读', () => {
   });
 
   it('marks a physical session without changing the contemporary-book result layout', () => {
-    const { container } = renderResult({ ...session, castingMethod: 'physical' });
+    const { container } = renderResult({
+      ...session,
+      castingMethod: 'physical',
+      castingBasis: { kind: 'physical', algorithm: 'three_coin_manual_v1' },
+    });
     const opening = screen.getByRole('banner', { name: '成卦卷首' });
 
-    expect(within(opening).getByText(/线下起卦/)).toBeVisible();
+    expect(within(opening).getAllByText(/线下起卦/)).toHaveLength(2);
     expect(container.querySelector('.result-workspace')).toBeInTheDocument();
   });
 

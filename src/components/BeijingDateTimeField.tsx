@@ -1,6 +1,6 @@
 import { CalendarDays, Clock3 } from 'lucide-react';
 import { useEffect, useRef, useState } from 'react';
-import { formatLunarDateLabel } from '../lib/lunarCalendar';
+import { formatTraditionalLunarDateTimeLabel } from '../lib/lunarCalendar';
 import { formatShanghaiDateTimeInput } from '../lib/shanghaiTime';
 import { BeijingDatePicker } from './BeijingDatePicker';
 import { BeijingTimePicker } from './BeijingTimePicker';
@@ -44,7 +44,7 @@ export function BeijingDateTimeField({
   const errorId = `${id}-error`;
   const lunarDateId = `${id}-lunar-date`;
   const describedBy = error ? errorId : helperText ? noteId : undefined;
-  const lunarDateLabel = formatLunarDateLabel(date);
+  const lunarDateLabel = formatTraditionalLunarDateTimeLabel(value);
   const dateDescribedBy = error
     ? errorId
     : [describedBy, lunarDateLabel ? lunarDateId : null].filter(Boolean).join(' ') || undefined;

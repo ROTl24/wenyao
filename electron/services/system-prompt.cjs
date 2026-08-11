@@ -83,22 +83,35 @@ const FOLLOW_UP_RESPONSE_CONTRACT = `
 6. 如果追问超出原卦能够回答的范围，先明确说明边界，再告诉用户需要补充什么；不得借机把原报告完整重写一遍。
 `.trim();
 
-function buildAnalysisSystemPrompt(plate) {
+function castingSourceDiscipline(castingMethod, castingBasis) {
+  if (castingMethod === 'time' && castingBasis?.kind === 'time') {
+    return [
+      '本次卦象由梅花年月日时法成卦，再使用文王纳甲盘面解读。',
+      `起卦规则为 ${castingBasis.algorithm}，上卦数 ${castingBasis.upperTrigramNumber}，下卦数 ${castingBasis.lowerTrigramNumber}，第 ${castingBasis.movingLine} 爻动。`,
+      '不得把本次卦象描述为摇铜钱、投币或随机所得；如需说明来源，必须明确称为“时间成卦”。',
+    ].join('\n');
+  }
+  return '起卦来源必须服从输入的 castingMethod，不得擅自改写或虚构另一种成卦方式。';
+}
+
+function buildAnalysisSystemPrompt(plate, castingMethod, castingBasis) {
   return [
     SHARED_DISCIPLINE,
     INITIAL_ANALYSIS_DISCIPLINE,
     COMPLETE_ANALYSIS_WORKFLOW,
     MARKDOWN_CITATION_CONTRACT,
     ANALYSIS_OUTPUT_CONTRACT,
+    castingSourceDiscipline(castingMethod, castingBasis),
     `当前排盘锁定：本卦“${plate.baseHexagram.name}”，变卦“${plate.changedHexagram.name}”。`,
   ].join('\n\n');
 }
 
-function buildFollowUpSystemPrompt() {
+function buildFollowUpSystemPrompt(session) {
   return [
     SHARED_DISCIPLINE,
     FOLLOW_UP_RESPONSE_CONTRACT,
     MARKDOWN_CITATION_CONTRACT,
+    castingSourceDiscipline(session?.castingMethod, session?.castingBasis),
   ].join('\n\n');
 }
 

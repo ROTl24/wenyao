@@ -39,12 +39,12 @@ export function HistoryPanel({ sessions, onClose, onOpen, onDelete }: Props) {
                     <span>{CASTING_METHOD_LABELS[session.castingMethod]}</span>
                   </span>
                   <strong>{session.question}</strong>
-                  <small>{session.status === 'complete' ? `${session.plate?.baseHexagram.name} → ${session.plate?.changedHexagram.name}` : `起卦中 · 已定 ${session.tosses.length} 爻`}</small>
+                  <small>{session.status === 'complete' ? `${session.plate?.baseHexagram.name} → ${session.plate?.changedHexagram.name}` : `起卦中 · 已定 ${session.lines.length} 爻`}</small>
                 </span>
                 <span className="history-glyph" aria-hidden="true">
                   {session.plate
                     ? <HexagramLines lines={session.plate.lines.map((line) => line.baseYang).reverse()} moving={session.plate.movingLines} compact />
-                    : <strong>{session.tosses.length}<small>/ 6</small></strong>}
+                    : <strong>{session.lines.length}<small>/ 6</small></strong>}
                 </span>
               </button>
               <button className="delete-button" type="button" aria-label={`删除：${session.question}`} onClick={() => { if (window.confirm('确定删除这次起卦及全部对话吗？')) onDelete(session.id); }}><Trash2 size={16} /></button>

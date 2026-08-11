@@ -176,6 +176,25 @@ test('follow-up prompt requires a focused conversational answer instead of the i
   assert.doesNotMatch(followUpPrompt, /仍必须输出完整 11 个章节/);
 });
 
+test('time casting prompts preserve the source boundary and never describe coin tossing', () => {
+  const castingBasis = {
+    kind: 'time',
+    algorithm: 'time_meihua_lunar_v1',
+    upperTrigramNumber: 3,
+    lowerTrigramNumber: 4,
+    movingLine: 6,
+  };
+  const analysisPrompt = buildAnalysisSystemPrompt(studyPlate, 'time', castingBasis);
+  const followUpPrompt = buildFollowUpSystemPrompt({ castingMethod: 'time', castingBasis });
+
+  for (const prompt of [analysisPrompt, followUpPrompt]) {
+    assert.match(prompt, /梅花年月日时法成卦/);
+    assert.match(prompt, /上卦数 3/);
+    assert.match(prompt, /不得把本次卦象描述为摇铜钱、投币或随机所得/);
+    assert.match(prompt, /时间成卦/);
+  }
+});
+
 test('postChat requests text output and returns the response verbatim without JSON parsing', async () => {
   let requestBody;
   const restore = mockDeepSeek(markdown, (_url, options) => {
@@ -1591,6 +1610,11 @@ test('cloud analysis requests the strict 11-section structure and returns the AI
       apiKey: 'secret',
       question: '学业会好吗？',
       category: 'study',
+      castingMethod: 'time',
+      castingBasis: {
+        kind: 'time', algorithm: 'time_meihua_lunar_v1',
+        upperTrigramNumber: 3, lowerTrigramNumber: 4, movingLine: 6,
+      },
       plate: studyPlate,
       evidence,
       retrievalDiagnostics: { mode: 'hybrid-fused', warnings: [] },
@@ -1604,6 +1628,8 @@ test('cloud analysis requests the strict 11-section structure and returns the AI
     const payload = JSON.parse(requestBody.messages[1].content);
     assert.equal(payload.question, '学业会好吗？');
     assert.equal(payload.responseFormat, 'markdown');
+    assert.equal(payload.castingMethod, 'time');
+    assert.equal(payload.castingBasis.algorithm, 'time_meihua_lunar_v1');
     assert.deepEqual(payload.evidence.map((item) => item.id), ['E1']);
     assert.equal(payload.reasoningPlan.immutableFacts.baseHexagram, '泽雷随');
   } finally {
@@ -1634,6 +1660,11 @@ test('cloud analysis and follow-up preserve unstructured AI responses', async ()
       session: {
         question: '学业会好吗？',
         category: 'study',
+        castingMethod: 'time',
+        castingBasis: {
+          kind: 'time', algorithm: 'time_meihua_lunar_v1',
+          upperTrigramNumber: 3, lowerTrigramNumber: 4, movingLine: 6,
+        },
         plate: studyPlate,
         analysis: report,
         messages: [],
@@ -1663,6 +1694,11 @@ test('follow-up continues the same plate with a focused conversational response 
       session: {
         question: '学业会好吗？',
         category: 'study',
+        castingMethod: 'time',
+        castingBasis: {
+          kind: 'time', algorithm: 'time_meihua_lunar_v1',
+          upperTrigramNumber: 3, lowerTrigramNumber: 4, movingLine: 6,
+        },
         plate: studyPlate,
         analysis: { mode: 'cloud', markdown, generatedAt: new Date().toISOString() },
         messages: [{ role: 'user', content: '什么时候有结果？' }],
@@ -1676,6 +1712,8 @@ test('follow-up continues the same plate with a focused conversational response 
     assert.equal(context.originalReport, markdown);
     assert.equal(context.plate.baseHexagram.name, '泽雷随');
     assert.equal(context.responseMode, 'focused-follow-up');
+    assert.equal(context.castingMethod, 'time');
+    assert.equal(context.castingBasis.movingLine, 6);
     assert.match(requestBody.messages[0].content, /先直接回答/);
     assert.doesNotMatch(requestBody.messages[0].content, /严格按以下 11 个章节和顺序输出/);
   } finally {

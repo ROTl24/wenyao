@@ -369,6 +369,8 @@ button:focus-visible, input:focus-visible, textarea:focus-visible { outline: 2px
 .casting-method-button strong { font: 17px/1.4 var(--serif); letter-spacing: .08em; }
 .casting-method-button span { margin-top: 5px; color: var(--muted); font-size: 11px; }
 .casting-method-button--selected { border-color: var(--cinnabar); color: var(--cinnabar); background: rgba(247,239,226,.7); }
+.casting-method-button:disabled { cursor: wait; opacity: .62; }
+.home-start-error { margin: 12px 0 0; color: var(--cinnabar); font-size: 11px; line-height: 1.6; text-align: center; }
 .beijing-date-time-field { position: relative; z-index: 2; min-width: 0; text-align: left; }
 .beijing-date-time-field--wide { display: grid; grid-template-columns: minmax(180px, .43fr) minmax(250px, .57fr); grid-template-areas: "heading controls" "support controls"; align-items: center; gap: 4px 18px; margin-top: 18px; padding: 13px 16px; border: 1px solid rgba(140,113,70,.34); background: rgba(245,239,225,.5); }
 .beijing-date-time-field--compact { display: grid; grid-template-areas: "heading" "controls" "support"; gap: 9px; }

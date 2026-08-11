@@ -1,5 +1,10 @@
 import { isValidQuestion, QUESTION_LENGTH } from '../lib/question';
-import { CASTING_METHOD_LABELS, type CastingMethod, type SessionCategory } from '../lib/session';
+import {
+  CASTING_METHOD_DESCRIPTIONS,
+  CASTING_METHOD_LABELS,
+  type CastingMethod,
+} from '../lib/casting';
+import type { SessionCategory } from '../lib/session';
 import { SESSION_CATEGORY_LABELS } from '../lib/sessionCategories';
 import { BeijingDateTimeField } from './BeijingDateTimeField';
 import { CreatorLinks } from './CreatorLinks';
@@ -15,16 +20,20 @@ const categories: Array<{ id: SessionCategory; mark: string }> = [
   { id: 'other', mark: '余' },
 ];
 
+const castingMethods: readonly CastingMethod[] = ['digital', 'physical', 'random', 'time'];
+
 interface Props {
   question: string;
   category: SessionCategory | null;
   castingMethod: CastingMethod | null;
-  physicalTimeInput: string;
-  physicalTimeError: string;
+  castingTimeInput: string;
+  castingTimeError: string;
+  starting: boolean;
+  startError: string;
   onQuestionChange(value: string): void;
   onCategoryChange(value: SessionCategory): void;
   onCastingMethodChange(value: CastingMethod): void;
-  onPhysicalTimeChange(value: string): void;
+  onCastingTimeChange(value: string): void;
   onStart(): void;
 }
 
@@ -32,18 +41,21 @@ export function HomeScreen({
   question,
   category,
   castingMethod,
-  physicalTimeInput,
-  physicalTimeError,
+  castingTimeInput,
+  castingTimeError,
+  starting,
+  startError,
   onQuestionChange,
   onCategoryChange,
   onCastingMethodChange,
-  onPhysicalTimeChange,
+  onCastingTimeChange,
   onStart,
 }: Props) {
   const valid = isValidQuestion(question)
     && Boolean(category)
     && Boolean(castingMethod)
-    && (castingMethod !== 'physical' || !physicalTimeError);
+    && (!castingMethod || !['physical', 'time'].includes(castingMethod) || !castingTimeError)
+    && !starting;
   return (
     <main className="home-screen">
       <div className="mountain-wash mountain-wash--left" />
@@ -83,7 +95,7 @@ export function HomeScreen({
         <div className="casting-method-field">
           <div className="field-label" id="casting-method-label">选择起卦方式</div>
           <div className="casting-method-row" role="group" aria-labelledby="casting-method-label">
-            {(['digital', 'physical'] as const).map((method) => (
+            {castingMethods.map((method) => (
               <button
                 type="button"
                 key={method}
@@ -92,25 +104,31 @@ export function HomeScreen({
                   : 'casting-method-button'}
                 aria-pressed={castingMethod === method}
                 onClick={() => onCastingMethodChange(method)}
+                disabled={starting}
               >
                 <strong>{CASTING_METHOD_LABELS[method]}</strong>
-                <span>{method === 'digital' ? '应用内完成六轮 3D 模拟投掷' : '摇实体铜钱后逐爻录入钱象'}</span>
+                <span>{CASTING_METHOD_DESCRIPTIONS[method]}</span>
               </button>
             ))}
           </div>
         </div>
-        {castingMethod === 'physical' && (
+        {(castingMethod === 'physical' || castingMethod === 'time') && (
           <BeijingDateTimeField
-            id="physical-cast-time"
-            value={physicalTimeInput}
-            error={physicalTimeError}
-            disabled={false}
-            helperText="默认当前时间，可修改到实际摇卦时刻"
+            id="casting-time"
+            value={castingTimeInput}
+            error={castingTimeError}
+            disabled={starting}
+            helperText={castingMethod === 'time'
+              ? '默认当前时间，可修改到实际起念时刻；同一时辰内卦象相同'
+              : '默认当前时间，可修改到实际摇卦时刻'}
             layout="wide"
-            onChange={onPhysicalTimeChange}
+            onChange={onCastingTimeChange}
           />
         )}
-        <button className="primary-ink-button" type="button" disabled={!valid} onClick={onStart}>开始起卦</button>
+        <button className="primary-ink-button" type="button" disabled={!valid} onClick={onStart}>
+          {starting ? '正在保存卦象…' : '开始起卦'}
+        </button>
+        {startError ? <p className="home-start-error" role="alert">{startError}</p> : null}
         <p className="ritual-note">静心片刻，专注于一件事</p>
         <CreatorLinks variant="compact" />
       </section>

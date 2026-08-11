@@ -6,7 +6,7 @@ import {
   createSession,
   prepareToss,
   type DivinationSession,
-  type PreparedToss,
+  type PreparedCoinLine,
 } from './session';
 
 const STORAGE_KEY = 'wenyao-browser-sessions';
@@ -41,7 +41,11 @@ function completedPhysicalSession(id = 'physical-session'): DivinationSession {
   return {
     ...digital,
     castingMethod: 'physical',
-    tosses: digital.tosses.map(({ visualSeed: _visualSeed, ...toss }) => toss),
+    castingBasis: { kind: 'physical', algorithm: 'three_coin_manual_v1' },
+    lines: digital.lines.map((line) => ({
+      ...line,
+      coin: line.coin ? { faces: line.coin.faces } : undefined,
+    })),
   };
 }
 
@@ -122,9 +126,9 @@ describe('浏览器会话存储', () => {
     const input = {
       ...completedDigitalSession('canonical-session'),
       forgedTopLevel: { accepted: true },
-      tosses: completedDigitalSession().tosses.map((toss) => ({
-        ...toss,
-        forgedTossField: { accepted: true },
+      lines: completedDigitalSession().lines.map((line) => ({
+        ...line,
+        forgedLineField: { accepted: true },
       })),
     } as unknown as DivinationSession;
 
@@ -132,47 +136,38 @@ describe('浏览器会话存储', () => {
     const stored = JSON.parse(localStorage.getItem(STORAGE_KEY) || '[]') as Array<
       Record<string, unknown>
     >;
-    const storedTosses = stored[0].tosses as Array<Record<string, unknown>>;
+    const storedLines = stored[0].lines as Array<Record<string, unknown>>;
 
     expect(saved).not.toHaveProperty('forgedTopLevel');
-    expect(saved.tosses[0]).not.toHaveProperty('forgedTossField');
+    expect(saved.lines[0]).not.toHaveProperty('forgedLineField');
     expect(stored[0]).not.toHaveProperty('forgedTopLevel');
-    expect(storedTosses[0]).not.toHaveProperty('forgedTossField');
+    expect(storedLines[0]).not.toHaveProperty('forgedLineField');
     expect(saved.plate).toEqual(input.plate);
     expect(saved.analysis).toEqual(input.analysis);
     expect(saved.messages).toEqual(input.messages);
   });
 
-  it('rejects inconsistent toss derivations and non-contiguous line indexes', async () => {
-    const corruptions: Array<[string, (toss: Record<string, unknown>) => void]> = [
-      ['faces', (toss) => { toss.faces = ['reverse', 'reverse', 'reverse']; }],
-      ['value', (toss) => { toss.value = 9; }],
-      ['label', (toss) => { toss.label = '少阴'; }],
-      ['moving', (toss) => { toss.moving = false; }],
-      ['baseYang', (toss) => { toss.baseYang = true; }],
-      ['changedYang', (toss) => { toss.changedYang = false; }],
-    ];
+  it('rejects inconsistent coin evidence and non-contiguous line indexes', async () => {
+    const wrongFaces = structuredClone(completedDigitalSession('corrupt-faces'));
+    wrongFaces.lines[0].coin!.faces = ['reverse', 'reverse', 'reverse'];
+    await expect(desktop.sessions.save(wrongFaces)).rejects.toThrow('六爻记录冲突');
 
-    for (const [name, corrupt] of corruptions) {
-      const session = structuredClone(completedDigitalSession(`corrupt-${name}`));
-      corrupt(session.tosses[0] as unknown as Record<string, unknown>);
-      await expect(desktop.sessions.save(session)).rejects.toThrow(
-        '投币历史冲突',
-      );
-    }
+    const wrongValue = structuredClone(completedDigitalSession('corrupt-value'));
+    wrongValue.lines[0].value = 9;
+    await expect(desktop.sessions.save(wrongValue)).rejects.toThrow('六爻记录冲突');
 
     const badIndex = completedDigitalSession('bad-index');
-    badIndex.tosses[1].lineIndex = 3;
+    badIndex.lines[1].lineIndex = 3;
     await expect(desktop.sessions.save(badIndex)).rejects.toThrow(
-      '投币历史冲突',
+      '六爻记录冲突',
     );
   });
 
   it('requires non-empty visual seeds for digital confirmed and current tosses', async () => {
     const confirmed = completedDigitalSession('confirmed-without-seed');
-    confirmed.tosses[0].visualSeed = ' ';
+    confirmed.lines[0].coin!.visualSeed = ' ';
     await expect(desktop.sessions.save(confirmed)).rejects.toThrow(
-      '投币历史冲突',
+      '六爻记录冲突',
     );
 
     const current = prepareToss(
@@ -191,7 +186,7 @@ describe('浏览器会话存储', () => {
     await expect(desktop.sessions.get(valid.id)).resolves.toEqual(valid);
 
     const incomplete = completedPhysicalSession('incomplete-physical');
-    incomplete.tosses.pop();
+    incomplete.lines.pop();
     await expect(desktop.sessions.save(incomplete)).rejects.toThrow(
       '线下起卦只能保存完整六爻',
     );
@@ -203,20 +198,21 @@ describe('浏览器会话存储', () => {
     );
 
     const withCurrent = completedPhysicalSession('physical-with-current');
-    withCurrent.currentToss = {
+    withCurrent.currentLine = {
       ...createTossFromValue(7),
       id: 'physical-current',
       lineIndex: 7,
-    } as unknown as PreparedToss;
+      visualSeed: 'physical-seed',
+    } as PreparedCoinLine;
     await expect(desktop.sessions.save(withCurrent)).rejects.toThrow(
       '线下起卦只能保存完整六爻',
     );
 
     const withOwnedSeed = completedPhysicalSession('physical-with-owned-seed');
-    withOwnedSeed.tosses[0].visualSeed = undefined;
-    expect(Object.hasOwn(withOwnedSeed.tosses[0], 'visualSeed')).toBe(true);
+    withOwnedSeed.lines[0].coin!.visualSeed = undefined;
+    expect(Object.hasOwn(withOwnedSeed.lines[0].coin!, 'visualSeed')).toBe(true);
     await expect(desktop.sessions.save(withOwnedSeed)).rejects.toThrow(
-      '投币历史冲突',
+      '六爻记录冲突',
     );
   });
 

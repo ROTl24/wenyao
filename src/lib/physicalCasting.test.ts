@@ -34,9 +34,9 @@ describe('线下起卦草稿', () => {
       status: 'complete',
       updatedAt: '2026-07-30T00:02:00.000Z',
     });
-    expect(session.tosses.map((toss) => toss.value)).toEqual([6, 9, 8, 9, 7, 8]);
-    expect(session.tosses.map((toss) => toss.lineIndex)).toEqual([1, 2, 3, 4, 5, 6]);
-    expect(session.tosses.every((toss) => !Object.hasOwn(toss, 'visualSeed'))).toBe(true);
+    expect(session.lines.map((line) => line.value)).toEqual([6, 9, 8, 9, 7, 8]);
+    expect(session.lines.map((line) => line.lineIndex)).toEqual([1, 2, 3, 4, 5, 6]);
+    expect(session.lines.every((line) => line.coin && !Object.hasOwn(line.coin, 'visualSeed'))).toBe(true);
     expect(session.plate?.lines.map((line) => line.value)).toEqual([6, 9, 8, 9, 7, 8]);
   });
 

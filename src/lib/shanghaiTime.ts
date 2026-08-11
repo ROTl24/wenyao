@@ -129,6 +129,14 @@ export function formatShanghaiDate(instant: Date): string {
 }
 
 export function parseShanghaiDateTimeInput(value: string, now = new Date()): string {
+  const instant = new Date(parseShanghaiDateTimeValue(value));
+  if (instant.getTime() > now.getTime() + FUTURE_TOLERANCE_MS) {
+    throw new RangeError('起卦时间不能超过当前北京时间 5 分钟');
+  }
+  return instant.toISOString();
+}
+
+export function parseShanghaiDateTimeValue(value: string): string {
   const requested = parseInput(value);
   const requestedWallEpoch = wallEpoch(requested);
   const probes = [
@@ -147,11 +155,7 @@ export function parseShanghaiDateTimeInput(value: string, now = new Date()): str
   if (matches.length > 1) {
     throw new TypeError('该北京时间处于夏令时回拨重复时段，无法唯一确定');
   }
-  const instant = matches[0];
-  if (instant.getTime() > now.getTime() + FUTURE_TOLERANCE_MS) {
-    throw new RangeError('起卦时间不能超过当前北京时间 5 分钟');
-  }
-  return instant.toISOString();
+  return matches[0].toISOString();
 }
 
 export function shanghaiDateTimeError(value: string, now = new Date()): string {

@@ -27,19 +27,24 @@ function completedHistorySession(question: string): DivinationSession {
   const castAt = new Date('2026-07-14T08:00:00.000Z');
   const values = [7, 8, 7, 8, 7, 8] as const;
   return {
+    schemaVersion: 2,
     id: 'saved-session',
     question,
     category: 'career',
     castingMethod: 'digital',
+    castingBasis: { kind: 'digital', algorithm: 'three_coin_secure_v1' },
     castAt: castAt.toISOString(),
     updatedAt: castAt.toISOString(),
     status: 'complete',
-    tosses: values.map((value, index) => ({
-      ...createTossFromValue(value),
-      id: `saved-toss-${index + 1}`,
+    lines: values.map((value, index) => ({
+      id: `saved-line-${index + 1}`,
       lineIndex: index + 1,
-      visualSeed: `seed-${index + 1}`,
-      confirmedAt: castAt.toISOString(),
+      value,
+      recordedAt: castAt.toISOString(),
+      coin: {
+        faces: createTossFromValue(value).faces,
+        visualSeed: `seed-${index + 1}`,
+      },
     })),
     plate: buildPlate(values, castAt),
     messages: [],
@@ -121,6 +126,70 @@ describe('问爻桌面体验', () => {
       .filter((saved) => saved.status === 'complete');
     expect(completeSaves).toHaveLength(2);
     expect(completeSaves[1].id).toBe(completeSaves[0].id);
+  });
+
+  it('generates a random cast in one batch and retries the exact same result after a save failure', async () => {
+    const save = vi.spyOn(desktop.sessions, 'save')
+      .mockRejectedValueOnce(new Error('随机卦保存失败'))
+      .mockImplementation(async (next) => next);
+    const analyze = vi.spyOn(desktop.ai, 'analyze').mockImplementation(() => new Promise(() => {}));
+
+    render(<App />);
+    fireEvent.change(screen.getByLabelText('所占之事'), { target: { value: '随机起卦能否顺利完成' } });
+    fireEvent.click(screen.getByRole('button', { name: '其他' }));
+    fireEvent.click(screen.getByRole('button', { name: /随机起卦/ }));
+    fireEvent.click(screen.getByRole('button', { name: '开始起卦' }));
+
+    expect(await screen.findByRole('alert')).toHaveTextContent('随机卦保存失败');
+    expect(analyze).not.toHaveBeenCalled();
+    expect(screen.queryByRole('heading', { name: '第一爻' })).not.toBeInTheDocument();
+
+    fireEvent.click(screen.getByRole('button', { name: '开始起卦' }));
+    await waitFor(() => expect(save).toHaveBeenCalledTimes(2));
+    await waitFor(() => expect(analyze).toHaveBeenCalledTimes(1));
+    const [first, second] = save.mock.calls.map(([saved]) => saved);
+    expect(second.id).toBe(first.id);
+    expect(second.lines.map((line) => line.id)).toEqual(first.lines.map((line) => line.id));
+    expect(second).toMatchObject({
+      castingMethod: 'random',
+      castingBasis: { kind: 'random', algorithm: 'three_coin_secure_batch_v1' },
+      status: 'complete',
+    });
+    expect(second.lines).toHaveLength(6);
+    expect(await screen.findByText('AI 解读')).toBeVisible();
+  });
+
+  it('derives a time cast at zi hour, persists its basis and passes that source to AI', async () => {
+    const save = vi.spyOn(desktop.sessions, 'save').mockImplementation(async (next) => next);
+    const analyze = vi.spyOn(desktop.ai, 'analyze').mockImplementation(() => new Promise(() => {}));
+
+    render(<App />);
+    fireEvent.change(screen.getByLabelText('所占之事'), { target: { value: '时间起卦能否顺利完成' } });
+    fireEvent.click(screen.getByRole('button', { name: '其他' }));
+    fireEvent.click(screen.getByRole('button', { name: /时间起卦/ }));
+    const timeField = screen.getByRole('group', { name: '起卦时间（北京时间）' });
+    fireEvent.change(within(timeField).getByLabelText('日期'), { target: { value: '2026-08-03' } });
+    fireEvent.change(within(timeField).getByLabelText('时刻'), { target: { value: '23:00' } });
+    fireEvent.click(screen.getByRole('button', { name: '开始起卦' }));
+
+    await waitFor(() => expect(save).toHaveBeenCalledTimes(1));
+    await waitFor(() => expect(analyze).toHaveBeenCalledTimes(1));
+    const saved = save.mock.calls[0][0];
+    expect(saved.castingMethod).toBe('time');
+    expect(saved.lines.map((line) => line.value)).toEqual([7, 8, 8, 7, 8, 9]);
+    expect(saved.lines.every((line) => !Object.hasOwn(line, 'coin'))).toBe(true);
+    expect(saved.castingBasis).toMatchObject({
+      kind: 'time',
+      upperTrigramNumber: 3,
+      lowerTrigramNumber: 4,
+      movingLine: 6,
+      calendar: { traditionalDate: '2026-08-04', timeBranch: '子' },
+    });
+    expect(analyze.mock.calls[0][0]).toMatchObject({
+      castingMethod: 'time',
+      castingBasis: saved.castingBasis,
+    });
+    expect(await screen.findByRole('region', { name: '时间起卦依据' })).toHaveTextContent('上卦数 3');
   });
 
   it('opens calendar, history and settings from the desktop chrome', async () => {
@@ -435,8 +504,8 @@ describe('问爻桌面体验', () => {
       castingMethod: 'physical',
       status: 'complete',
     });
-    expect(saved.tosses).toHaveLength(6);
-    expect(saved.tosses.every((toss) => !Object.hasOwn(toss, 'visualSeed'))).toBe(true);
+    expect(saved.lines).toHaveLength(6);
+    expect(saved.lines.every((line) => line.coin && !Object.hasOwn(line.coin, 'visualSeed'))).toBe(true);
     expect(saved.plate).toBeDefined();
     expect(await screen.findByText('AI 解读')).toBeVisible();
   });
@@ -489,8 +558,8 @@ describe('问爻桌面体验', () => {
 
     await waitFor(() => expect(save).toHaveBeenCalledTimes(2));
     expect(save.mock.calls[1][0].id).toBe(save.mock.calls[0][0].id);
-    expect(save.mock.calls[1][0].tosses.map((toss) => toss.id)).toEqual(
-      save.mock.calls[0][0].tosses.map((toss) => toss.id),
+    expect(save.mock.calls[1][0].lines.map((line) => line.id)).toEqual(
+      save.mock.calls[0][0].lines.map((line) => line.id),
     );
     expect(await screen.findByText('AI 解读')).toBeVisible();
   });

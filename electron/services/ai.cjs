@@ -923,12 +923,14 @@ async function postChat({ chat, messages, signal }) {
   return requireAIResponse(content);
 }
 
-async function analyzeCloud({ chat, question, category, plate, evidence = [], retrievalDiagnostics, signal }) {
+async function analyzeCloud({ chat, question, category, castingMethod, castingBasis, plate, evidence = [], retrievalDiagnostics, signal }) {
   assertCloudAnalysisConfigured({ chat });
   const plan = reasoningPlan(category, plate);
   const payload = {
     responseFormat: 'markdown',
     question,
+    castingMethod,
+    castingBasis,
     reasoningPlan: plan,
     retrievalDiagnostics,
     evidence: evidencePayload(evidence),
@@ -944,7 +946,7 @@ async function analyzeCloud({ chat, question, category, plate, evidence = [], re
     chat,
     signal,
     messages: [
-      { role: 'system', content: buildAnalysisSystemPrompt(plate) },
+      { role: 'system', content: buildAnalysisSystemPrompt(plate, castingMethod, castingBasis) },
       { role: 'user', content: JSON.stringify(payload) },
     ],
   });
@@ -978,6 +980,8 @@ async function followUpCloud({ chat, question, session, evidence = [], signal })
     responseMode: 'focused-follow-up',
     originalQuestion: session.question,
     category: session.category,
+    castingMethod: session.castingMethod,
+    castingBasis: session.castingBasis,
     plate: session.plate,
     reasoningPlan: reasoningPlan(session.category, session.plate),
     originalReport,
@@ -987,7 +991,7 @@ async function followUpCloud({ chat, question, session, evidence = [], signal })
     chat,
     signal,
     messages: [
-      { role: 'system', content: buildFollowUpSystemPrompt() },
+      { role: 'system', content: buildFollowUpSystemPrompt(session) },
       { role: 'user', content: JSON.stringify(context) },
       ...history,
       { role: 'user', content: question },

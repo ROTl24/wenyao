@@ -1,5 +1,6 @@
 import { Solar, type Lunar } from 'lunar-javascript';
-import { shanghaiDateTimeParts } from './shanghaiTime';
+import { parseShanghaiDateTimeValue, shanghaiDateTimeParts } from './shanghaiTime';
+import { formatTraditionalLunarDateLabel } from './traditionalCalendar';
 
 interface GregorianDateParts {
   year: number;
@@ -48,6 +49,14 @@ export function formatLunarDateLabel(gregorianDate: string): string | null {
   try {
     const lunar = Solar.fromYmd(parts.year, parts.month, parts.day).getLunar();
     return `农历${lunar.getYearInGanZhi()}年${lunar.getMonthInChinese()}月${lunar.getDayInChinese()}`;
+  } catch {
+    return null;
+  }
+}
+
+export function formatTraditionalLunarDateTimeLabel(value: string): string | null {
+  try {
+    return formatTraditionalLunarDateLabel(new Date(parseShanghaiDateTimeValue(value)));
   } catch {
     return null;
   }

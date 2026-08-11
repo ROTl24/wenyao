@@ -15,6 +15,7 @@ import { desktop } from './lib/desktop';
 import { currentAlmanacSelection, type AlmanacSelection } from './lib/almanac';
 import { isAIUsable } from './lib/aiStatus';
 import { randomToss, upgradePlate } from './lib/divination';
+import { generateRandomCasting } from './lib/casting';
 import { isValidQuestion } from './lib/question';
 import type { EvidenceEntry, RetrievalDiagnostics } from './lib/retrieval';
 import {
@@ -32,6 +33,7 @@ import {
 } from './lib/shanghaiTime';
 import {
   confirmCurrentToss,
+  createCompletedSession,
   createSession,
   normalizeSession,
   prepareToss,
@@ -41,6 +43,7 @@ import {
   type DivinationSession,
   type SessionCategory,
 } from './lib/session';
+import { deriveTimeCasting } from './lib/timeCasting';
 import type { LineValue } from './lib/divination';
 import type { AIConfigStatus, AIProviderCatalog, UpdateState } from './types/desktop';
 
@@ -74,7 +77,7 @@ const categoryTerms: Record<SessionCategory, string[]> = {
 };
 
 function prepareNext(session: DivinationSession): DivinationSession {
-  if (session.status === 'complete' || session.currentToss) return session;
+  if (session.status === 'complete' || session.currentLine) return session;
   return prepareToss(session, randomToss(), crypto.randomUUID());
 }
 
@@ -111,11 +114,14 @@ export function App() {
   const [question, setQuestion] = useState('');
   const [category, setCategory] = useState<SessionCategory | null>(null);
   const [castingMethod, setCastingMethod] = useState<CastingMethod | null>(null);
-  const [physicalTimeInput, setPhysicalTimeInput] = useState(() => formatShanghaiDateTimeInput());
+  const [castingTimeInput, setCastingTimeInput] = useState(() => formatShanghaiDateTimeInput());
   const [physicalDraft, setPhysicalDraft] = useState<PhysicalCastDraft | null>(null);
   const [pendingPhysicalSession, setPendingPhysicalSession] = useState<DivinationSession | null>(null);
   const [physicalFinalizing, setPhysicalFinalizing] = useState(false);
   const [physicalFinalizeError, setPhysicalFinalizeError] = useState('');
+  const [starting, setStarting] = useState(false);
+  const [startError, setStartError] = useState('');
+  const [pendingStartSession, setPendingStartSession] = useState<DivinationSession | null>(null);
   const [session, setSession] = useState<DivinationSession | null>(null);
   const [sessionSaveStatus, setSessionSaveStatus] = useState<SessionSaveStatus>('idle');
   const [sessionSaveError, setSessionSaveError] = useState('');
@@ -155,9 +161,9 @@ export function App() {
     aiStatusRef.current = next;
     setAIStatus(next);
   };
-  const physicalTimeError = useMemo(
-    () => shanghaiDateTimeError(physicalTimeInput),
-    [physicalTimeInput],
+  const castingTimeError = useMemo(
+    () => shanghaiDateTimeError(castingTimeInput),
+    [castingTimeInput],
   );
 
   useEffect(() => {
@@ -396,7 +402,15 @@ export function App() {
         setEvidence(found.evidence);
         setRetrievalDiagnostics(found.diagnostics);
       }
-      const result = await desktop.ai.analyze({ question: target.question, category: target.category, plate: target.plate, evidence: found.evidence, retrievalDiagnostics: found.diagnostics || undefined });
+      const result = await desktop.ai.analyze({
+        question: target.question,
+        category: target.category,
+        castingMethod: target.castingMethod,
+        castingBasis: target.castingBasis,
+        plate: target.plate,
+        evidence: found.evidence,
+        retrievalDiagnostics: found.diagnostics || undefined,
+      });
       if (result.ok && result.report) {
         await persistAnalysis(withAnalysis(target, result.report), runToken);
       } else if (ownsAnalysisUi()) {
@@ -411,18 +425,20 @@ export function App() {
     }
   };
 
-  const start = () => {
-    if (!category || !castingMethod || !isValidQuestion(question)) return;
+  const start = async () => {
+    if (!category || !castingMethod || !isValidQuestion(question) || starting) return;
     setSessionSaveStatus('idle');
     setSessionSaveError('');
     setAnalysisSaveStatus('idle');
     setAnalysisSaveError('');
     setPhysicalFinalizeError('');
     setPendingPhysicalSession(null);
+    setStartError('');
     if (castingMethod === 'physical') {
       try {
-        const castAt = parseShanghaiDateTimeInput(physicalTimeInput);
+        const castAt = parseShanghaiDateTimeInput(castingTimeInput);
         setPhysicalDraft(createPhysicalCastDraft(question, category, castAt));
+        setPendingStartSession(null);
         activateSession(null);
         setScreen('physical-casting');
       } catch {
@@ -430,22 +446,65 @@ export function App() {
       }
       return;
     }
-    const next = prepareNext(createSession(question, category, new Date(), 'digital'));
-    void persist(next);
-    setScreen('casting');
+
+    let next = pendingStartSession;
+    try {
+      if (!next) {
+        if (castingMethod === 'digital') {
+          next = prepareNext(createSession(question, category, new Date(), 'digital'));
+        } else if (castingMethod === 'random') {
+          const castAt = new Date();
+          next = createCompletedSession(
+            question,
+            category,
+            castAt,
+            generateRandomCasting(castAt),
+          );
+        } else {
+          const castAt = new Date(parseShanghaiDateTimeInput(castingTimeInput));
+          next = createCompletedSession(
+            question,
+            category,
+            castAt,
+            deriveTimeCasting(castAt),
+          );
+        }
+        setPendingStartSession(next);
+      }
+
+      setStarting(true);
+      setSessionSaveStatus('saving');
+      activateSession(next);
+      const saved = await commitSession(next);
+      if (!saved) return;
+      setPendingStartSession(null);
+      setSessionSaveStatus('saved');
+      setScreen(saved.status === 'complete' ? 'result' : 'casting');
+      if (saved.status === 'complete') void runAnalysis(saved);
+    } catch (error) {
+      setSessionSaveStatus('error');
+      setStartError(error instanceof Error ? error.message : '起卦保存失败，请重试。');
+      activateSession(null);
+    } finally {
+      setStarting(false);
+    }
   };
 
   const changeCastingMethod = (method: CastingMethod) => {
-    if (method === 'physical' && castingMethod !== 'physical') {
-      setPhysicalTimeInput(formatShanghaiDateTimeInput());
+    if ((method === 'physical' || method === 'time') && castingMethod !== method) {
+      setCastingTimeInput(formatShanghaiDateTimeInput());
     }
     setCastingMethod(method);
+    setPendingStartSession(null);
+    setStartError('');
     setPhysicalFinalizeError('');
   };
 
-  const changePhysicalTime = (value: string) => {
+  const changeCastingTime = (value: string) => {
     if (physicalFinalizing) return;
-    setPhysicalTimeInput(value);
+    setCastingTimeInput(value);
+    setPendingStartSession(null);
+    setStartError('');
     setPendingPhysicalSession(null);
     setPhysicalFinalizeError('');
   };
@@ -456,13 +515,16 @@ export function App() {
     if (next.status === 'casting') next = prepareNext(next);
     activateSession(next);
     if (next.status === 'complete') {
+      setScreen('result');
       setSessionSaveStatus('saving');
       setSessionSaveError('');
-      setScreen('result');
       void commitSession(next)
         .then((saved) => {
           if (!saved) return;
-          if (isActiveSession(saved.id)) setSessionSaveStatus('saved');
+          if (isActiveSession(saved.id)) {
+            setSessionSaveStatus('saved');
+            setScreen('result');
+          }
           return runAnalysis(saved);
         })
         .catch((error) => {
@@ -500,11 +562,11 @@ export function App() {
   };
 
   const finalizePhysical = async () => {
-    if (!physicalDraft || physicalTimeError || physicalFinalizing) return;
+    if (!physicalDraft || castingTimeError || physicalFinalizing) return;
     setPhysicalFinalizing(true);
     setPhysicalFinalizeError('');
     try {
-      const castAt = parseShanghaiDateTimeInput(physicalTimeInput);
+      const castAt = parseShanghaiDateTimeInput(castingTimeInput);
       const completedDraft = updatePhysicalCastTime(physicalDraft, castAt);
       const completeSession = pendingPhysicalSession ?? finalizePhysicalCast(completedDraft);
       setPendingPhysicalSession(completeSession);
@@ -543,7 +605,7 @@ export function App() {
     setQuestion(next.question);
     setCategory(next.category);
     setCastingMethod(next.castingMethod);
-    setPhysicalTimeInput(formatShanghaiDateTimeInput(new Date(next.castAt)));
+    setCastingTimeInput(formatShanghaiDateTimeInput(new Date(next.castAt)));
     setHistoryOpen(false);
     setSessionSaveStatus('saved');
     setSessionSaveError('');
@@ -655,10 +717,13 @@ export function App() {
     setQuestion('');
     setCategory(null);
     setCastingMethod(null);
+    setPendingStartSession(null);
+    setStarting(false);
+    setStartError('');
     setPhysicalDraft(null);
     setPendingPhysicalSession(null);
     setPhysicalFinalizing(false);
-    setPhysicalTimeInput(formatShanghaiDateTimeInput());
+    setCastingTimeInput(formatShanghaiDateTimeInput());
     setPhysicalFinalizeError('');
     setSessionSaveStatus('idle');
     setSessionSaveError('');
@@ -709,16 +774,26 @@ export function App() {
               question={question}
               category={category}
               castingMethod={castingMethod}
-              physicalTimeInput={physicalTimeInput}
-              physicalTimeError={physicalTimeError}
-              onQuestionChange={setQuestion}
-              onCategoryChange={setCategory}
+              castingTimeInput={castingTimeInput}
+              castingTimeError={castingTimeError}
+              starting={starting}
+              startError={startError}
+              onQuestionChange={(value) => {
+                setQuestion(value);
+                setPendingStartSession(null);
+                setStartError('');
+              }}
+              onCategoryChange={(value) => {
+                setCategory(value);
+                setPendingStartSession(null);
+                setStartError('');
+              }}
               onCastingMethodChange={changeCastingMethod}
-              onPhysicalTimeChange={changePhysicalTime}
-              onStart={start}
+              onCastingTimeChange={changeCastingTime}
+              onStart={() => void start()}
             />
           )}
-          {screen === 'casting' && session?.currentToss && <RitualScreen session={session} onConfirm={confirm} />}
+          {screen === 'casting' && session?.currentLine && <RitualScreen session={session} onConfirm={confirm} />}
           {screen === 'physical-casting' && physicalDraft && (
             <PhysicalCastingScreen
               draft={physicalDraft}
@@ -729,11 +804,11 @@ export function App() {
           {screen === 'physical-review' && physicalDraft && (
             <PhysicalReviewScreen
               draft={physicalDraft}
-              timeInput={physicalTimeInput}
-              timeError={physicalTimeError}
+              timeInput={castingTimeInput}
+              timeError={castingTimeError}
               finalizing={physicalFinalizing}
               finalizeError={physicalFinalizeError}
-              onTimeChange={changePhysicalTime}
+              onTimeChange={changeCastingTime}
               onChangeLine={changePhysicalLine}
               onConfirm={() => void finalizePhysical()}
               onCancel={discardPhysicalDraft}

@@ -31,16 +31,31 @@ function tossFor(value, lineIndex, { castingMethod = 'digital', confirmed = true
   return toss;
 }
 
+function lineFor(value, lineIndex, { castingMethod = 'digital' } = {}) {
+  return {
+    id: `line-${lineIndex}`,
+    lineIndex,
+    value,
+    recordedAt: `2026-07-30T12:00:0${lineIndex}.000Z`,
+    coin: {
+      faces: FACES_BY_VALUE[value],
+      ...(castingMethod === 'digital' ? { visualSeed: `seed-${lineIndex}` } : {}),
+    },
+  };
+}
+
 function sessionFixture(overrides = {}) {
   return {
+    schemaVersion: 2,
     id: 'session-1',
     question: '项目是否可以顺利推进',
     category: 'career',
     castingMethod: 'digital',
+    castingBasis: { kind: 'digital', algorithm: 'three_coin_secure_v1' },
     castAt: CAST_AT,
     updatedAt: UPDATED_AT,
     status: 'casting',
-    tosses: [],
+    lines: [],
     messages: [],
     ...overrides,
   };
@@ -50,8 +65,9 @@ function physicalSession(overrides = {}) {
   return sessionFixture({
     id: 'physical-session',
     castingMethod: 'physical',
+    castingBasis: { kind: 'physical', algorithm: 'three_coin_manual_v1' },
     status: 'complete',
-    tosses: VALUES.map((value, index) => tossFor(value, index + 1, {
+    lines: VALUES.map((value, index) => lineFor(value, index + 1, {
       castingMethod: 'physical',
     })),
     plate: { baseHexagram: { name: '测试卦' } },
@@ -108,6 +124,10 @@ test('legacy sessions without castingMethod read as digital without rewriting or
       nested: { retained: true },
     },
   });
+  delete legacySession.schemaVersion;
+  delete legacySession.castingBasis;
+  legacySession.tosses = [];
+  delete legacySession.lines;
   delete legacySession.castingMethod;
   fs.writeFileSync(filePath, JSON.stringify({
     sessions: [legacySession],
@@ -137,6 +157,10 @@ test('castingMethod cannot change for an existing session, including legacy digi
   const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'wenyao-store-'));
   const filePath = path.join(dir, 'app-data.json');
   const legacy = sessionFixture({ id: 'legacy-method' });
+  delete legacy.schemaVersion;
+  delete legacy.castingBasis;
+  legacy.tosses = [];
+  delete legacy.lines;
   delete legacy.castingMethod;
   fs.writeFileSync(filePath, JSON.stringify({ sessions: [legacy], settings: {} }));
   const legacyStore = new JsonStore(filePath);
@@ -146,29 +170,29 @@ test('castingMethod cannot change for an existing session, including legacy digi
   );
 });
 
-test('digital confirmed and current tosses require a non-empty visualSeed', () => {
+test('digital confirmed and current lines require a non-empty visualSeed', () => {
   const store = createStore();
-  const confirmed = tossFor(7, 1);
-  delete confirmed.visualSeed;
+  const confirmed = lineFor(7, 1);
+  delete confirmed.coin.visualSeed;
   assert.throws(
-    () => store.saveSession(sessionFixture({ tosses: [confirmed] })),
-    /投币历史冲突/,
+    () => store.saveSession(sessionFixture({ lines: [confirmed] })),
+    /六爻记录冲突/,
   );
 
   const current = tossFor(7, 1, { confirmed: false });
   current.visualSeed = '   ';
   assert.throws(
-    () => store.saveSession(sessionFixture({ currentToss: current })),
+    () => store.saveSession(sessionFixture({ currentLine: current })),
     /当前投币状态冲突/,
   );
 
   const valid = store.saveSession(sessionFixture({
     id: 'digital-valid',
-    tosses: [tossFor(7, 1)],
-    currentToss: tossFor(8, 2, { confirmed: false }),
+    lines: [lineFor(7, 1)],
+    currentLine: tossFor(8, 2, { confirmed: false }),
   }));
-  assert.equal(valid.tosses[0].visualSeed, 'seed-1');
-  assert.equal(valid.currentToss.visualSeed, 'seed-2');
+  assert.equal(valid.lines[0].coin.visualSeed, 'seed-1');
+  assert.equal(valid.currentLine.visualSeed, 'seed-2');
 });
 
 test('physical casting persists only a complete six-line record with no current toss or visualSeed', () => {
@@ -180,8 +204,8 @@ test('physical casting persists only a complete six-line record with no current 
 
   assert.equal(saved.castingMethod, 'physical');
   assert.equal(saved.status, 'complete');
-  assert.equal(saved.tosses.length, 6);
-  assert.equal(saved.tosses.some((toss) => Object.hasOwn(toss, 'visualSeed')), false);
+  assert.equal(saved.lines.length, 6);
+  assert.equal(saved.lines.some((line) => Object.hasOwn(line.coin, 'visualSeed')), false);
   assert.deepEqual(saved.plate, { baseHexagram: { name: '测试卦' } });
   assert.deepEqual(saved.analysis, { mode: 'cloud', markdown: '# 已解读', generatedAt: UPDATED_AT });
   assert.equal(saved.messages.length, 1);
@@ -189,7 +213,7 @@ test('physical casting persists only a complete six-line record with no current 
   assert.throws(
     () => store.saveSession(physicalSession({
       id: 'physical-partial',
-      tosses: physicalSession().tosses.slice(0, 5),
+      lines: physicalSession().lines.slice(0, 5),
     })),
     /线下起卦只能保存完整六爻/,
   );
@@ -203,30 +227,30 @@ test('physical casting persists only a complete six-line record with no current 
   assert.throws(
     () => store.saveSession(physicalSession({
       id: 'physical-current',
-      currentToss: tossFor(7, 7, { castingMethod: 'physical', confirmed: false }),
+      currentLine: tossFor(7, 7, { castingMethod: 'physical', confirmed: false }),
     })),
     /线下起卦只能保存完整六爻/,
   );
 
   const seeded = physicalSession({ id: 'physical-seeded' });
-  seeded.tosses[0].visualSeed = undefined;
-  assert.throws(() => store.saveSession(seeded), /投币历史冲突/);
+  seeded.lines[0].coin.visualSeed = undefined;
+  assert.throws(() => store.saveSession(seeded), /六爻记录冲突/);
 });
 
-test('toss order, faces, value and derived fields must be self-consistent', () => {
+test('line order, faces and value must be self-consistent', () => {
   const store = createStore();
 
   const wrongOrder = physicalSession({ id: 'wrong-order' });
-  wrongOrder.tosses[1].lineIndex = 3;
-  assert.throws(() => store.saveSession(wrongOrder), /投币历史冲突/);
+  wrongOrder.lines[1].lineIndex = 3;
+  assert.throws(() => store.saveSession(wrongOrder), /六爻记录冲突/);
 
   const wrongFaces = physicalSession({ id: 'wrong-faces' });
-  wrongFaces.tosses[0].faces = ['reverse', 'reverse', 'reverse'];
-  assert.throws(() => store.saveSession(wrongFaces), /投币历史冲突/);
+  wrongFaces.lines[0].coin.faces = ['reverse', 'reverse', 'reverse'];
+  assert.throws(() => store.saveSession(wrongFaces), /六爻记录冲突/);
 
-  const wrongDerived = physicalSession({ id: 'wrong-derived' });
-  wrongDerived.tosses[3].changedYang = true;
-  assert.throws(() => store.saveSession(wrongDerived), /投币历史冲突/);
+  const wrongValue = physicalSession({ id: 'wrong-value' });
+  wrongValue.lines[3].value = 6;
+  assert.throws(() => store.saveSession(wrongValue), /六爻记录冲突/);
 });
 
 test('JsonStore never exposes an encrypted secret through public AI state', () => {

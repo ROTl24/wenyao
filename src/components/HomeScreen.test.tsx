@@ -5,10 +5,12 @@ import { HomeScreen } from './HomeScreen';
 describe('HomeScreen 事项题签', () => {
   const sharedProps = {
     castingMethod: 'digital' as const,
-    physicalTimeInput: '2026-07-12T12:00',
-    physicalTimeError: '',
+    castingTimeInput: '2026-07-12T12:00',
+    castingTimeError: '',
+    starting: false,
+    startError: '',
     onCastingMethodChange: vi.fn(),
-    onPhysicalTimeChange: vi.fn(),
+    onCastingTimeChange: vi.fn(),
   };
 
   it('presents eight text-first category choices with stable accessible names', () => {
@@ -48,7 +50,7 @@ describe('HomeScreen 事项题签', () => {
     expect(screen.getByRole('button', { name: '感情婚姻' })).toHaveAttribute('aria-pressed', 'false');
   });
 
-  it('switches between online and offline casting and exposes Beijing time only offline', () => {
+  it('offers all four casting methods and exposes Beijing time for physical and time casting', () => {
     const onCastingMethodChange = vi.fn();
     const { rerender } = render(
       <HomeScreen
@@ -61,6 +63,10 @@ describe('HomeScreen 事项题签', () => {
         onStart={vi.fn()}
       />,
     );
+    const methods = screen.getByRole('group', { name: '选择起卦方式' });
+    expect(within(methods).getAllByRole('button')).toHaveLength(4);
+    expect(within(methods).getByRole('button', { name: /随机起卦/ })).toBeVisible();
+    expect(within(methods).getByRole('button', { name: /时间起卦/ })).toBeVisible();
     expect(screen.queryByRole('group', { name: '起卦时间（北京时间）' })).not.toBeInTheDocument();
     fireEvent.click(screen.getByRole('button', { name: /线下起卦/ }));
     expect(onCastingMethodChange).toHaveBeenCalledWith('physical');
@@ -81,7 +87,20 @@ describe('HomeScreen 事项题签', () => {
     expect(within(timeField).getByLabelText('时刻')).toHaveValue('12:00');
 
     fireEvent.change(within(timeField).getByLabelText('时刻'), { target: { value: '12:01' } });
-    expect(sharedProps.onPhysicalTimeChange).toHaveBeenCalledWith('2026-07-12T12:01');
+    expect(sharedProps.onCastingTimeChange).toHaveBeenCalledWith('2026-07-12T12:01');
+
+    rerender(
+      <HomeScreen
+        question="问事中"
+        category="career"
+        {...sharedProps}
+        castingMethod="time"
+        onQuestionChange={vi.fn()}
+        onCategoryChange={vi.fn()}
+        onStart={vi.fn()}
+      />,
+    );
+    expect(screen.getByRole('group', { name: '起卦时间（北京时间）' })).toHaveTextContent('同一时辰内卦象相同');
   });
 
   it('associates an offline time error with both segments and prevents starting', () => {
@@ -92,8 +111,8 @@ describe('HomeScreen 事项题签', () => {
         category="career"
         {...sharedProps}
         castingMethod="physical"
-        physicalTimeInput="2026-07-12T"
-        physicalTimeError={error}
+        castingTimeInput="2026-07-12T"
+        castingTimeError={error}
         onQuestionChange={vi.fn()}
         onCategoryChange={vi.fn()}
         onStart={vi.fn()}

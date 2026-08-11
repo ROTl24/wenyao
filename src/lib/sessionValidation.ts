@@ -1,18 +1,17 @@
-import { createToss, type CoinFace } from './divination';
-import type { CastingMethod, DivinationSession } from './session';
+import { createToss, type CoinFace, type LineValue } from './divination';
+import {
+  normalizeSession,
+  type CastingMethod,
+  type DivinationSession,
+} from './session';
+import { deriveTimeCasting } from './timeCasting';
 
 type UnknownRecord = Record<string, unknown>;
 
-const CASTING_METHODS = new Set<CastingMethod>(['digital', 'physical']);
+const CASTING_METHODS = new Set<CastingMethod>(['digital', 'physical', 'random', 'time']);
+const LINE_VALUES = new Set<LineValue>([6, 7, 8, 9]);
 const SESSION_CATEGORIES = new Set([
-  'career',
-  'wealth',
-  'relationship',
-  'health',
-  'study',
-  'lost_item',
-  'travel',
-  'other',
+  'career', 'wealth', 'relationship', 'health', 'study', 'lost_item', 'travel', 'other',
 ]);
 const SESSION_STATUSES = new Set(['casting', 'complete']);
 
@@ -51,129 +50,156 @@ function pickOwn(input: unknown, fields: readonly string[]): UnknownRecord {
   return output;
 }
 
-function sanitizeToss(value: unknown, confirmed: boolean): UnknownRecord {
+function sanitizeCoin(value: unknown): UnknownRecord | undefined {
+  if (!isRecord(value)) return undefined;
+  return pickOwn(value, ['faces', 'visualSeed']);
+}
+
+function sanitizeLine(value: unknown): UnknownRecord {
+  const line = pickOwn(value, ['id', 'lineIndex', 'value', 'recordedAt']);
+  if (isRecord(value)) {
+    const coin = sanitizeCoin(value.coin);
+    if (coin) line.coin = coin;
+  }
+  return line;
+}
+
+function sanitizeCurrentLine(value: unknown): UnknownRecord {
   return pickOwn(value, [
-    'id',
-    'lineIndex',
-    'visualSeed',
-    ...(confirmed ? ['confirmedAt'] : []),
-    'faces',
-    'value',
-    'label',
-    'moving',
-    'baseYang',
-    'changedYang',
+    'id', 'lineIndex', 'visualSeed', 'faces', 'value', 'label', 'moving', 'baseYang', 'changedYang',
   ]);
 }
 
-/**
- * Canonicalizes renderer-owned session data with the same allowlist used by Electron IPC.
- */
+function sanitizeCastingBasis(value: unknown): UnknownRecord {
+  if (!isRecord(value)) return {};
+  if (value.kind !== 'time') return pickOwn(value, ['kind', 'algorithm']);
+  const basis = pickOwn(value, [
+    'kind', 'algorithm', 'castAt', 'upperTrigramNumber', 'lowerTrigramNumber', 'movingLine',
+  ]);
+  if (isRecord(value.calendar)) {
+    const calendar = pickOwn(value.calendar, [
+      'timezone', 'rule', 'traditionalDate', 'lunarYearGanZhi', 'lunarYearBranch',
+      'lunarMonth', 'leapMonth', 'lunarDay', 'lunarLabel', 'timeBranch',
+    ]);
+    if (isRecord(value.calendar.numbers)) {
+      calendar.numbers = pickOwn(value.calendar.numbers, ['year', 'month', 'day', 'hour']);
+    }
+    basis.calendar = calendar;
+  }
+  return basis;
+}
+
+/** Canonicalizes renderer-owned session data with the Electron IPC allowlist. */
 export function sanitizeRendererSession(value: unknown): unknown {
   const session = pickOwn(value, [
-    'id',
-    'question',
-    'category',
-    'castingMethod',
-    'castAt',
-    'updatedAt',
-    'status',
-    'plate',
-    'analysis',
-    'messages',
+    'schemaVersion', 'id', 'question', 'category', 'castingMethod', 'castAt', 'updatedAt',
+    'status', 'plate', 'analysis', 'messages',
   ]);
-  if (isRecord(value) && Array.isArray(value.tosses)) {
-    session.tosses = value.tosses.map((toss) => sanitizeToss(toss, true));
-  }
-  if (isRecord(value) && isRecord(value.currentToss)) {
-    session.currentToss = sanitizeToss(value.currentToss, false);
+  if (isRecord(value)) {
+    session.castingBasis = sanitizeCastingBasis(value.castingBasis);
+    if (Array.isArray(value.lines)) session.lines = value.lines.map(sanitizeLine);
+    if (isRecord(value.currentLine)) session.currentLine = sanitizeCurrentLine(value.currentLine);
   }
   return session;
 }
 
-function validToss(
-  tossValue: unknown,
-  expectedLineIndex: number,
-  castingMethod: CastingMethod,
-  confirmed: boolean,
-): tossValue is UnknownRecord {
-  if (!isRecord(tossValue)) return false;
-  const toss = tossValue;
-  if (!nonEmptyString(toss.id) || toss.lineIndex !== expectedLineIndex) return false;
-  if (
-    !Array.isArray(toss.faces)
-    || toss.faces.length !== 3
-    || toss.faces.some((face) => face !== 'text' && face !== 'reverse')
-  ) return false;
-
-  const expected = createToss(toss.faces as CoinFace[]);
-  if (
-    toss.value !== expected.value
-    || toss.label !== expected.label
-    || toss.moving !== expected.moving
-    || toss.baseYang !== expected.baseYang
-    || toss.changedYang !== expected.changedYang
-  ) return false;
-
-  if (confirmed ? !exactIso(toss.confirmedAt) : hasOwn(toss, 'confirmedAt')) return false;
-  if (castingMethod === 'digital') return nonEmptyString(toss.visualSeed);
-  return !hasOwn(toss, 'visualSeed');
+function validCoin(value: unknown, lineValue: LineValue, visualSeedRequired: boolean): boolean {
+  if (!isRecord(value) || !Array.isArray(value.faces) || value.faces.length !== 3) return false;
+  if (value.faces.some((face) => face !== 'text' && face !== 'reverse')) return false;
+  if (createToss(value.faces as CoinFace[]).value !== lineValue) return false;
+  return visualSeedRequired
+    ? nonEmptyString(value.visualSeed)
+    : !hasOwn(value, 'visualSeed');
 }
 
-function validateTossSequence(session: UnknownRecord & {
+function validLine(
+  value: unknown,
+  expectedLineIndex: number,
+  method: CastingMethod,
+): value is UnknownRecord {
+  if (!isRecord(value)) return false;
+  if (
+    !nonEmptyString(value.id)
+    || value.lineIndex !== expectedLineIndex
+    || !LINE_VALUES.has(value.value as LineValue)
+    || !exactIso(value.recordedAt)
+  ) return false;
+  if (method === 'time') return !hasOwn(value, 'coin');
+  return validCoin(value.coin, value.value as LineValue, method === 'digital');
+}
+
+function validCurrentLine(value: unknown, expectedLineIndex: number): boolean {
+  if (!isRecord(value) || !nonEmptyString(value.id) || value.lineIndex !== expectedLineIndex) return false;
+  if (
+    !Array.isArray(value.faces)
+    || value.faces.length !== 3
+    || value.faces.some((face) => face !== 'text' && face !== 'reverse')
+    || !nonEmptyString(value.visualSeed)
+  ) return false;
+  const expected = createToss(value.faces as CoinFace[]);
+  return value.value === expected.value
+    && value.label === expected.label
+    && value.moving === expected.moving
+    && value.baseYang === expected.baseYang
+    && value.changedYang === expected.changedYang;
+}
+
+function validateLineSequence(session: UnknownRecord & {
   castingMethod: CastingMethod;
-  tosses: unknown[];
+  lines: unknown[];
 }): void {
   const seenIds = new Set<string>();
-  for (const [index, toss] of session.tosses.entries()) {
-    if (!validToss(toss, index + 1, session.castingMethod, true)) {
-      throw new TypeError('投币历史冲突');
+  for (const [index, line] of session.lines.entries()) {
+    if (!validLine(line, index + 1, session.castingMethod) || seenIds.has(line.id as string)) {
+      throw new TypeError('六爻记录冲突');
     }
-    if (seenIds.has(toss.id as string)) throw new TypeError('投币历史冲突');
-    seenIds.add(toss.id as string);
+    seenIds.add(line.id as string);
   }
-
-  if (session.currentToss !== undefined) {
-    if (!validToss(
-      session.currentToss,
-      session.tosses.length + 1,
-      session.castingMethod,
-      false,
-    )) {
-      throw new TypeError('当前投币状态冲突');
-    }
-    if (seenIds.has(session.currentToss.id as string)) {
-      throw new TypeError('当前投币状态冲突');
-    }
+  if (session.currentLine !== undefined) {
+    if (
+      session.castingMethod !== 'digital'
+      || !validCurrentLine(session.currentLine, session.lines.length + 1)
+      || seenIds.has((session.currentLine as UnknownRecord).id as string)
+    ) throw new TypeError('当前投币状态冲突');
   }
 }
 
-/**
- * Normalizes supported legacy storage differences on a detached copy.
- */
+function validateCastingBasis(value: unknown, method: CastingMethod, castAt: string): void {
+  if (!isRecord(value) || value.kind !== method) throw new TypeError('起卦依据与方式不一致');
+  const expectedAlgorithms: Record<Exclude<CastingMethod, 'time'>, string> = {
+    digital: 'three_coin_secure_v1',
+    physical: 'three_coin_manual_v1',
+    random: 'three_coin_secure_batch_v1',
+  };
+  if (method !== 'time') {
+    if (value.algorithm !== expectedAlgorithms[method]) throw new TypeError('起卦算法版本无效');
+    return;
+  }
+  if (value.algorithm !== 'time_meihua_lunar_v1' || value.castAt !== castAt) {
+    throw new TypeError('时间起卦依据无效');
+  }
+  const expected = deriveTimeCasting(new Date(castAt)).basis;
+  if (JSON.stringify(sanitizeCastingBasis(value)) !== JSON.stringify(sanitizeCastingBasis(expected))) {
+    throw new TypeError('时间起卦依据无法重放');
+  }
+}
+
+/** Normalizes legacy storage on a detached copy without rewriting the source. */
 export function normalizeStoredSession(value: unknown): DivinationSession {
   const normalized = structuredClone(value);
   if (!isRecord(normalized)) return normalized as DivinationSession;
-  if (!hasOwn(normalized, 'castingMethod')) {
-    normalized.castingMethod = 'digital';
-  } else if (!CASTING_METHODS.has(normalized.castingMethod as CastingMethod)) {
-    throw new TypeError('起卦方式无效');
-  }
-  if (isRecord(normalized.analysis) && normalized.analysis.mode === 'local') {
-    delete normalized.analysis;
-  }
-  return normalized as unknown as DivinationSession;
+  if (isRecord(normalized.analysis) && normalized.analysis.mode === 'local') delete normalized.analysis;
+  return normalizeSession(normalized);
 }
 
-/**
- * Enforces the browser persistence contract at the storage seam.
- */
+/** Enforces the browser persistence contract at the storage seam. */
 export function validateSessionForSave(
   value: unknown,
   existingValue: unknown = null,
 ): DivinationSession {
   if (
     !isRecord(value)
+    || value.schemaVersion !== 2
     || !nonEmptyString(value.id)
     || value.id !== value.id.trim()
     || !nonEmptyString(value.question)
@@ -181,52 +207,49 @@ export function validateSessionForSave(
     || !exactIso(value.castAt)
     || !exactIso(value.updatedAt)
     || !SESSION_STATUSES.has(value.status as string)
-    || !Array.isArray(value.tosses)
+    || !Array.isArray(value.lines)
     || !Array.isArray(value.messages)
-  ) {
-    throw new TypeError('会话数据无效');
-  }
-  if (!CASTING_METHODS.has(value.castingMethod as CastingMethod)) {
-    throw new TypeError('起卦方式无效');
-  }
+  ) throw new TypeError('会话数据无效');
+  if (!CASTING_METHODS.has(value.castingMethod as CastingMethod)) throw new TypeError('起卦方式无效');
   if (
     hasOwn(value, 'analysis')
     && value.analysis !== undefined
     && (!isRecord(value.analysis) || value.analysis.mode !== 'cloud')
-  ) {
-    throw new TypeError('仅允许保存云端 AI 解读');
-  }
-  if (
-    existingValue
-    && storedCastingMethod(existingValue) !== value.castingMethod
-  ) {
+  ) throw new TypeError('仅允许保存云端 AI 解读');
+  if (existingValue && storedCastingMethod(existingValue) !== value.castingMethod) {
     throw new TypeError('起卦方式不可更改');
   }
 
   const session = value as UnknownRecord & {
     castingMethod: CastingMethod;
     status: string;
-    tosses: unknown[];
+    castAt: string;
+    lines: unknown[];
   };
-  validateTossSequence(session);
-
-  if (session.castingMethod === 'physical') {
-    if (
-      session.status !== 'complete'
-      || session.tosses.length !== 6
-      || session.currentToss !== undefined
-    ) {
-      throw new TypeError('线下起卦只能保存完整六爻');
+  validateCastingBasis(session.castingBasis, session.castingMethod, session.castAt);
+  if (session.castingMethod !== 'digital') {
+    if (session.status !== 'complete' || session.lines.length !== 6 || session.currentLine !== undefined) {
+      const methodLabel = session.castingMethod === 'physical'
+        ? '线下'
+        : session.castingMethod === 'random'
+          ? '随机'
+          : '时间';
+      throw new TypeError(`${methodLabel}起卦只能保存完整六爻`);
     }
   } else if (
-    (
-      session.status === 'complete'
-      && (session.tosses.length !== 6 || session.currentToss !== undefined)
-    )
-    || (session.status === 'casting' && session.tosses.length >= 6)
-  ) {
-    throw new TypeError('在线起卦状态冲突');
+    (session.status === 'complete' && (session.lines.length !== 6 || session.currentLine !== undefined))
+    || (session.status === 'casting' && session.lines.length >= 6)
+  ) throw new TypeError('在线起卦状态冲突');
+  validateLineSequence(session);
+  if (session.castingMethod === 'time') {
+    const expectedLines = deriveTimeCasting(new Date(session.castAt)).lines;
+    if (session.lines.some((line, index) => (
+      !isRecord(line)
+      || line.value !== expectedLines[index].value
+      || line.recordedAt !== session.castAt
+    ))) throw new TypeError('时间起卦爻值与推导依据不一致');
   }
+  if (session.status === 'complete' && !isRecord(session.plate)) throw new TypeError('完整会话缺少排盘');
 
   return structuredClone(value) as unknown as DivinationSession;
 }
