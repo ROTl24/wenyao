@@ -8,6 +8,8 @@ import type { SessionCategory } from '../lib/session';
 import { SESSION_CATEGORY_LABELS } from '../lib/sessionCategories';
 import { BeijingDateTimeField } from './BeijingDateTimeField';
 import { CreatorLinks } from './CreatorLinks';
+import { PwaInstallPrompt } from './PwaInstallPrompt';
+import { desktop } from '../lib/desktop';
 
 const categories: Array<{ id: SessionCategory; mark: string }> = [
   { id: 'career', mark: '事' },
@@ -63,7 +65,10 @@ export function HomeScreen({
       <section className="question-composition">
         <div className="brand-seal" aria-hidden="true">爻</div>
         <h1>心有所问</h1>
-        <p className="home-lead">一事一占，凝神明问。六爻成象后，再由古籍证据与 AI 共同解读。</p>
+        <p className="home-lead">{desktop.platform === 'browser'
+          ? '一事一占，凝神明问。起卦、排盘、历史与内置古籍均在本机运行。'
+          : '一事一占，凝神明问。六爻成象后，再由古籍证据与 AI 共同解读。'}</p>
+        <PwaInstallPrompt />
         <div className="question-field">
           <label htmlFor="question">所占之事</label>
           <textarea

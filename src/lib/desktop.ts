@@ -1,7 +1,15 @@
 import corpus from '../../resources/corpus.json';
 import aiProviderCatalog from '../../config/ai-providers.json';
 import publicLinks from '../../config/public-links.json';
-import type { AIConfigStatus, AIProviderCatalog, CorpusBookSummary, CorpusStatus, DesktopApi } from '../types/desktop';
+import type {
+  AIConfigStatus,
+  AIProviderCatalog,
+  CorpusBookSummary,
+  CorpusStatus,
+  DesktopApi,
+  ElectronBridge,
+  PlatformRuntime,
+} from '../types/desktop';
 import type { UpdateState } from '../types/desktop';
 import type { DivinationSession } from './session';
 import { searchEvidence } from './retrieval';
@@ -12,13 +20,31 @@ import {
 } from './sessionValidation';
 
 const STORAGE_KEY = 'wenyao-browser-sessions';
+const browserRuntime: PlatformRuntime = {
+  kind: 'web',
+  capabilities: {
+    ai: false,
+    corpusImport: false,
+    nativeUpdates: false,
+    secureKeyStorage: false,
+  },
+};
+const electronRuntime: PlatformRuntime = {
+  kind: 'electron',
+  capabilities: {
+    ai: true,
+    corpusImport: true,
+    nativeUpdates: true,
+    secureKeyStorage: true,
+  },
+};
 const browserUpdateState: UpdateState = {
   status: 'unsupported',
   currentVersion: '',
 };
 const browserAIStatus: AIConfigStatus = {
   status: 'unconfigured',
-  message: '浏览器预览不连接 AI 服务',
+  message: '网页版提供本地排盘、历史记录和内置古籍浏览，不提供 AI 解读。',
   activeCapabilities: null,
   activeFingerprint: '',
   corpusCount: corpus.length,
@@ -73,7 +99,7 @@ const browserCorpusStatus: CorpusStatus = {
   readyShardIds: [],
   ready: true,
 };
-const desktopOnlyCorpusError = { code: 'DESKTOP_ONLY', message: '浏览器预览不支持用户古籍书库。', dataSafe: true, nextAction: '请启动 Electron 桌面应用。' };
+const webOnlyLocalCorpusError = { code: 'WEB_FEATURE_UNAVAILABLE', message: '网页版仅提供内置古籍浏览。', dataSafe: true, nextAction: '仍可使用本地排盘、历史记录和内置古籍检索。' };
 
 function storedBrowserSessions(): unknown[] {
   try {
@@ -95,6 +121,7 @@ function storedSessionId(value: unknown): unknown {
 }
 
 const browserFallback: DesktopApi = {
+  runtime: browserRuntime,
   externalLinks: {
     async open(id) {
       const url = publicLinks[id]?.url;
@@ -140,13 +167,13 @@ const browserFallback: DesktopApi = {
   aiConfig: {
     async getCatalog() { return structuredClone(aiProviderCatalog) as AIProviderCatalog; },
     async getStatus() { return structuredClone(browserAIStatus); },
-    async saveDraft() { return { ok: false, error: { code: 'DESKTOP_ONLY', message: '浏览器预览不保存 AI 密钥。', dataSafe: true, nextAction: '请启动 Electron 桌面应用。' } }; },
-    async testDraft() { return { ok: false, error: { code: 'DESKTOP_ONLY', message: '浏览器预览不测试 AI 连接。', dataSafe: true, nextAction: '请启动 Electron 桌面应用。' } }; },
-    async buildAndActivate() { return { ok: false, error: { code: 'DESKTOP_ONLY', message: '浏览器预览不构建向量索引。', dataSafe: true, nextAction: '请启动 Electron 桌面应用。' } }; },
+    async saveDraft() { return { ok: false, error: { code: 'WEB_FEATURE_UNAVAILABLE', message: '网页版不接收或保存 AI 密钥。', dataSafe: true, nextAction: '仍可使用本地排盘、历史记录和内置古籍检索。' } }; },
+    async testDraft() { return { ok: false, error: { code: 'WEB_FEATURE_UNAVAILABLE', message: '网页版不连接 AI 服务。', dataSafe: true, nextAction: '仍可使用本地排盘、历史记录和内置古籍检索。' } }; },
+    async buildAndActivate() { return { ok: false, error: { code: 'WEB_FEATURE_UNAVAILABLE', message: '网页版不构建向量索引。', dataSafe: true, nextAction: '内置古籍仍可在本机进行关键词检索。' } }; },
     async pauseBuild() { return structuredClone(browserAIStatus); },
     async resumeBuild() { return structuredClone(browserAIStatus); },
     async cancelBuild() { return structuredClone(browserAIStatus); },
-    async removeConnection() { return { ok: false, error: { code: 'DESKTOP_ONLY', message: '浏览器预览没有 AI 连接。', dataSafe: true, nextAction: '请启动 Electron 桌面应用。' } }; },
+    async removeConnection() { return { ok: false, error: { code: 'WEB_FEATURE_UNAVAILABLE', message: '网页版没有 AI 连接。', dataSafe: true, nextAction: '无需进行 AI 连接管理。' } }; },
     async openExternal(url) { window.open(url, '_blank', 'noopener,noreferrer'); return true; },
     onStatus() { return () => {}; },
   },
@@ -169,18 +196,18 @@ const browserFallback: DesktopApi = {
       const entries = book ? corpus.filter((entry) => entry.source === book.title && (!query || `${entry.title}${entry.text}`.toLowerCase().includes(query))) : [];
       return { items: entries.slice(0, payload.limit || 30).map((entry) => ({ id: entry.id, title: entry.title, location: entry.location, text: entry.text, tags: entry.tags, knowledgeKind: 'doctrine' as const })), total: entries.length };
     },
-    async selectImportFiles() { return { ok: false, error: desktopOnlyCorpusError }; },
-    async previewDroppedFiles() { return { ok: false, error: desktopOnlyCorpusError }; },
-    async commitImport() { return { ok: false, error: desktopOnlyCorpusError }; },
-    async setEnabled() { return { ok: false, error: desktopOnlyCorpusError }; },
-    async updateMetadata() { return { ok: false, error: desktopOnlyCorpusError }; },
-    async trash() { return { ok: false, error: desktopOnlyCorpusError }; },
-    async restore() { return { ok: false, error: desktopOnlyCorpusError }; },
-    async purge() { return { ok: false, error: desktopOnlyCorpusError }; },
+    async selectImportFiles() { return { ok: false, error: webOnlyLocalCorpusError }; },
+    async previewDroppedFiles() { return { ok: false, error: webOnlyLocalCorpusError }; },
+    async commitImport() { return { ok: false, error: webOnlyLocalCorpusError }; },
+    async setEnabled() { return { ok: false, error: webOnlyLocalCorpusError }; },
+    async updateMetadata() { return { ok: false, error: webOnlyLocalCorpusError }; },
+    async trash() { return { ok: false, error: webOnlyLocalCorpusError }; },
+    async restore() { return { ok: false, error: webOnlyLocalCorpusError }; },
+    async purge() { return { ok: false, error: webOnlyLocalCorpusError }; },
     async pauseIndex() { return structuredClone(browserCorpusStatus); },
     async resumeIndex() { return structuredClone(browserCorpusStatus); },
     async cancelIndex() { return structuredClone(browserCorpusStatus); },
-    async rebuildVectors() { return { ok: false, error: { code: 'DESKTOP_ONLY', message: '请在桌面应用中构建向量索引。', dataSafe: true, nextAction: '启动 Electron 桌面窗口。' } }; },
+    async rebuildVectors() { return { ok: false, error: { code: 'WEB_FEATURE_UNAVAILABLE', message: '网页版不构建向量索引。', dataSafe: true, nextAction: '内置古籍仍可在本机进行关键词检索。' } }; },
     onState() { return () => {}; },
   },
   retrieval: {
@@ -190,10 +217,18 @@ const browserFallback: DesktopApi = {
     },
   },
   ai: {
-    async analyze() { return { ok: false, error: { code: 'DESKTOP_ONLY', message: '浏览器预览不发送 AI 请求。', dataSafe: true, nextAction: '请在桌面应用中连接完整 AI 服务后生成云端解读。' } }; },
-    async followUp() { return { ok: false, error: { code: 'DESKTOP_ONLY', message: '浏览器预览不发送 AI 请求。', dataSafe: true, nextAction: '请使用桌面应用。' } }; },
+    async analyze() { return { ok: false, error: { code: 'WEB_FEATURE_UNAVAILABLE', message: '网页版不发送 AI 请求。', dataSafe: true, nextAction: '仍可查看本地排盘和内置古籍依据。' } }; },
+    async followUp() { return { ok: false, error: { code: 'WEB_FEATURE_UNAVAILABLE', message: '网页版不发送 AI 请求。', dataSafe: true, nextAction: '仍可查看本地排盘和内置古籍依据。' } }; },
   },
   platform: 'browser',
 };
 
-export const desktop = window.wenyao || browserFallback;
+export function resolvePlatformApi(bridge?: ElectronBridge): DesktopApi {
+  if (!bridge) return browserFallback;
+  return {
+    ...bridge,
+    runtime: bridge.runtime || electronRuntime,
+  };
+}
+
+export const desktop = resolvePlatformApi(window.wenyao);

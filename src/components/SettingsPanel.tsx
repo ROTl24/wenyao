@@ -20,7 +20,7 @@ interface Props {
 
 function updateStatusText(state: UpdateState) {
   switch (state.status) {
-    case 'unsupported': return '浏览器预览不支持桌面应用更新';
+    case 'unsupported': return '当前平台不支持应用内更新';
     case 'idle': return '已启用启动检查与每 6 小时自动检查';
     case 'checking': return '正在检查新版本…';
     case 'upToDate': return '当前已经是最新版本';
@@ -43,6 +43,7 @@ export function SettingsPanel({
   onClose,
 }: Props) {
   const [advancedOpen, setAdvancedOpen] = useState(false);
+  const { capabilities } = desktop.runtime;
   const [corpus, setCorpus] = useState<CorpusStatus>({ count: 0, bookCount: 0, builtInBookCount: 0, userBookCount: 0, enabledBookCount: 0, chunkCount: 0, deletedBookCount: 0, pendingIndexCount: 0, originalCount: 0, summaryCount: 0, ruleCount: 0, caseCount: 0, doctrineCount: 0, vectorReady: false, vectorModel: '', readyShardIds: [], ready: false });
   useEffect(() => { void desktop.corpus.status().then(setCorpus); }, [aiStatus.status, aiStatus.activeFingerprint]);
   const usage = useMemo(() => aiStatus.usage.reduce((total, item) => total + item.totalTokens, 0), [aiStatus.usage]);
@@ -52,16 +53,16 @@ export function SettingsPanel({
   return (
     <div className="overlay" role="presentation" onMouseDown={(event) => { if (event.target === event.currentTarget) onClose(); }}>
       <aside className="side-panel settings-panel" aria-modal="true" role="dialog">
-        <header><div><h2>应用设置</h2><p>软件更新、AI 服务与本地知识库</p></div><button type="button" aria-label="关闭设置" onClick={onClose}><X /></button></header>
+        <header><div><h2>应用设置</h2><p>{capabilities.ai ? '软件更新、AI 服务与本地知识库' : '本地排盘、历史记录与内置古籍'}</p></div><button type="button" aria-label="关闭设置" onClick={onClose}><X /></button></header>
 
         <section className="settings-section">
-          <AIStatusCard status={aiStatus} onConfigure={onConfigureAI} onAdvanced={() => setAdvancedOpen(true)} />
-          <p className="ai-billing-note">AI 调用费用由所选服务商收取，问爻不会代扣，也不会根据可能变化的价格自行估算金额。</p>
-          {billingLinks.length ? <div className="ai-billing-links">{billingLinks.map((preset) => <button type="button" key={preset.id} onClick={() => void desktop.aiConfig.openExternal(preset.setup.billingUrl)}>{preset.name} 余额 / 充值 <ExternalLink size={13} /></button>)}</div> : null}
-          {usage > 0 ? <p className="ai-usage-summary">本机已记录 {aiStatus.usage.length} 次带用量响应，共 {usage.toLocaleString('zh-CN')} Tokens；不含未返回用量的服务。</p> : null}
+          <AIStatusCard available={capabilities.ai} status={aiStatus} onConfigure={onConfigureAI} onAdvanced={() => setAdvancedOpen(true)} />
+          {capabilities.ai ? <p className="ai-billing-note">AI 调用费用由所选服务商收取，问爻不会代扣，也不会根据可能变化的价格自行估算金额。</p> : null}
+          {capabilities.ai && billingLinks.length ? <div className="ai-billing-links">{billingLinks.map((preset) => <button type="button" key={preset.id} onClick={() => void desktop.aiConfig.openExternal(preset.setup.billingUrl)}>{preset.name} 余额 / 充值 <ExternalLink size={13} /></button>)}</div> : null}
+          {capabilities.ai && usage > 0 ? <p className="ai-usage-summary">本机已记录 {aiStatus.usage.length} 次带用量响应，共 {usage.toLocaleString('zh-CN')} Tokens；不含未返回用量的服务。</p> : null}
         </section>
 
-        <section className="settings-section update-settings">
+        {capabilities.nativeUpdates ? <section className="settings-section update-settings">
           <div className="settings-heading"><RefreshCw /><div><strong>软件更新</strong><span>{updateStatusText(updateState)}</span></div></div>
           <div className="update-version-row"><span>当前版本</span><strong>{updateState.currentVersion ? `v${updateState.currentVersion}` : '未知'}</strong></div>
           {updateState.status === 'error' && updateState.manual ? <p className="settings-status" role="alert">{updateState.message}</p> : null}
@@ -69,20 +70,20 @@ export function SettingsPanel({
             {updateState.status === 'checking' ? '正在检查…' : updateState.status === 'downloading' ? `下载中 ${updateState.progress.toFixed(1)}%` : updateState.status === 'available' || updateState.status === 'downloaded' || (updateState.status === 'error' && updateState.operation === 'download') ? '查看更新' : updateState.status === 'error' ? '重新检查' : '检查更新'}
           </button>
           <p className="update-signing-note">当前版本尚未进行 Windows 代码签名，安装更新时仍可能出现 SmartScreen 提示；SHA-512 完整性校验不等同于发布者身份验证。</p>
-        </section>
+        </section> : null}
 
         <section className="settings-section">
-          <div className="settings-heading"><Database /><div><strong>本地结构化古籍库</strong><span>{corpus.vectorReady ? `${corpus.vectorModel} 向量索引已就绪` : '向量索引尚未完成'}</span></div></div>
-          <div className="corpus-stats corpus-stats--knowledge"><span><b>{corpus.bookCount}</b>本古籍</span><span><b>{corpus.ruleCount}</b>条规则</span><span><b>{corpus.caseCount}</b>条占例</span><span><b>{corpus.doctrineCount}</b>条义理</span></div>
-          {corpus.vectorReady ? <p className="corpus-ready">严格检索已启用：关键词候选 + 向量召回 + 专用模型重排。</p> : <p className="corpus-warning">AI 解读必须等待向量召回和重排均可用，不会退回关键词检索生成报告。</p>}
+          <div className="settings-heading"><Database /><div><strong>{capabilities.ai ? '本地结构化古籍库' : '内置古籍库'}</strong><span>{capabilities.ai ? (corpus.vectorReady ? `${corpus.vectorModel} 向量索引已就绪` : '向量索引尚未完成') : '内置古籍可在本机浏览和检索'}</span></div></div>
+          {capabilities.ai ? <div className="corpus-stats corpus-stats--knowledge"><span><b>{corpus.bookCount}</b>本古籍</span><span><b>{corpus.ruleCount}</b>条规则</span><span><b>{corpus.caseCount}</b>条占例</span><span><b>{corpus.doctrineCount}</b>条义理</span></div> : <div className="corpus-stats"><span><b>{corpus.bookCount}</b>本古籍</span><span><b>{corpus.count}</b>段原文</span></div>}
+          {capabilities.ai ? (corpus.vectorReady ? <p className="corpus-ready">严格检索已启用：关键词候选 + 向量召回 + 专用模型重排。</p> : <p className="corpus-warning">AI 解读必须等待向量召回和重排均可用，不会退回关键词检索生成报告。</p>) : <p className="corpus-ready">起卦、排盘、历史记录和内置古籍均在当前设备中使用；清除浏览器站点数据会移除本地历史。</p>}
           <button className="index-button" type="button" onClick={onOpenCorpus}>打开古籍书库</button>
         </section>
 
         <CreatorLinks variant="panel" />
 
-        <div className="security-note"><ShieldCheck /><p><strong>隐私边界</strong>访问密钥由 Windows DPAPI 加密，历史和向量索引留在本机。设置中可以随时查看当前问题、排盘、证据与追问分别发送给哪一家服务商。</p></div>
+        <div className="security-note"><ShieldCheck /><p><strong>隐私边界</strong>{capabilities.secureKeyStorage ? '访问密钥由 Windows DPAPI 加密，历史和向量索引留在本机。设置中可以随时查看当前问题、排盘、证据与追问分别发送给哪一家服务商。' : '网页版不接收 AI 密钥；排盘与历史保存在当前浏览器，不需要账号，也不会同步到服务器。清除站点数据会同时删除本地历史。'}</p></div>
       </aside>
-      {advancedOpen ? <AIAdvancedSettings catalog={aiCatalog} status={aiStatus} onStatus={onAIStatus} onClose={() => setAdvancedOpen(false)} /> : null}
+      {capabilities.ai && advancedOpen ? <AIAdvancedSettings catalog={aiCatalog} status={aiStatus} onStatus={onAIStatus} onClose={() => setAdvancedOpen(false)} /> : null}
     </div>
   );
 }

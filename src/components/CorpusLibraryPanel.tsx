@@ -1,4 +1,4 @@
-import { ArchiveRestore, BookOpen, CirclePause, CirclePlay, FilePlus2, Pencil, Save, Search, Trash2, X } from 'lucide-react';
+import { ArchiveRestore, ArrowLeft, BookOpen, CirclePause, CirclePlay, FilePlus2, Pencil, Save, Search, Trash2, X } from 'lucide-react';
 import { useCallback, useEffect, useMemo, useState, type DragEvent } from 'react';
 import { desktop } from '../lib/desktop';
 import type { AIConfigStatus, CorpusBookDetail, CorpusBookSummary, CorpusImportBatch, CorpusStatus } from '../types/desktop';
@@ -71,6 +71,13 @@ export function CorpusLibraryPanel({ aiStatus, onClose }: Props) {
     if (!selected) return;
     const result = await desktop.corpus.bookEntries({ bookId: selected.id, query: value, limit: 30 });
     setEntries(result.items);
+  };
+
+  const closeBook = () => {
+    setSelected(null);
+    setEntryQuery('');
+    setEntries([]);
+    setEditing(false);
   };
 
   const previewSelection = async () => {
@@ -150,25 +157,28 @@ export function CorpusLibraryPanel({ aiStatus, onClose }: Props) {
 
   const building = books.some((book) => book.indexState === 'building');
   const paused = books.some((book) => book.indexState === 'paused');
-  const sourceSummary = useMemo(() => `${status.builtInBookCount} 本内置 · ${status.userBookCount} 本用户导入 · ${status.chunkCount.toLocaleString('zh-CN')} 条证据`, [status]);
+  const canManageCorpus = desktop.runtime.capabilities.corpusImport;
+  const sourceSummary = useMemo(() => canManageCorpus
+    ? `${status.builtInBookCount} 本内置 · ${status.userBookCount} 本用户导入 · ${status.chunkCount.toLocaleString('zh-CN')} 条证据`
+    : `${status.builtInBookCount} 本内置古籍 · ${status.chunkCount.toLocaleString('zh-CN')} 段原文`, [canManageCorpus, status]);
 
   return (
     <div className="overlay corpus-library-overlay" role="presentation">
       <aside className="corpus-library-panel" aria-labelledby="corpus-library-title" aria-modal="true" role="dialog">
         <header className="corpus-library-header">
           <div><span className="corpus-kicker">LOCAL ARCHIVE</span><h2 id="corpus-library-title">古籍书库</h2><p>{sourceSummary}</p></div>
-          <div className="corpus-header-actions"><button type="button" className="corpus-primary-button" disabled={desktop.platform === 'browser'} onClick={() => void previewSelection()}><FilePlus2 />导入古籍</button><button type="button" aria-label="关闭古籍书库" onClick={onClose}><X /></button></div>
+          <div className="corpus-header-actions">{canManageCorpus ? <button type="button" className="corpus-primary-button" onClick={() => void previewSelection()}><FilePlus2 />导入古籍</button> : null}<button type="button" aria-label="关闭古籍书库" onClick={onClose}><X /></button></div>
         </header>
 
         <div className="corpus-library-toolbar">
           <label className="panel-search"><Search size={16} /><input aria-label="搜索古籍书库" value={query} onChange={(event) => setQuery(event.target.value)} placeholder="搜索书名、作者或版本" /></label>
           <button type="button" className={showDeleted ? 'is-active' : ''} onClick={() => setShowDeleted((value) => !value)}>{showDeleted ? '返回书库' : `最近删除 ${status.deletedBookCount || ''}`}</button>
-          {building ? <button type="button" onClick={() => void desktop.corpus.pauseIndex()}><CirclePause />暂停索引</button> : null}
-          {paused ? <button type="button" onClick={() => void desktop.corpus.resumeIndex()}><CirclePlay />继续索引</button> : null}
-          {building || paused ? <button type="button" onClick={() => void desktop.corpus.cancelIndex()}><X />取消任务</button> : null}
+          {canManageCorpus && building ? <button type="button" onClick={() => void desktop.corpus.pauseIndex()}><CirclePause />暂停索引</button> : null}
+          {canManageCorpus && paused ? <button type="button" onClick={() => void desktop.corpus.resumeIndex()}><CirclePlay />继续索引</button> : null}
+          {canManageCorpus && (building || paused) ? <button type="button" onClick={() => void desktop.corpus.cancelIndex()}><X />取消任务</button> : null}
         </div>
 
-        <div className="corpus-library-body">
+        <div className={`corpus-library-body${selected ? ' corpus-library-body--detail' : ''}`}>
           <section className={`corpus-book-list${dragging ? ' is-dragging' : ''}`} onDragEnter={(event) => { event.preventDefault(); setDragging(true); }} onDragOver={(event) => event.preventDefault()} onDragLeave={(event) => { if (event.currentTarget === event.target) setDragging(false); }} onDrop={(event) => void previewDrop(event)}>
             {dragging ? <div className="corpus-drop-mask"><FilePlus2 /><strong>松开即可解析 TXT / Markdown</strong></div> : null}
             {books.length ? books.map((book) => (
@@ -189,6 +199,7 @@ export function CorpusLibraryPanel({ aiStatus, onClose }: Props) {
           <section className="corpus-book-detail">
             {selected ? (
               <>
+                <button type="button" className="corpus-mobile-back" onClick={closeBook}><ArrowLeft />返回书目</button>
                 <header className="corpus-detail-header"><div><span className={`corpus-origin corpus-origin--${selected.origin}`}>{selected.origin === 'builtin' ? '内置' : '用户导入'}</span><h3>《{selected.title}》</h3><p>{[selected.author, selected.edition, selected.encoding.toUpperCase()].filter(Boolean).join(' · ')}</p></div>{selected.origin === 'user' && !selected.deletedAt ? <button type="button" onClick={() => setEditing((value) => !value)}><Pencil />编辑资料</button> : null}</header>
                 {editing ? <div className="corpus-edit-form"><label>书名<input value={editMetadata.title} onChange={(event) => setEditMetadata((value) => ({ ...value, title: event.target.value }))} /></label><label>作者<input value={editMetadata.author} onChange={(event) => setEditMetadata((value) => ({ ...value, author: event.target.value }))} /></label><label>版本说明<input value={editMetadata.edition} onChange={(event) => setEditMetadata((value) => ({ ...value, edition: event.target.value }))} /></label><button type="button" className="corpus-primary-button" disabled={!editMetadata.title.trim()} onClick={() => void saveMetadata()}><Save />保存资料</button></div> : null}
                 <div className="corpus-detail-stats"><span><b>{selected.charCount.toLocaleString('zh-CN')}</b>字</span><span><b>{selected.chapterCount}</b>章节</span><span><b>{selected.chunkCount}</b>片段</span></div>

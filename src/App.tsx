@@ -756,9 +756,9 @@ export function App() {
         <div className="chrome-brand"><span>爻</span><strong>{appTitle}</strong></div>
         <nav>
           <button type="button" aria-label="日历" aria-current={calendarOpen ? 'page' : undefined} disabled={physicalFinalizing} onClick={openCalendar}><CalendarDays size={17} /><span>日历</span></button>
-          <button type="button" aria-label="古籍书库" disabled={physicalFinalizing} onClick={() => { setHistoryOpen(false); setSettingsOpen(false); setLibraryOpen(true); }}><BookOpen size={17} /><span>古籍</span></button>
-          <button type="button" aria-label="历史记录" disabled={physicalFinalizing} onClick={() => { setLibraryOpen(false); setSettingsOpen(false); setHistoryOpen(true); }}><History size={17} /><span>历史</span></button>
-          <button type="button" aria-label="应用设置" disabled={physicalFinalizing} onClick={() => { setLibraryOpen(false); setHistoryOpen(false); setSettingsOpen(true); }}><Settings2 size={17} /><span>设置</span></button>
+          <button type="button" aria-label="古籍书库" aria-current={libraryOpen ? 'page' : undefined} disabled={physicalFinalizing} onClick={() => { setHistoryOpen(false); setSettingsOpen(false); setLibraryOpen(true); }}><BookOpen size={17} /><span>古籍</span></button>
+          <button type="button" aria-label="历史记录" aria-current={historyOpen ? 'page' : undefined} disabled={physicalFinalizing} onClick={() => { setLibraryOpen(false); setSettingsOpen(false); setHistoryOpen(true); }}><History size={17} /><span>历史</span></button>
+          <button type="button" aria-label="应用设置" aria-current={settingsOpen ? 'page' : undefined} disabled={physicalFinalizing} onClick={() => { setLibraryOpen(false); setHistoryOpen(false); setSettingsOpen(true); }}><Settings2 size={17} /><span>设置</span></button>
         </nav>
       </header>
       {calendarOpen ? (
@@ -814,7 +814,7 @@ export function App() {
               onCancel={discardPhysicalDraft}
             />
           )}
-          {screen === 'result' && session?.plate && <ResultScreen session={session} evidence={evidence} retrievalDiagnostics={retrievalDiagnostics} aiStatus={aiStatus} sessionSaveStatus={sessionSaveStatus} sessionSaveError={sessionSaveError} analyzing={analyzing} analysisError={analysisError} analysisSaveStatus={analysisSaveStatus} analysisSaveError={analysisSaveError} chatting={chatting} chatError={chatError} onRetrySessionSave={() => void retrySessionSave()} onAnalyze={() => void runAnalysis(session, true)} onRetryAnalysisSave={() => void retryAnalysisSave()} onFollowUp={followUp} onBack={returnHome} />}
+          {screen === 'result' && session?.plate && <ResultScreen session={session} evidence={evidence} retrievalDiagnostics={retrievalDiagnostics} aiStatus={aiStatus} aiAvailable={desktop.runtime.capabilities.ai} sessionSaveStatus={sessionSaveStatus} sessionSaveError={sessionSaveError} analyzing={analyzing} analysisError={analysisError} analysisSaveStatus={analysisSaveStatus} analysisSaveError={analysisSaveError} chatting={chatting} chatError={chatError} onRetrySessionSave={() => void retrySessionSave()} onAnalyze={() => void runAnalysis(session, true)} onRetryAnalysisSave={() => void retryAnalysisSave()} onFollowUp={followUp} onBack={returnHome} />}
         </>
       )}
       {historyOpen && <HistoryPanel sessions={history} onClose={() => setHistoryOpen(false)} onOpen={(saved) => void openSession(saved)} onDelete={(id) => void deleteSession(id)} />}

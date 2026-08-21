@@ -75,6 +75,7 @@ function renderResult(
     analysisSaveError = '',
     onRetryAnalysisSave = vi.fn(),
     targetAIStatus = readyAIStatus,
+    aiAvailable = true,
   }: {
     analyzing?: boolean;
     onAnalyze?: () => void;
@@ -85,12 +86,14 @@ function renderResult(
     analysisSaveError?: string;
     onRetryAnalysisSave?: () => void;
     targetAIStatus?: AIConfigStatus;
+    aiAvailable?: boolean;
   } = {},
 ) {
   const view = render(
     <ResultScreen
       session={targetSession}
       aiStatus={targetAIStatus}
+      aiAvailable={aiAvailable}
       evidence={targetEvidence}
       retrievalDiagnostics={null}
       sessionSaveStatus={sessionSaveStatus}
@@ -112,6 +115,34 @@ function renderResult(
 }
 
 describe('ResultScreen Markdown 解读', () => {
+  it('keeps the browser result local-only without AI setup or follow-up controls', () => {
+    renderResult(session, { aiAvailable: false });
+
+    expect(screen.getByRole('heading', { name: '本地模式' })).toBeVisible();
+    expect(screen.getByText('网页版提供本地排盘')).toBeVisible();
+    expect(screen.getByText(/起卦、排盘、历史记录和内置古籍均可在当前设备使用/)).toBeVisible();
+    expect(screen.queryByRole('button', { name: /开始解读|连接 AI 服务/ })).not.toBeInTheDocument();
+    expect(screen.queryByRole('textbox', { name: '你的追问' })).not.toBeInTheDocument();
+  });
+
+  it('shows a saved AI report read-only in the browser', () => {
+    const markdownSession: DivinationSession = {
+      ...session,
+      analysis: {
+        mode: 'cloud',
+        markdown: '## 已保存解读\n\n历史内容仍然可读。',
+        generatedAt: castAt.toISOString(),
+      },
+    };
+
+    renderResult(markdownSession, { aiAvailable: false, analyzing: true });
+
+    expect(screen.getByRole('heading', { name: '已保存解读' })).toBeVisible();
+    expect(screen.getByText('历史内容仍然可读。')).toBeVisible();
+    expect(screen.queryByRole('button', { name: /重新解析|连接 AI 服务/ })).not.toBeInTheDocument();
+    expect(screen.queryByText('正在检索古籍并校验排盘…')).not.toBeInTheDocument();
+  });
+
   it('keeps the active AI stack usable while a replacement vector index builds', () => {
     renderResult(session, {
       targetAIStatus: { ...readyAIStatus, status: 'building', message: '正在准备新方案' },
@@ -333,6 +364,7 @@ describe('ResultScreen Markdown 解读', () => {
       <ResultScreen
         session={session}
         aiStatus={readyAIStatus}
+        aiAvailable
         evidence={evidence}
         retrievalDiagnostics={null}
         sessionSaveStatus="error"

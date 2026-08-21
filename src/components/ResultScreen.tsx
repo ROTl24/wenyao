@@ -18,6 +18,7 @@ interface Props {
   evidence: EvidenceEntry[];
   retrievalDiagnostics: RetrievalDiagnostics | null;
   aiStatus: AIConfigStatus;
+  aiAvailable: boolean;
   sessionSaveStatus: 'idle' | 'saving' | 'saved' | 'error';
   sessionSaveError: string;
   analyzing: boolean;
@@ -33,7 +34,7 @@ interface Props {
   onBack(): void;
 }
 
-export function ResultScreen({ session, evidence, retrievalDiagnostics, aiStatus, sessionSaveStatus, sessionSaveError, analyzing, analysisError, analysisSaveStatus, analysisSaveError, chatting, chatError, onRetrySessionSave, onAnalyze, onRetryAnalysisSave, onFollowUp, onBack }: Props) {
+export function ResultScreen({ session, evidence, retrievalDiagnostics, aiStatus, aiAvailable, sessionSaveStatus, sessionSaveError, analyzing, analysisError, analysisSaveStatus, analysisSaveError, chatting, chatError, onRetrySessionSave, onAnalyze, onRetryAnalysisSave, onFollowUp, onBack }: Props) {
   const [followUp, setFollowUp] = useState('');
   const plate = session.plate!;
   const evidenceSourceCount = useMemo(() => new Set(evidence.map((item) => item.source)).size, [evidence]);
@@ -49,11 +50,11 @@ export function ResultScreen({ session, evidence, retrievalDiagnostics, aiStatus
     : null;
   const legacyAnalysis = Boolean(session.analysis && !markdownAnalysis);
   const sessionReady = sessionSaveStatus !== 'saving' && sessionSaveStatus !== 'error';
-  const aiReady = isAIUsable(aiStatus);
-  const aiPreparing = !aiReady && (aiStatus.status === 'testing' || aiStatus.status === 'building' || aiStatus.status === 'paused');
+  const aiReady = aiAvailable && isAIUsable(aiStatus);
+  const aiPreparing = aiAvailable && !aiReady && (aiStatus.status === 'testing' || aiStatus.status === 'building' || aiStatus.status === 'paused');
   const aiProgress = aiStatus.draft?.indexTask?.progress ?? 0;
   const submit = () => {
-    if (!followUp.trim() || chatting || !sessionReady || !aiReady) return;
+    if (!aiAvailable || !followUp.trim() || chatting || !sessionReady || !aiReady) return;
     onFollowUp(followUp.trim());
     setFollowUp('');
   };
@@ -128,8 +129,8 @@ export function ResultScreen({ session, evidence, retrievalDiagnostics, aiStatus
             data-folio="卷二"
           >
             <div className="analysis-heading">
-              <h2 className="section-title" id="analysis-heading"><i aria-hidden="true" />AI 解读</h2>
-              {markdownAnalysis ? (
+              <h2 className="section-title" id="analysis-heading"><i aria-hidden="true" />{aiAvailable || markdownAnalysis || legacyAnalysis ? 'AI 解读' : '本地模式'}</h2>
+              {aiAvailable && markdownAnalysis ? (
                 <button className="analysis-reanalyze" type="button" onClick={onAnalyze} disabled={analyzing || !sessionReady}>
                   <RefreshCw className={analyzing ? 'is-spinning' : undefined} size={15} aria-hidden="true" />
                   {analyzing ? '解析中' : aiReady ? '重新解析' : '连接 AI 服务'}
@@ -149,15 +150,16 @@ export function ResultScreen({ session, evidence, retrievalDiagnostics, aiStatus
                 {analysisSaveStatus === 'error' ? <><div><strong>解读已生成，但自动保存失败</strong><p>{analysisSaveError || '写入历史记录失败。'}</p></div><button type="button" onClick={onRetryAnalysisSave}><RefreshCw size={15} />重试保存</button></> : null}
               </div>
             ) : null}
-            {analyzing ? <div className="analysis-loading"><span className="ink-loader" /><strong>正在检索古籍并校验排盘…</strong><p>排盘事实已经锁定，AI 只能依据当前卦象与证据解释。</p></div> : null}
-            {!analyzing && analysisError ? <div className="analysis-error" role="alert"><strong>AI 分析暂时失败</strong><p>{analysisError}</p><button type="button" onClick={onAnalyze} disabled={!sessionReady}><RefreshCw size={16} />重新分析</button></div> : null}
-            {!analyzing && legacyAnalysis && !analysisError ? (
-              <div className="analysis-error"><strong>这份历史解读不是当前 Markdown 格式</strong><p>旧版结构化结果不再解析，请重新分析生成 Markdown 解读。</p><button type="button" onClick={onAnalyze} disabled={!sessionReady}><RefreshCw size={16} />重新分析</button></div>
+            {aiAvailable && analyzing ? <div className="analysis-loading"><span className="ink-loader" /><strong>正在检索古籍并校验排盘…</strong><p>排盘事实已经锁定，AI 只能依据当前卦象与证据解释。</p></div> : null}
+            {aiAvailable && !analyzing && analysisError ? <div className="analysis-error" role="alert"><strong>AI 分析暂时失败</strong><p>{analysisError}</p><button type="button" onClick={onAnalyze} disabled={!sessionReady}><RefreshCw size={16} />重新分析</button></div> : null}
+            {legacyAnalysis && (!aiAvailable || (!analyzing && !analysisError)) ? (
+              <div className="analysis-error"><strong>这份历史解读不是当前 Markdown 格式</strong><p>{aiAvailable ? '旧版结构化结果不再解析，请重新分析生成 Markdown 解读。' : '旧版结构化结果无法在网页版展示。'}</p>{aiAvailable ? <button type="button" onClick={onAnalyze} disabled={!sessionReady}><RefreshCw size={16} />重新分析</button> : null}</div>
             ) : null}
-            {!analyzing && !markdownAnalysis && !legacyAnalysis && !analysisError ? (
+            {!aiAvailable && !markdownAnalysis && !legacyAnalysis ? <div className="analysis-error"><strong>网页版提供本地排盘</strong><p>起卦、排盘、历史记录和内置古籍均可在当前设备使用；此版本不提供 AI 解读。</p></div> : null}
+            {aiAvailable && !analyzing && !markdownAnalysis && !legacyAnalysis && !analysisError ? (
               <div className="analysis-error"><strong>{!sessionReady ? '排盘保存完成后才能开始解读' : aiReady ? '这条历史记录没有已保存的 AI 解读' : aiPreparing ? 'AI 服务正在准备中' : '需要先连接 AI 服务'}</strong><p>{!sessionReady ? '请等待自动保存完成，或先重试保存本次排盘。' : aiReady ? '打开历史记录不会自动发起新的 AI 请求，如需解读请手动开始。' : aiPreparing ? `向量索引当前完成 ${aiProgress.toFixed(1)}%，完成后才能生成解读。` : '连接向导只需选择服务商、粘贴访问密钥；模型与接口由问爻自动配置。'}</p><button type="button" onClick={onAnalyze} disabled={!sessionReady || aiPreparing}><Sparkles size={16} />{aiReady ? '开始解读' : aiPreparing ? '准备中' : '连接 AI 服务'}</button></div>
             ) : null}
-            {!analyzing && markdownAnalysis ? (
+            {markdownAnalysis && (!aiAvailable || !analyzing) ? (
               <article className="analysis-report">
                 <div className="analysis-mode"><Sparkles size={15} />云端 AI · Markdown 解读</div>
                 {markdownAnalysis.pipeline ? (
@@ -295,10 +297,10 @@ export function ResultScreen({ session, evidence, retrievalDiagnostics, aiStatus
           <div className="result-spine" aria-hidden="true" />
         </div>
 
-        <section className="chat-dock result-leaf" aria-labelledby="follow-up-heading" data-folio="卷末">
+        {aiAvailable || session.messages.length > 0 ? <section className="chat-dock result-leaf" aria-labelledby="follow-up-heading" data-folio="卷末">
           <div className="chat-dock-header">
-            <h2 id="follow-up-heading">继续追问</h2>
-            <p>围绕当前卦象，继续确认时间、条件或原因。</p>
+            <h2 id="follow-up-heading">{aiAvailable ? '继续追问' : '历史追问'}</h2>
+            <p>{aiAvailable ? '围绕当前卦象，继续确认时间、条件或原因。' : '保留在当前设备中的过往问答记录。'}</p>
           </div>
           {session.messages.length > 0 ? (
             <div className="chat-history" aria-live="polite">
@@ -324,20 +326,20 @@ export function ResultScreen({ session, evidence, retrievalDiagnostics, aiStatus
               })}
             </div>
           ) : null}
-          {chatError ? (
+          {aiAvailable && chatError ? (
             <div className="analysis-save-status analysis-save-status--error" role="alert">
               <div><strong>追问未完成</strong><p>{chatError}</p></div>
             </div>
           ) : null}
-          <div className="chat-composer">
+          {aiAvailable ? <div className="chat-composer">
             <label className="chat-composer-label" htmlFor="follow-up">你的追问</label>
             <div className="chat-input">
               <input id="follow-up" aria-describedby="follow-up-hint" value={followUp} disabled={!sessionReady || !aiReady} onChange={(event) => setFollowUp(event.target.value)} onKeyDown={(event) => { if (event.key === 'Enter') submit(); }} placeholder={aiReady ? '基于本次卦象，继续问一个相关问题…' : '连接并准备好 AI 服务后可以继续追问'} />
               <button type="button" onClick={submit} disabled={!followUp.trim() || chatting || !sessionReady || !aiReady}>{chatting ? <span className="small-loader" /> : <Send size={17} />}<span>继续追问</span></button>
             </div>
             <p id="follow-up-hint">{aiReady ? '按 Enter 发送，回答会继续沿用本次排盘。' : 'AI 解读、向量召回与重排全部就绪后才会发送。'}</p>
-          </div>
-        </section>
+          </div> : null}
+        </section> : null}
       </div>
     </main>
   );

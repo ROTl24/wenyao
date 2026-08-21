@@ -1,6 +1,6 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { createTossFromValue } from './divination';
-import { desktop } from './desktop';
+import { desktop, resolvePlatformApi } from './desktop';
 import {
   confirmCurrentToss,
   createSession,
@@ -68,6 +68,45 @@ describe('浏览器公共外链', () => {
 
     open.mockReturnValueOnce(null);
     await expect(desktop.externalLinks.open('xiaohongshu')).resolves.toBe(false);
+  });
+});
+
+describe('平台能力', () => {
+  it('describes the browser as local-only without directing users into desktop-only setup', async () => {
+    expect(desktop.runtime).toEqual({
+      kind: 'web',
+      capabilities: {
+        ai: false,
+        corpusImport: false,
+        nativeUpdates: false,
+        secureKeyStorage: false,
+      },
+    });
+
+    const status = await desktop.aiConfig.getStatus();
+    const result = await desktop.aiConfig.saveDraft({});
+
+    expect(status.message).toContain('本地排盘、历史记录和内置古籍');
+    expect(result.error).toMatchObject({ code: 'WEB_FEATURE_UNAVAILABLE' });
+    expect(`${result.error?.message}${result.error?.nextAction}`).not.toContain('Electron');
+  });
+
+  it('augments the existing Electron bridge without changing its public methods', () => {
+    const { runtime: _runtime, ...bridge } = desktop;
+    const resolved = resolvePlatformApi({ ...bridge, platform: 'win32' });
+
+    expect(resolved.runtime).toEqual({
+      kind: 'electron',
+      capabilities: {
+        ai: true,
+        corpusImport: true,
+        nativeUpdates: true,
+        secureKeyStorage: true,
+      },
+    });
+    expect(resolved.sessions).toBe(bridge.sessions);
+    expect(resolved.ai).toBe(bridge.ai);
+    expect(resolved.platform).toBe('win32');
   });
 });
 

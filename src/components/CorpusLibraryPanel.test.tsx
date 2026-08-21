@@ -1,5 +1,5 @@
 import { fireEvent, render, screen, waitFor } from '@testing-library/react';
-import { beforeEach, describe, expect, it, vi } from 'vitest';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { desktop } from '../lib/desktop';
 import type { AIConfigStatus, CorpusBookSummary, CorpusStatus } from '../types/desktop';
 import { CorpusLibraryPanel } from './CorpusLibraryPanel';
@@ -33,11 +33,22 @@ describe('CorpusLibraryPanel 古籍书库', () => {
   beforeEach(() => {
     vi.restoreAllMocks();
     desktop.platform = 'win32';
+    desktop.runtime = {
+      kind: 'electron',
+      capabilities: { ai: true, corpusImport: true, nativeUpdates: true, secureKeyStorage: true },
+    };
     vi.spyOn(desktop.corpus, 'status').mockResolvedValue(status);
     vi.spyOn(desktop.corpus, 'books').mockResolvedValue({ items: [builtIn, localBook], total: 2 });
     vi.spyOn(desktop.corpus, 'onState').mockReturnValue(() => {});
     vi.spyOn(desktop.corpus, 'book').mockResolvedValue({ ...builtIn, samples: { first: '首段', last: '末段' } });
     vi.spyOn(desktop.corpus, 'bookEntries').mockResolvedValue({ items: [{ id: 'E1', title: '用神章', location: '第一行', text: '凡占以用神为要。', tags: ['用神'], knowledgeKind: 'rule' }], total: 1 });
+  });
+
+  afterEach(() => {
+    desktop.runtime = {
+      kind: 'web',
+      capabilities: { ai: false, corpusImport: false, nativeUpdates: false, secureKeyStorage: false },
+    };
   });
 
   it('区分内置与用户来源，并按需查看原文片段', async () => {

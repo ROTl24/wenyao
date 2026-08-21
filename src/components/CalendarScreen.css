@@ -1,5 +1,6 @@
 .calendar-screen {
-  height: calc(100% - 42px);
+  height: calc(100% - var(--app-chrome-height));
+  padding-bottom: var(--safe-bottom);
   overflow: auto;
   color: var(--ink);
   background:
@@ -439,6 +440,18 @@
     flex-wrap: wrap;
   }
 
+  .calendar-month-actions > button,
+  .calendar-period-button,
+  .calendar-close-button {
+    min-height: var(--control-md);
+  }
+
+  .calendar-period-picker {
+    right: auto;
+    left: 0;
+    width: min(310px, calc(100vw - var(--safe-left) - var(--safe-right) - 28px));
+  }
+
   .calendar-day {
     min-height: 62px;
   }
@@ -453,6 +466,10 @@
 
   .calendar-pillars strong {
     font-size: 22px;
+  }
+
+  .calendar-hour-grid {
+    padding-bottom: max(8px, var(--safe-bottom));
   }
 }
 

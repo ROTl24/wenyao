@@ -1,5 +1,5 @@
 import { act, fireEvent, render, screen, waitFor, within } from '@testing-library/react';
-import { beforeEach, describe, expect, it, vi } from 'vitest';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { App } from './App';
 import { desktop } from './lib/desktop';
 import { buildPlate, createTossFromValue } from './lib/divination';
@@ -65,6 +65,15 @@ function reachPhysicalReview(question = '线下事业如何发展') {
 
 beforeEach(() => {
   vi.restoreAllMocks();
+  desktop.runtime = {
+    kind: 'electron',
+    capabilities: {
+      ai: true,
+      corpusImport: true,
+      nativeUpdates: true,
+      secureKeyStorage: true,
+    },
+  };
   vi.spyOn(desktop.aiConfig, 'getStatus').mockResolvedValue(structuredClone(readyAIStatus));
   localStorage.clear();
   Object.defineProperty(window, 'wenyao', { value: undefined, configurable: true });
@@ -76,6 +85,18 @@ beforeEach(() => {
     }),
     configurable: true,
   });
+});
+
+afterEach(() => {
+  desktop.runtime = {
+    kind: 'web',
+    capabilities: {
+      ai: false,
+      corpusImport: false,
+      nativeUpdates: false,
+      secureKeyStorage: false,
+    },
+  };
 });
 
 describe('问爻桌面体验', () => {

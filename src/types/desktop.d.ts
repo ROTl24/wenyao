@@ -6,6 +6,18 @@ export type AICapability = 'generation' | 'embedding' | 'rerank';
 export type AIProtocol = 'openai-chat' | 'openai-embeddings' | 'cohere-rerank' | 'alibaba-rerank';
 export type PublicLinkId = 'repository' | 'xiaohongshu';
 
+export interface PlatformCapabilities {
+  ai: boolean;
+  corpusImport: boolean;
+  nativeUpdates: boolean;
+  secureKeyStorage: boolean;
+}
+
+export interface PlatformRuntime {
+  kind: 'electron' | 'web';
+  capabilities: PlatformCapabilities;
+}
+
 export interface AICapabilityDefinition {
   protocol: AIProtocol;
   model: string;
@@ -158,6 +170,7 @@ export type UpdateState =
   | { status: 'error'; currentVersion: string; availableVersion?: string; operation: 'check' | 'download'; manual: boolean; message: string };
 
 export interface DesktopApi {
+  runtime: PlatformRuntime;
   externalLinks: {
     open(id: PublicLinkId): Promise<boolean>;
   };
@@ -216,8 +229,12 @@ export interface DesktopApi {
   platform: string;
 }
 
+export type ElectronBridge = Omit<DesktopApi, 'runtime'> & {
+  runtime?: PlatformRuntime;
+};
+
 declare global {
-  interface Window { wenyao?: DesktopApi }
+  interface Window { wenyao?: ElectronBridge }
 }
 
 export {};

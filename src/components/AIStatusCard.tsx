@@ -3,6 +3,7 @@ import type { AIConfigStatus } from '../types/desktop';
 
 interface Props {
   status: AIConfigStatus;
+  available?: boolean;
   onConfigure(): void;
   onAdvanced(): void;
 }
@@ -19,7 +20,19 @@ const statusLabel: Record<AIConfigStatus['status'], string> = {
   ready: '已就绪',
 };
 
-export function AIStatusCard({ status, onConfigure, onAdvanced }: Props) {
+export function AIStatusCard({ status, available = true, onConfigure, onAdvanced }: Props) {
+  if (!available) {
+    return (
+      <div className="ai-status-card ai-status-card--ready">
+        <div className="ai-status-card__icon"><CheckCircle2 /></div>
+        <div className="ai-status-card__copy">
+          <div className="ai-status-card__title"><strong>本地模式</strong><span>网页版</span></div>
+          <p>起卦、排盘、历史记录和内置古籍均可在当前设备使用；网页版不接收 AI 密钥。</p>
+        </div>
+      </div>
+    );
+  }
+
   const progress = status.draft?.indexTask?.progress ?? 0;
   const busy = status.status === 'testing' || status.status === 'building';
   const Icon = status.status === 'ready' ? CheckCircle2 : busy ? LoaderCircle : status.status === 'error' ? AlertTriangle : Bot;

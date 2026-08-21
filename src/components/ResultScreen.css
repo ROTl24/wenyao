@@ -12,10 +12,10 @@
   --result-ui: var(--font-ui);
   position: relative;
   isolation: isolate;
-  height: calc(100% - 42px);
+  height: calc(100% - var(--app-chrome-height));
   overflow-x: hidden;
   overflow-y: auto;
-  padding: clamp(16px, 2vw, 30px) clamp(16px, 2vw, 34px) 96px;
+  padding: clamp(16px, 2vw, 30px) clamp(16px, 2vw, 34px) calc(96px + var(--safe-bottom));
   background-color: var(--result-paper-outer);
   background-image:
     repeating-linear-gradient(92deg, rgba(46, 42, 34, .018) 0 1px, transparent 1px 5px),
@@ -1428,7 +1428,7 @@
     grid-template-columns: repeat(2, minmax(0, 1fr));
   }
   .result-screen {
-    padding: 0 0 76px;
+    padding: 0 0 calc(76px + var(--safe-bottom));
   }
 
   .result-codex {
@@ -1747,7 +1747,7 @@
   }
 
   .chat-dock {
-    padding: 32px 16px 42px;
+    padding: 32px max(16px, var(--safe-right)) calc(42px + var(--safe-bottom)) max(16px, var(--safe-left));
   }
 
   .chat-dock::after {
@@ -1825,6 +1825,10 @@
 
   .chat-input button {
     min-height: 48px;
+  }
+
+  .chat-input input {
+    font-size: 16px;
   }
 }
 
