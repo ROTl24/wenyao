@@ -39,6 +39,7 @@ test('desktop release waits for ARM build and Intel smoke before one privileged 
   assert.match(workflow, /runs-on: macos-15\s/);
   assert.match(workflow, /runs-on: macos-15-intel\s/);
   assert.match(workflow, /verify-macos-intel:/);
+  assert.match(workflow, /lipo "\$app\/Contents\/MacOS\/问爻" -verify_arch x86_64 arm64/);
   assert.match(workflow, /publish:\s+if: startsWith\(github\.ref, 'refs\/tags\/v'\)\s+needs:\s+- build-windows\s+- build-macos\s+- verify-macos-intel/s);
   assert.match(workflow, /publish:\s+[\s\S]*?permissions:\s+contents: write/);
   assert.doesNotMatch(workflow, /APPLE_|MAC_CSC|notar/i);

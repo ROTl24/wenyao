@@ -126,7 +126,7 @@ jobs:
           mkdir -p release/intel-smoke
           ditto -x -k "release/WenYao-$version-universal-app.zip" release/intel-smoke
           app="release/intel-smoke/问爻.app"
-          lipo -verify_arch x86_64 arm64 "$app/Contents/MacOS/问爻"
+          lipo "$app/Contents/MacOS/问爻" -verify_arch x86_64 arm64
           codesign --verify --deep --strict --verbose=2 "$app"
           runtime="$($app/Contents/MacOS/问爻 --verify-platform-runtime)"
           printf '%s\n' "$runtime"
