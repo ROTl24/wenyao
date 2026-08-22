@@ -4,9 +4,10 @@ import remarkGfm from 'remark-gfm';
 interface Props {
   markdown: string;
   className?: string;
+  allowExternalLinks?: boolean;
 }
 
-export function MarkdownContent({ markdown, className = '' }: Props) {
+export function MarkdownContent({ markdown, className = '', allowExternalLinks = true }: Props) {
   return (
     <div className={`markdown-content ${className}`.trim()}>
       <ReactMarkdown
@@ -17,7 +18,7 @@ export function MarkdownContent({ markdown, className = '' }: Props) {
             const evidenceAnchor = Boolean(href?.startsWith('#evidence-'));
             const plateAnchor = href === '#plate-facts';
             const external = Boolean(href && /^https?:\/\//i.test(href));
-            if (!evidenceAnchor && !plateAnchor && !external) return <span>{children}</span>;
+            if (!evidenceAnchor && !plateAnchor && (!external || !allowExternalLinks)) return <span>{children}</span>;
             return (
               <a
                 {...props}
@@ -48,6 +49,10 @@ export function MarkdownContent({ markdown, className = '' }: Props) {
                 {children}
               </a>
             );
+          },
+          img({ alt = '', ...props }) {
+            if (!allowExternalLinks) return <span>{alt ? `［图片：${alt}］` : '［图片已隐藏］'}</span>;
+            return <img {...props} alt={alt} />;
           },
         }}
       >

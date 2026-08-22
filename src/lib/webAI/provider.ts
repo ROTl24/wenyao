@@ -1,0 +1,183 @@
+import type { AIConnection } from '../../types/desktop';
+import { toDesktopError, validateWebConnection, WebAIError } from './security';
+
+interface UsageRecord {
+  capability: 'generation' | 'embedding' | 'rerank';
+  model: string;
+  promptTokens: number;
+  completionTokens: number;
+  totalTokens: number;
+}
+
+const MAX_RESPONSE_BYTES = 4 * 1024 * 1024;
+const REQUEST_TIMEOUT_MS = 90_000;
+
+function usage(value: unknown): Omit<UsageRecord, 'capability' | 'model'> | null {
+  if (!value || typeof value !== 'object') return null;
+  const record = value as Record<string, unknown>;
+  const promptTokens = Number(record.prompt_tokens ?? record.input_tokens ?? 0);
+  const completionTokens = Number(record.completion_tokens ?? record.output_tokens ?? 0);
+  const totalTokens = Number(record.total_tokens ?? promptTokens + completionTokens);
+  return [promptTokens, completionTokens, totalTokens].some((item) => Number.isFinite(item) && item > 0)
+    ? { promptTokens, completionTokens, totalTokens }
+    : null;
+}
+
+async function boundedText(response: Response): Promise<string> {
+  const declared = Number(response.headers.get('content-length') || 0);
+  if (declared > MAX_RESPONSE_BYTES) throw new Error('AI 服务响应超过 4 MB 安全上限。');
+  if (!response.body) {
+    const text = await response.text();
+    if (new TextEncoder().encode(text).byteLength > MAX_RESPONSE_BYTES) throw new Error('AI 服务响应超过 4 MB 安全上限。');
+    return text;
+  }
+  const reader = response.body.getReader();
+  const chunks: Uint8Array[] = [];
+  let received = 0;
+  while (true) {
+    const { value, done } = await reader.read();
+    if (done) break;
+    if (!value) continue;
+    received += value.byteLength;
+    if (received > MAX_RESPONSE_BYTES) {
+      await reader.cancel();
+      throw new Error('AI 服务响应超过 4 MB 安全上限。');
+    }
+    chunks.push(value);
+  }
+  const merged = new Uint8Array(received);
+  let offset = 0;
+  for (const chunk of chunks) { merged.set(chunk, offset); offset += chunk.byteLength; }
+  return new TextDecoder().decode(merged);
+}
+
+function providerFailure(status: number): WebAIError {
+  if (status === 401 || status === 403) return new WebAIError({ code: 'WEB_AI_AUTH_FAILED', message: '访问密钥无效或没有模型权限。', dataSafe: true, nextAction: '请重新输入密钥，并确认账号已开通所选模型。' });
+  if (status === 402) return new WebAIError({ code: 'WEB_AI_BALANCE_REQUIRED', message: 'AI 服务账号余额或额度不足。', dataSafe: true, nextAction: '请到服务商控制台检查余额和用量。' });
+  if (status === 404) return new WebAIError({ code: 'WEB_AI_MODEL_UNAVAILABLE', message: 'AI 接口或模型不存在。', dataSafe: true, nextAction: '请核对自定义路径和模型名称。' });
+  if (status === 429) return new WebAIError({ code: 'WEB_AI_RATE_LIMITED', message: 'AI 服务当前请求过于频繁。', dataSafe: true, nextAction: '请稍后手动重试；问爻不会自动重试。' });
+  return new WebAIError({ code: 'WEB_AI_PROVIDER_FAILED', message: `AI 服务请求失败（${status}）。`, dataSafe: true, nextAction: '请到服务商控制台核对服务状态；响应正文不会在问爻中保存或展示。' });
+}
+
+function combinedSignal(outer?: AbortSignal): { signal: AbortSignal; dispose(): void } {
+  const controller = new AbortController();
+  const timer = setTimeout(() => controller.abort(new DOMException('Timeout', 'TimeoutError')), REQUEST_TIMEOUT_MS);
+  const abort = () => controller.abort(outer?.reason);
+  outer?.addEventListener('abort', abort, { once: true });
+  return {
+    signal: controller.signal,
+    dispose() {
+      clearTimeout(timer);
+      outer?.removeEventListener('abort', abort);
+    },
+  };
+}
+
+export async function secureJsonRequest(
+  url: string,
+  apiKey: string,
+  body: unknown,
+  options: { signal?: AbortSignal; method?: 'GET' | 'POST'; fetchImpl?: typeof fetch } = {},
+): Promise<Record<string, any>> {
+  const method = options.method || 'POST';
+  const timeout = combinedSignal(options.signal);
+  try {
+    const response = await (options.fetchImpl || fetch)(url, {
+      method,
+      mode: 'cors',
+      credentials: 'omit',
+      cache: 'no-store',
+      redirect: 'error',
+      referrerPolicy: 'no-referrer',
+      headers: {
+        accept: 'application/json',
+        authorization: `Bearer ${apiKey}`,
+        ...(method === 'POST' ? { 'content-type': 'application/json' } : {}),
+      },
+      ...(method === 'POST' ? { body: JSON.stringify(body) } : {}),
+      signal: timeout.signal,
+    });
+    const text = await boundedText(response);
+    if (!response.ok) throw providerFailure(response.status);
+    try {
+      return text ? JSON.parse(text) as Record<string, any> : {};
+    } catch {
+      throw new WebAIError({ code: 'WEB_AI_INVALID_RESPONSE', message: 'AI 服务返回了无法解析的数据。', dataSafe: true, nextAction: '请确认自定义服务兼容所选协议。' });
+    }
+  } catch (error) {
+    if (error instanceof WebAIError) throw error;
+    if (timeout.signal.aborted) throw timeout.signal.reason instanceof DOMException ? timeout.signal.reason : new DOMException('Aborted', 'AbortError');
+    const detail = toDesktopError(error, 'WEB_AI_NETWORK_FAILED');
+    detail.message = '无法连接 AI 服务。';
+    detail.nextAction = '请确认服务商允许浏览器 CORS 访问，且网络和域名均正常；问爻不会改用公共代理。';
+    throw new WebAIError(detail);
+  } finally {
+    timeout.dispose();
+  }
+}
+
+export function createWebProvider(
+  connection: AIConnection,
+  apiKey: string,
+  onUsage: (usage: UsageRecord) => void = () => {},
+) {
+  const validated = validateWebConnection(connection);
+  const recordUsage = (capability: UsageRecord['capability'], model: string, json: Record<string, any>) => {
+    const normalized = usage(json.usage || json.meta?.tokens || json.tokens);
+    if (normalized) onUsage({ capability, model, ...normalized });
+  };
+
+  return {
+    origins: validated.origins,
+    async chat({ messages, signal, maxTokens = 8192, temperature = 0 }: { messages: Array<{ role: string; content: string }>; signal?: AbortSignal; maxTokens?: number; temperature?: number }) {
+      const definition = validated.connection.capabilities.generation!;
+      const json = await secureJsonRequest(validated.endpoints.generation!, apiKey, {
+        model: definition.model,
+        messages,
+        temperature,
+        max_tokens: maxTokens,
+      }, { signal });
+      recordUsage('generation', definition.model, json);
+      const content = json.choices?.[0]?.message?.content;
+      if (typeof content !== 'string' || !content.trim()) throw new WebAIError({ code: 'WEB_AI_INVALID_RESPONSE', message: '解读模型没有返回可展示的内容。', dataSafe: true, nextAction: '请核对模型和 OpenAI Chat 兼容协议。' });
+      return { content, raw: json };
+    },
+    async embed(input: string | string[], { signal }: { signal?: AbortSignal } = {}) {
+      const definition = validated.connection.capabilities.embedding!;
+      const values = Array.isArray(input) ? input : [input];
+      if (!values.length || values.some((item) => !item.trim())) throw new Error('向量请求不能包含空文本。');
+      const json = await secureJsonRequest(validated.endpoints.embedding!, apiKey, {
+        model: definition.model,
+        input: values,
+        dimensions: definition.dimensions,
+        encoding_format: 'float',
+      }, { signal });
+      recordUsage('embedding', definition.model, json);
+      const ordered = [...(json.data || [])].sort((left, right) => Number(left.index) - Number(right.index));
+      if (ordered.length !== values.length || ordered.some((item) => !Array.isArray(item.embedding) || item.embedding.length !== definition.dimensions)) {
+        throw new WebAIError({ code: 'WEB_AI_EMBEDDING_INVALID_RESPONSE', message: '向量响应数量或维度与配置不一致。', dataSafe: true, nextAction: '请核对向量模型维度，修改后重新建库。' });
+      }
+      return ordered.map((item) => item.embedding as number[]);
+    },
+    async rerank(query: string, documents: string[], { signal, topN = 12 }: { signal?: AbortSignal; topN?: number } = {}) {
+      const definition = validated.connection.capabilities.rerank!;
+      const json = await secureJsonRequest(validated.endpoints.rerank!, apiKey, {
+        model: definition.model,
+        query,
+        documents,
+        top_n: Math.min(topN, documents.length),
+        ...(definition.protocol === 'alibaba-rerank'
+          ? { instruct: 'Given a Chinese divination question, retrieve classical divination passages that directly support the interpretation.' }
+          : { instruction: '根据中文六爻问题，优先选择能直接支持判断的古籍原文、规则与占例。' }),
+      }, { signal });
+      recordUsage('rerank', definition.model, json);
+      const results = json.results || json.output?.results || [];
+      const normalized: Array<{ index: number; score: number }> = results.map((item: Record<string, unknown>) => ({
+        index: Number(item.index),
+        score: Number(item.relevance_score ?? item.score),
+      })).filter((item: { index: number; score: number }) => Number.isInteger(item.index) && Number.isFinite(item.score));
+      if (!normalized.length) throw new WebAIError({ code: 'WEB_AI_RERANK_INVALID_RESPONSE', message: '重排服务没有返回有效候选。', dataSafe: true, nextAction: '请核对重排协议、模型和接口路径。' });
+      return normalized;
+    },
+  };
+}

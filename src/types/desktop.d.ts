@@ -80,6 +80,10 @@ export interface AIDraft {
     progress: number;
     error?: DesktopError | null;
   } | null;
+  webSecurity?: {
+    confirmedOrigins: string[];
+    bulkEmbeddingAccepted: boolean;
+  };
 }
 
 export type AIConfigStatusName = 'unconfigured' | 'needs-consent' | 'needs-setup' | 'index-required' | 'testing' | 'building' | 'paused' | 'error' | 'ready';
@@ -190,7 +194,7 @@ export interface DesktopApi {
   aiConfig: {
     getCatalog(): Promise<AIProviderCatalog>;
     getStatus(): Promise<AIConfigStatus>;
-    saveDraft(payload: { presetId?: string; fields?: Record<string, string>; connection?: Partial<AIConnection>; pipeline?: AIPipeline; apiKey?: string; consentAccepted?: boolean }): Promise<{ ok: boolean; status?: AIConfigStatus; error?: DesktopError }>;
+    saveDraft(payload: { presetId?: string; fields?: Record<string, string>; connection?: Partial<AIConnection>; pipeline?: AIPipeline; apiKey?: string; consentAccepted?: boolean; webSecurity?: { confirmedOrigins: string[]; bulkEmbeddingAccepted?: boolean } }): Promise<{ ok: boolean; status?: AIConfigStatus; error?: DesktopError }>;
     testDraft(): Promise<{ ok: boolean; status?: AIConfigStatus; error?: DesktopError }>;
     buildAndActivate(): Promise<{ ok: boolean; status?: AIConfigStatus; error?: DesktopError }>;
     pauseBuild(): Promise<AIConfigStatus>;

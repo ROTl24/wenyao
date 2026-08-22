@@ -52,4 +52,13 @@ describe('MarkdownContent', () => {
       expect(screen.getByText(label).closest('a')).toBeNull();
     }
   });
+
+  it('turns model-provided external links into plain text in the web trust boundary', () => {
+    const { container } = render(<MarkdownContent allowExternalLinks={false} markdown={'[内部依据](#evidence-E1) [诱导链接](https://evil.example/key) ![追踪图](https://evil.example/pixel)'} />);
+
+    expect(screen.getByRole('link', { name: '内部依据' })).toBeVisible();
+    expect(screen.getByText('诱导链接').closest('a')).toBeNull();
+    expect(screen.getByText('［图片：追踪图］')).toBeVisible();
+    expect(container.querySelector('img')).toBeNull();
+  });
 });

@@ -43,7 +43,9 @@ describe('AI 高级设置', () => {
     fireEvent.click(screen.getByRole('button', { name: /DeepSeek 官方/ }));
     expect(screen.getByLabelText('解读模型')).toHaveValue('deepseek-v4-pro');
     fireEvent.change(screen.getByLabelText('访问密钥'), { target: { value: 'deepseek-test-key' } });
-    fireEvent.click(screen.getByRole('button', { name: '保存草稿并验证' }));
+    fireEvent.change(screen.getByLabelText(/请逐字输入/), { target: { value: 'api.deepseek.com' } });
+    fireEvent.click(screen.getByRole('checkbox', { name: /我确认这些域名/ }));
+    fireEvent.click(screen.getByRole('button', { name: '确认域名并验证' }));
 
     await waitFor(() => expect(saveDraft).toHaveBeenCalledTimes(1));
     const payload = saveDraft.mock.calls[0][0];
@@ -51,5 +53,6 @@ describe('AI 高级设置', () => {
     expect(payload.pipeline?.generation?.connectionId).toBe(payload.connection?.id);
     expect(payload.pipeline?.embedding?.connectionId).toBe('active-stack');
     expect(payload.pipeline?.rerank?.connectionId).toBe('active-stack');
+    expect(payload.webSecurity?.confirmedOrigins).toEqual(['https://api.deepseek.com']);
   });
 });

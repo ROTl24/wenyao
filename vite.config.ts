@@ -5,6 +5,11 @@ import { VitePWA } from 'vite-plugin-pwa';
 const maximumFileSizeToCacheInBytes = 10 * 1024 * 1024;
 
 export default defineConfig({
+  build: {
+    commonjsOptions: {
+      include: [/electron[\\/]services/, /node_modules/],
+    },
+  },
   plugins: [
     react(),
     VitePWA({
@@ -32,7 +37,7 @@ export default defineConfig({
         clientsClaim: false,
         skipWaiting: false,
         navigateFallback: 'index.html',
-        globPatterns: ['**/*.{html,js,css,png,svg,webp,avif,ttf,woff,woff2,json,webmanifest}'],
+        globPatterns: ['**/*.{html,js,css,png,svg,webp,avif,ttf,woff,woff2,json,webmanifest,f32}'],
         maximumFileSizeToCacheInBytes,
       },
       devOptions: {

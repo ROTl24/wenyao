@@ -10,6 +10,7 @@ import { formatShanghaiDateTime } from '../lib/shanghaiTime';
 import { HexagramLines } from './HexagramLines';
 import { CastingBasisSummary } from './CastingBasisSummary';
 import { MarkdownContent } from './MarkdownContent';
+import { desktop } from '../lib/desktop';
 import './ResultScreen.css';
 import { StemBranchText } from './StemBranchText';
 
@@ -169,7 +170,7 @@ export function ResultScreen({ session, evidence, retrievalDiagnostics, aiStatus
                     <span>{markdownAnalysis.pipeline.retrievalMode === 'hybrid-reranked' ? '混合召回 + 模型重排' : markdownAnalysis.pipeline.retrievalMode === 'hybrid-fused' ? '混合召回 + 融合排序' : '关键词检索'}</span>
                   </div>
                 ) : null}
-                <MarkdownContent markdown={markdownAnalysis.markdown} />
+                <MarkdownContent markdown={markdownAnalysis.markdown} allowExternalLinks={desktop.runtime.kind === 'electron'} />
                 {evidence.length === 0 ? <p className="uncertainty">当前未检索到可用古籍证据；以上依据全部来自程序锁定的排盘事实。</p> : null}
               </article>
             ) : null}
@@ -317,7 +318,7 @@ export function ResultScreen({ session, evidence, retrievalDiagnostics, aiStatus
                     <span className="chat-message-role">{message.role === 'user' ? '你' : '问爻'}</span>
                     <div className="chat-message-copy">
                       {message.role === 'user' ? <p>{message.content}</p> : null}
-                      {isMarkdownAnswer ? <MarkdownContent className="chat-markdown" markdown={message.content} /> : null}
+                      {isMarkdownAnswer ? <MarkdownContent className="chat-markdown" markdown={message.content} allowExternalLinks={desktop.runtime.kind === 'electron'} /> : null}
                       {isSystemNotice ? <p>{message.content}</p> : null}
                       {isLegacyAnswer ? <p className="chat-contract-warning">这条历史追问不是当前 Markdown 格式，已停止展示。</p> : null}
                     </div>

@@ -13,6 +13,8 @@ import type {
 import type { UpdateState } from '../types/desktop';
 import type { DivinationSession } from './session';
 import { searchEvidence } from './retrieval';
+import { WebAIClient, emptyWebAIStatus } from './webAI/client';
+import { isTrustedWebAIOrigin } from './webAI/security';
 import {
   normalizeStoredSession,
   sanitizeRendererSession,
@@ -20,10 +22,12 @@ import {
 } from './sessionValidation';
 
 const STORAGE_KEY = 'wenyao-browser-sessions';
+const browserAIEnabled = isTrustedWebAIOrigin();
+const webAI = browserAIEnabled ? new WebAIClient() : null;
 const browserRuntime: PlatformRuntime = {
   kind: 'web',
   capabilities: {
-    ai: false,
+    ai: browserAIEnabled,
     corpusImport: false,
     nativeUpdates: false,
     secureKeyStorage: false,
@@ -43,17 +47,21 @@ const browserUpdateState: UpdateState = {
   currentVersion: '',
 };
 const browserAIStatus: AIConfigStatus = {
-  status: 'unconfigured',
-  message: '网页版提供本地排盘、历史记录和内置古籍浏览，不提供 AI 解读。',
-  activeCapabilities: null,
-  activeFingerprint: '',
+  ...emptyWebAIStatus,
+  message: browserAIEnabled
+    ? '尚未连接 AI 服务；访问密钥只在当前页面会话中使用。'
+    : '此预览域名不接收 AI 密钥；请使用正式发布地址。',
   corpusCount: corpus.length,
-  consentAcceptedAt: '',
-  connections: [],
-  activePipeline: null,
-  draft: null,
-  usage: [],
 };
+const browserProviderCatalog: AIProviderCatalog = {
+  ...(structuredClone(aiProviderCatalog) as AIProviderCatalog),
+  defaultPresetId: 'alibaba-cn-quality',
+  presets: (structuredClone(aiProviderCatalog.presets) as AIProviderCatalog['presets']).map((preset) => ({
+    ...preset,
+    recommended: preset.id === 'alibaba-cn-quality',
+  })),
+};
+const officialAIUrls = new Set(browserProviderCatalog.presets.flatMap((preset) => Object.values(preset.setup)));
 const browserCorpusBooks: CorpusBookSummary[] = [...new Set(corpus.map((entry) => entry.source))].map((title, index) => {
   const entries = corpus.filter((entry) => entry.source === title);
   return {
@@ -165,20 +173,26 @@ const browserFallback: DesktopApi = {
     },
   },
   aiConfig: {
-    async getCatalog() { return structuredClone(aiProviderCatalog) as AIProviderCatalog; },
-    async getStatus() { return structuredClone(browserAIStatus); },
-    async saveDraft() { return { ok: false, error: { code: 'WEB_FEATURE_UNAVAILABLE', message: '网页版不接收或保存 AI 密钥。', dataSafe: true, nextAction: '仍可使用本地排盘、历史记录和内置古籍检索。' } }; },
-    async testDraft() { return { ok: false, error: { code: 'WEB_FEATURE_UNAVAILABLE', message: '网页版不连接 AI 服务。', dataSafe: true, nextAction: '仍可使用本地排盘、历史记录和内置古籍检索。' } }; },
-    async buildAndActivate() { return { ok: false, error: { code: 'WEB_FEATURE_UNAVAILABLE', message: '网页版不构建向量索引。', dataSafe: true, nextAction: '内置古籍仍可在本机进行关键词检索。' } }; },
-    async pauseBuild() { return structuredClone(browserAIStatus); },
-    async resumeBuild() { return structuredClone(browserAIStatus); },
-    async cancelBuild() { return structuredClone(browserAIStatus); },
-    async removeConnection() { return { ok: false, error: { code: 'WEB_FEATURE_UNAVAILABLE', message: '网页版没有 AI 连接。', dataSafe: true, nextAction: '无需进行 AI 连接管理。' } }; },
-    async openExternal(url) { window.open(url, '_blank', 'noopener,noreferrer'); return true; },
-    onStatus() { return () => {}; },
+    async getCatalog() { return structuredClone(browserProviderCatalog); },
+    async getStatus() { return webAI ? { ...(await webAI.getStatus()), corpusCount: corpus.length } : structuredClone(browserAIStatus); },
+    async saveDraft(payload) { return webAI ? webAI.saveDraft(payload) : { ok: false, error: { code: 'WEB_AI_ORIGIN_DISABLED', message: '此域名未启用 AI 密钥输入。', dataSafe: true, nextAction: '请使用问爻正式发布地址。' } }; },
+    async testDraft() { return webAI ? webAI.testDraft() : { ok: false, error: { code: 'WEB_AI_ORIGIN_DISABLED', message: '此域名未启用 AI 服务。', dataSafe: true, nextAction: '请使用问爻正式发布地址。' } }; },
+    async buildAndActivate() { return webAI ? webAI.buildAndActivate() : { ok: false, error: { code: 'WEB_AI_ORIGIN_DISABLED', message: '此域名未启用 AI 服务。', dataSafe: true, nextAction: '请使用问爻正式发布地址。' } }; },
+    async pauseBuild() { return webAI ? webAI.pauseBuild() : structuredClone(browserAIStatus); },
+    async resumeBuild() { return webAI ? webAI.resumeBuild() : structuredClone(browserAIStatus); },
+    async cancelBuild() { return webAI ? webAI.cancelBuild() : structuredClone(browserAIStatus); },
+    async removeConnection(id) { return webAI ? webAI.removeConnection(id) : { ok: false, error: { code: 'WEB_AI_ORIGIN_DISABLED', message: '此域名没有 AI 连接。', dataSafe: true, nextAction: '无需管理连接。' } }; },
+    async openExternal(url) {
+      if (!officialAIUrls.has(url)) return false;
+      return window.open(url, '_blank', 'noopener,noreferrer') !== null;
+    },
+    onStatus(listener) { return webAI ? webAI.onStatus(listener) : () => {}; },
   },
   corpus: {
-    async status() { return structuredClone(browserCorpusStatus); },
+    async status() {
+      const aiStatus = webAI ? await webAI.getStatus() : browserAIStatus;
+      return { ...structuredClone(browserCorpusStatus), vectorReady: aiStatus.status === 'ready', vectorModel: aiStatus.activeCapabilities?.embedding.model || '' };
+    },
     async books(payload = {}) {
       const query = String(payload.query || '').toLowerCase();
       const items = browserCorpusBooks.filter((book) => !query || book.title.toLowerCase().includes(query));
@@ -212,13 +226,14 @@ const browserFallback: DesktopApi = {
   },
   retrieval: {
     async search(payload) {
+      if (webAI && (await webAI.getStatus()).status === 'ready') return webAI.search(payload);
       const evidence = searchEvidence(corpus as import('./retrieval').EvidenceEntry[], payload.query, payload.domainTerms, payload.limit || 8);
-      return { evidence, diagnostics: { mode: 'lexical-fallback', lexicalCandidates: evidence.length, vectorCandidates: 0, fusedCandidates: evidence.length, vectorUsed: false, rerankUsed: false, warnings: ['浏览器预览仅使用关键词检索。'] } };
+      return { evidence, diagnostics: { mode: 'lexical-fallback', lexicalCandidates: evidence.length, vectorCandidates: 0, fusedCandidates: evidence.length, vectorUsed: false, rerankUsed: false, warnings: ['AI 未就绪时仅展示本地关键词检索结果，不会据此生成 AI 报告。'] } };
     },
   },
   ai: {
-    async analyze() { return { ok: false, error: { code: 'WEB_FEATURE_UNAVAILABLE', message: '网页版不发送 AI 请求。', dataSafe: true, nextAction: '仍可查看本地排盘和内置古籍依据。' } }; },
-    async followUp() { return { ok: false, error: { code: 'WEB_FEATURE_UNAVAILABLE', message: '网页版不发送 AI 请求。', dataSafe: true, nextAction: '仍可查看本地排盘和内置古籍依据。' } }; },
+    async analyze(payload) { return webAI ? webAI.analyze(payload) : { ok: false, error: { code: 'WEB_AI_ORIGIN_DISABLED', message: '此域名不发送 AI 请求。', dataSafe: true, nextAction: '请使用问爻正式发布地址。' } }; },
+    async followUp(payload) { return webAI ? webAI.followUp(payload) : { ok: false, error: { code: 'WEB_AI_ORIGIN_DISABLED', message: '此域名不发送 AI 请求。', dataSafe: true, nextAction: '请使用问爻正式发布地址。' } }; },
   },
   platform: 'browser',
 };

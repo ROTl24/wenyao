@@ -37,7 +37,7 @@ describe('AI 连接向导', () => {
 
     fireEvent.click(screen.getByRole('button', { name: '继续' }));
     expect(screen.getByText(/不是登录密码/)).toBeVisible();
-    expect(screen.getByText(/不会发送全部历史/)).toBeVisible();
+    expect(screen.getByText(/不会写入浏览器存储/)).toBeVisible();
     fireEvent.click(screen.getByRole('button', { name: /打开官方密钥页面/ }));
     await waitFor(() => expect(openExternal).toHaveBeenCalledWith('https://cloud.siliconflow.cn/account/ak'));
     expect(screen.getByRole('button', { name: /保存并检测三项能力/ })).toBeDisabled();
@@ -52,11 +52,19 @@ describe('AI 连接向导', () => {
 
     fireEvent.click(screen.getByRole('button', { name: '继续' }));
     fireEvent.change(screen.getByLabelText('访问密钥'), { target: { value: 'sf-test-key' } });
-    fireEvent.click(screen.getByRole('checkbox'));
+    screen.getAllByRole('checkbox').forEach((checkbox) => fireEvent.click(checkbox));
     fireEvent.click(screen.getByRole('button', { name: /保存并检测三项能力/ }));
 
     expect(await screen.findByRole('heading', { name: /三项能力和向量索引均已通过/ })).toBeVisible();
-    expect(saveDraft).toHaveBeenCalledWith(expect.objectContaining({ presetId: 'siliconflow-cn-quality', apiKey: 'sf-test-key', consentAccepted: true }));
+    expect(saveDraft).toHaveBeenCalledWith(expect.objectContaining({
+      presetId: 'siliconflow-cn-quality',
+      apiKey: 'sf-test-key',
+      consentAccepted: true,
+      webSecurity: {
+        confirmedOrigins: ['https://api.siliconflow.cn'],
+        bulkEmbeddingAccepted: true,
+      },
+    }));
     expect(testDraft).toHaveBeenCalledTimes(1);
     expect(buildAndActivate).toHaveBeenCalledTimes(1);
     fireEvent.click(screen.getByRole('button', { name: '开始解读' }));

@@ -72,11 +72,11 @@ describe('浏览器公共外链', () => {
 });
 
 describe('平台能力', () => {
-  it('describes the browser as local-only without directing users into desktop-only setup', async () => {
+  it('enables session-only browser AI in trusted builds without claiming secure storage', async () => {
     expect(desktop.runtime).toEqual({
       kind: 'web',
       capabilities: {
-        ai: false,
+        ai: true,
         corpusImport: false,
         nativeUpdates: false,
         secureKeyStorage: false,
@@ -86,8 +86,8 @@ describe('平台能力', () => {
     const status = await desktop.aiConfig.getStatus();
     const result = await desktop.aiConfig.saveDraft({});
 
-    expect(status.message).toContain('本地排盘、历史记录和内置古籍');
-    expect(result.error).toMatchObject({ code: 'WEB_FEATURE_UNAVAILABLE' });
+    expect(status.message).toContain('当前页面会话');
+    expect(result.error).toMatchObject({ code: 'WEB_AI_RUNTIME_UNAVAILABLE' });
     expect(`${result.error?.message}${result.error?.nextAction}`).not.toContain('Electron');
   });
 

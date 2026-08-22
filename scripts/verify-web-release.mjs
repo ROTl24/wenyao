@@ -66,12 +66,32 @@ function requireIcon(manifest, src, size, purpose) {
 const indexPath = path.join(distRoot, 'index.html');
 const manifestPath = path.join(distRoot, 'manifest.webmanifest');
 const serviceWorkerPath = path.join(distRoot, 'sw.js');
+const headersPath = path.join(distRoot, '_headers');
 const indexBytes = requireFile(indexPath, 200);
 const manifestBytes = requireFile(manifestPath, 100);
 const serviceWorkerBytes = requireFile(serviceWorkerPath, 200);
+requireFile(headersPath, 200);
 const index = readFileSync(indexPath, 'utf8');
 const manifest = JSON.parse(readFileSync(manifestPath, 'utf8'));
 const serviceWorker = readFileSync(serviceWorkerPath, 'utf8');
+const headers = readFileSync(headersPath, 'utf8');
+
+for (const requiredHeader of [
+  "frame-ancestors 'none'",
+  "base-uri 'none'",
+  "form-action 'none'",
+  "object-src 'none'",
+  "worker-src 'self'",
+  'Referrer-Policy: no-referrer',
+  'X-Content-Type-Options: nosniff',
+  'X-Frame-Options: DENY',
+  'Permissions-Policy:',
+]) {
+  if (!headers.includes(requiredHeader)) throw new Error(`Cloudflare Pages 安全响应头缺少：${requiredHeader}`);
+}
+if (/connect-src[^\n;]*\bhttp:/.test(headers) || /worker-src[^\n;]*blob:/.test(headers)) {
+  throw new Error('Cloudflare Pages 安全策略不得允许明文 AI 请求或 blob Worker');
+}
 
 if (/\/src\/main\.(?:t|j)sx?/.test(index)) {
   throw new Error('dist/index.html 仍引用开发源码入口');
@@ -120,13 +140,19 @@ if (/self\.skipWaiting\s*\(|clientsClaim\s*\(/.test(serviceWorkerWithoutExplicit
 const distFiles = listFiles(distRoot);
 const precacheFiles = distFiles.filter((filePath) => {
   const relative = normalizedRelative(filePath);
-  return relative !== 'sw.js' && !/^workbox-[\w-]+\.js$/.test(relative);
+  return relative !== 'sw.js' && relative !== '_headers' && !/^workbox-[\w-]+\.js$/.test(relative);
 });
 const missingFromPrecache = precacheFiles
   .map(normalizedRelative)
   .filter((relative) => !serviceWorker.includes(JSON.stringify(relative)));
 if (missingFromPrecache.length) {
   throw new Error(`Service Worker 未预缓存以下本地产物：${missingFromPrecache.join(', ')}`);
+}
+if (/runtimeCaching|NetworkFirst|NetworkOnly|StaleWhileRevalidate/.test(serviceWorker)) {
+  throw new Error('Service Worker 不得添加可能缓存跨域 AI 请求或响应的运行时路由');
+}
+if (/authorization|api[-_]?key|bearer/i.test(serviceWorker)) {
+  throw new Error('Service Worker 不得处理 AI 访问密钥或认证头');
 }
 
 for (const pattern of [

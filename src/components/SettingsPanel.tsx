@@ -53,7 +53,7 @@ export function SettingsPanel({
   return (
     <div className="overlay" role="presentation" onMouseDown={(event) => { if (event.target === event.currentTarget) onClose(); }}>
       <aside className="side-panel settings-panel" aria-modal="true" role="dialog">
-        <header><div><h2>应用设置</h2><p>{capabilities.ai ? '软件更新、AI 服务与本地知识库' : '本地排盘、历史记录与内置古籍'}</p></div><button type="button" aria-label="关闭设置" onClick={onClose}><X /></button></header>
+        <header><div><h2>应用设置</h2><p>{capabilities.ai ? (desktop.runtime.kind === 'web' ? '会话级 AI 服务与本地知识库' : '软件更新、AI 服务与本地知识库') : '本地排盘、历史记录与内置古籍'}</p></div><button type="button" aria-label="关闭设置" onClick={onClose}><X /></button></header>
 
         <section className="settings-section">
           <AIStatusCard available={capabilities.ai} status={aiStatus} onConfigure={onConfigureAI} onAdvanced={() => setAdvancedOpen(true)} />
@@ -81,7 +81,7 @@ export function SettingsPanel({
 
         <CreatorLinks variant="panel" />
 
-        <div className="security-note"><ShieldCheck /><p><strong>隐私边界</strong>{capabilities.secureKeyStorage ? '访问密钥由 Windows DPAPI 加密，历史和向量索引留在本机。设置中可以随时查看当前问题、排盘、证据与追问分别发送给哪一家服务商。' : '网页版不接收 AI 密钥；排盘与历史保存在当前浏览器，不需要账号，也不会同步到服务器。清除站点数据会同时删除本地历史。'}</p></div>
+        <div className="security-note"><ShieldCheck /><p><strong>隐私边界</strong>{capabilities.secureKeyStorage ? '访问密钥由 Windows DPAPI 加密，历史和向量索引留在本机。设置中可以随时查看当前问题、排盘、证据与追问分别发送给哪一家服务商。' : capabilities.ai ? '网页版密钥只保存在当前页面的隔离内存中，不写入浏览器存储；刷新、关页或应用更新会清除。AI 服务商会收到密钥和本次请求数据，浏览器扩展、设备或已被篡改的网页仍不属于问爻能够绝对防护的边界。' : '此预览域名不接收 AI 密钥；排盘与历史保存在当前浏览器，不需要账号，也不会同步到服务器。清除站点数据会同时删除本地历史。'}</p></div>
       </aside>
       {capabilities.ai && advancedOpen ? <AIAdvancedSettings catalog={aiCatalog} status={aiStatus} onStatus={onAIStatus} onClose={() => setAdvancedOpen(false)} /> : null}
     </div>
