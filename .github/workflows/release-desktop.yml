@@ -1,6 +1,7 @@
 name: Release desktop applications
 
 on:
+  workflow_dispatch:
   push:
     tags:
       - "v*.*.*"
@@ -26,6 +27,7 @@ jobs:
           cache: npm
 
       - name: Verify tag matches package version
+        if: startsWith(github.ref, 'refs/tags/')
         shell: pwsh
         run: |
           $packageVersion = node -p "require('./package.json').version"
@@ -71,6 +73,7 @@ jobs:
           cache: npm
 
       - name: Verify tag matches package version
+        if: startsWith(github.ref, 'refs/tags/')
         shell: bash
         run: |
           package_version="$(node -p "require('./package.json').version")"
@@ -130,6 +133,7 @@ jobs:
           RUNTIME_JSON="$runtime" node -e "const lines=process.env.RUNTIME_JSON.trim().split(/\\r?\\n/); const value=JSON.parse(lines.findLast(line=>line.trim().startsWith('{'))); if(value.platform!=='darwin'||value.arch!=='x64'||value.updateMode!=='manual') process.exit(1)"
 
   publish:
+    if: startsWith(github.ref, 'refs/tags/v')
     needs:
       - build-windows
       - build-macos

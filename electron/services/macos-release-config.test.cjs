@@ -35,10 +35,11 @@ test('Mac verifier preserves the truthful Gatekeeper and dual-architecture bound
 });
 
 test('desktop release waits for ARM build and Intel smoke before one privileged publish job', () => {
+  assert.match(workflow, /workflow_dispatch:/);
   assert.match(workflow, /runs-on: macos-15\s/);
   assert.match(workflow, /runs-on: macos-15-intel\s/);
   assert.match(workflow, /verify-macos-intel:/);
-  assert.match(workflow, /publish:\s+needs:\s+- build-windows\s+- build-macos\s+- verify-macos-intel/s);
+  assert.match(workflow, /publish:\s+if: startsWith\(github\.ref, 'refs\/tags\/v'\)\s+needs:\s+- build-windows\s+- build-macos\s+- verify-macos-intel/s);
   assert.match(workflow, /publish:\s+[\s\S]*?permissions:\s+contents: write/);
   assert.doesNotMatch(workflow, /APPLE_|MAC_CSC|notar/i);
   assert.equal((workflow.match(/gh release edit .*--draft=false/g) || []).length, 1);

@@ -4,6 +4,7 @@
 
 ## 近期更新
 
+- v0.5.1 增加 macOS 13+ 通用桌面版，覆盖 Intel 与 Apple Silicon；GitHub Actions 同时构建 Windows 与 Mac 安装包，Mac 使用零成本 ad-hoc 签名和手动更新。
 - v0.4.0 新增一站式多供应商 AI 连接向导，并将打包版数据直接保存在安装目录的 `data\`；不再读取或迁移旧 `%APPDATA%` 数据，安装器固定为当前用户模式。
 - v0.3.0 起支持应用内在线更新：启动时及每 6 小时检查 GitHub Releases，发现稳定版后先征得确认，再下载并在重启或正常退出时安装。
 - 首页提供在线、线下、随机、时间四种起卦方式。随机起卦沿用三钱概率并一次生成六爻；时间起卦按农历年支数、月数、日数和时支数推演上下卦与动爻，使用北京时间并在子初 23:00 换日。线下路线终审前不写入历史，三种快捷完成路线均在完整会话保存成功后进入结果与 AI 解读。
@@ -119,6 +120,8 @@ npm run verify:macos-release
 ```
 
 构建会生成 universal DMG、仅供 CI 跨架构冒烟使用的 `.app` 压缩包和 `SHA256SUMS.txt`。验收脚本检查 DMG、ad-hoc seal、双架构主程序、最低系统版本、预期的 Gatekeeper 拒绝边界、真实打包运行时和用户数据目录。
+
+仓库的 `Release desktop applications` 工作流可以从 GitHub Actions 手动运行。手动运行只生成经过双架构验收的 Windows 与 macOS 候选安装包，不创建公开 Release；只有与 `package.json` 版本一致的 `v*.*.*` 标签才会进入正式发布任务。
 
 ## 古籍证据包
 
