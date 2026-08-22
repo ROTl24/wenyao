@@ -75,11 +75,14 @@ describe('平台能力', () => {
   it('enables session-only browser AI in trusted builds without claiming secure storage', async () => {
     expect(desktop.runtime).toEqual({
       kind: 'web',
+      platform: 'browser',
+      arch: 'web',
+      isPackaged: false,
+      updateMode: 'none',
+      secureStorage: 'memory',
       capabilities: {
         ai: true,
         corpusImport: false,
-        nativeUpdates: false,
-        secureKeyStorage: false,
       },
     });
 
@@ -91,22 +94,35 @@ describe('平台能力', () => {
     expect(`${result.error?.message}${result.error?.nextAction}`).not.toContain('Electron');
   });
 
-  it('augments the existing Electron bridge without changing its public methods', () => {
-    const { runtime: _runtime, ...bridge } = desktop;
-    const resolved = resolvePlatformApi({ ...bridge, platform: 'win32' });
+  it('uses the runtime profile supplied by the Electron preload seam', () => {
+    const bridge = {
+      ...desktop,
+      runtime: {
+        kind: 'electron' as const,
+        platform: 'win32' as const,
+        arch: 'x64',
+        isPackaged: true,
+        updateMode: 'native' as const,
+        secureStorage: 'dpapi' as const,
+        capabilities: { ai: true, corpusImport: true },
+      },
+    };
+    const resolved = resolvePlatformApi(bridge);
 
     expect(resolved.runtime).toEqual({
       kind: 'electron',
+      platform: 'win32',
+      arch: 'x64',
+      isPackaged: true,
+      updateMode: 'native',
+      secureStorage: 'dpapi',
       capabilities: {
         ai: true,
         corpusImport: true,
-        nativeUpdates: true,
-        secureKeyStorage: true,
       },
     });
     expect(resolved.sessions).toBe(bridge.sessions);
     expect(resolved.ai).toBe(bridge.ai);
-    expect(resolved.platform).toBe('win32');
   });
 });
 

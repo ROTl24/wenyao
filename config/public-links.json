@@ -2,6 +2,9 @@
   "repository": {
     "url": "https://github.com/ROTl24/wenyao"
   },
+  "releases": {
+    "url": "https://github.com/ROTl24/wenyao/releases/latest"
+  },
   "xiaohongshu": {
     "url": "https://www.xiaohongshu.com/user/profile/66b5c9be000000001d0320ae"
   }

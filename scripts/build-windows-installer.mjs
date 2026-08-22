@@ -1,5 +1,5 @@
 import { spawnSync } from 'node:child_process';
-import { readFileSync, writeFileSync } from 'node:fs';
+import { cpSync, existsSync, mkdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import path from 'node:path';
 import process from 'node:process';
 
@@ -14,6 +14,8 @@ const nsisTemplateRoot = path.join(
 const commonTemplatePath = path.join(nsisTemplateRoot, 'common.nsh');
 const installSectionTemplatePath = path.join(nsisTemplateRoot, 'installSection.nsh');
 const electronBuilderCliPath = path.join(projectRoot, 'node_modules', 'electron-builder', 'cli.js');
+const releaseRoot = path.join(projectRoot, 'release');
+const interruptedElectronDistPath = path.join(projectRoot, 'node_modules', '.cache', 'wenyao-electron-dist-win32-x64');
 
 function replaceOnce(source, search, replacement, label) {
   const firstIndex = source.indexOf(search);
@@ -97,15 +99,31 @@ try {
   writeFileSync(commonTemplatePath, visibleCommonTemplate, 'utf8');
   writeFileSync(installSectionTemplatePath, descriptiveInstallSectionTemplate, 'utf8');
 
-  const result = spawnSync(
-    process.execPath,
-    [electronBuilderCliPath, '--win', 'nsis', ...process.argv.slice(2)],
-    {
-      cwd: projectRoot,
-      env: process.env,
-      stdio: 'inherit',
-    },
-  );
+  const builderArguments = [electronBuilderCliPath, '--win', 'nsis', ...process.argv.slice(2)];
+  let result = spawnSync(process.execPath, builderArguments, {
+    cwd: projectRoot,
+    env: process.env,
+    stdio: 'inherit',
+  });
+
+  const interruptedExtractionPath = path.join(releaseRoot, 'win-unpacked.tmp');
+  if (result.status !== 0 && existsSync(path.join(interruptedExtractionPath, 'electron.exe'))) {
+    // Windows scanners can briefly retain a handle after Electron extraction. Once the
+    // failed child exits, preserve that verified runtime and let electron-builder copy it
+    // through its supported unpacked electronDist path instead of downloading again.
+    rmSync(interruptedElectronDistPath, { recursive: true, force: true });
+    mkdirSync(path.dirname(interruptedElectronDistPath), { recursive: true });
+    cpSync(interruptedExtractionPath, interruptedElectronDistPath, { recursive: true });
+    result = spawnSync(
+      process.execPath,
+      [...builderArguments, `--config.electronDist=${interruptedElectronDistPath}`],
+      {
+        cwd: projectRoot,
+        env: process.env,
+        stdio: 'inherit',
+      },
+    );
+  }
 
   if (result.error) throw result.error;
   if (result.signal) {
@@ -113,6 +131,8 @@ try {
   }
   exitCode = result.status ?? 1;
 } finally {
+  rmSync(interruptedElectronDistPath, { recursive: true, force: true });
+  rmSync(path.join(releaseRoot, 'win-unpacked.tmp'), { recursive: true, force: true });
   writeFileSync(commonTemplatePath, originalCommonTemplate, 'utf8');
   writeFileSync(installSectionTemplatePath, originalInstallSectionTemplate, 'utf8');
 }

@@ -1,0 +1,211 @@
+name: Release desktop applications
+
+on:
+  push:
+    tags:
+      - "v*.*.*"
+
+permissions:
+  contents: read
+
+concurrency:
+  group: release-${{ github.ref }}
+  cancel-in-progress: false
+
+jobs:
+  build-windows:
+    runs-on: windows-2025
+    steps:
+      - name: Check out tagged source
+        uses: actions/checkout@v4
+
+      - name: Use Node.js 24
+        uses: actions/setup-node@v4
+        with:
+          node-version: "24"
+          cache: npm
+
+      - name: Verify tag matches package version
+        shell: pwsh
+        run: |
+          $packageVersion = node -p "require('./package.json').version"
+          if ($env:GITHUB_REF_NAME -ne "v$packageVersion") {
+            throw "Tag $env:GITHUB_REF_NAME does not match package version $packageVersion"
+          }
+
+      - name: Install locked dependencies
+        run: npm ci
+
+      - name: Verify source contracts
+        run: npm test
+
+      - name: Build Windows release artifacts
+        run: npm run build:windows
+        env:
+          WIN_CSC_LINK: ${{ secrets.WIN_CSC_LINK }}
+          WIN_CSC_KEY_PASSWORD: ${{ secrets.WIN_CSC_KEY_PASSWORD }}
+
+      - name: Verify Windows release artifacts
+        run: npm run verify:release
+
+      - name: Store verified Windows assets
+        uses: actions/upload-artifact@v4
+        with:
+          name: desktop-release-windows
+          if-no-files-found: error
+          path: |
+            release/WenYao-*-Setup.exe
+            release/WenYao-*-Setup.exe.blockmap
+            release/latest.yml
+
+  build-macos:
+    runs-on: macos-15
+    steps:
+      - name: Check out tagged source
+        uses: actions/checkout@v4
+
+      - name: Use Node.js 24
+        uses: actions/setup-node@v4
+        with:
+          node-version: "24"
+          cache: npm
+
+      - name: Verify tag matches package version
+        shell: bash
+        run: |
+          package_version="$(node -p "require('./package.json').version")"
+          test "$GITHUB_REF_NAME" = "v$package_version"
+
+      - name: Install locked dependencies
+        run: npm ci
+
+      - name: Verify source contracts
+        run: npm test
+
+      - name: Build universal macOS release artifacts
+        run: npm run build:macos
+
+      - name: Verify Apple Silicon package
+        run: npm run verify:macos-release
+
+      - name: Store verified macOS assets
+        uses: actions/upload-artifact@v4
+        with:
+          name: desktop-release-macos
+          if-no-files-found: error
+          path: |
+            release/WenYao-*-universal.dmg
+            release/WenYao-*-universal-app.zip
+            release/SHA256SUMS.txt
+
+  verify-macos-intel:
+    needs: build-macos
+    runs-on: macos-15-intel
+    steps:
+      - name: Check out tagged source
+        uses: actions/checkout@v4
+
+      - name: Use Node.js 24
+        uses: actions/setup-node@v4
+        with:
+          node-version: "24"
+
+      - name: Download universal macOS package
+        uses: actions/download-artifact@v4
+        with:
+          name: desktop-release-macos
+          path: release
+
+      - name: Verify Intel runtime and universal executable
+        shell: bash
+        run: |
+          version="$(node -p "require('./package.json').version")"
+          mkdir -p release/intel-smoke
+          ditto -x -k "release/WenYao-$version-universal-app.zip" release/intel-smoke
+          app="release/intel-smoke/问爻.app"
+          lipo -verify_arch x86_64 arm64 "$app/Contents/MacOS/问爻"
+          codesign --verify --deep --strict --verbose=2 "$app"
+          runtime="$($app/Contents/MacOS/问爻 --verify-platform-runtime)"
+          printf '%s\n' "$runtime"
+          RUNTIME_JSON="$runtime" node -e "const lines=process.env.RUNTIME_JSON.trim().split(/\\r?\\n/); const value=JSON.parse(lines.findLast(line=>line.trim().startsWith('{'))); if(value.platform!=='darwin'||value.arch!=='x64'||value.updateMode!=='manual') process.exit(1)"
+
+  publish:
+    needs:
+      - build-windows
+      - build-macos
+      - verify-macos-intel
+    runs-on: ubuntu-24.04
+    permissions:
+      contents: write
+    steps:
+      - name: Check out tagged source
+        uses: actions/checkout@v4
+
+      - name: Download verified desktop assets
+        uses: actions/download-artifact@v4
+        with:
+          pattern: desktop-release-*
+          path: release
+          merge-multiple: true
+
+      - name: Create or validate draft release
+        shell: bash
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          if release_json="$(gh release view "$GITHUB_REF_NAME" --json isDraft,isPrerelease 2>/dev/null)"; then
+            RELEASE_JSON="$release_json" node -e "const r=JSON.parse(process.env.RELEASE_JSON); if(!r.isDraft||r.isPrerelease) process.exit(1)"
+          else
+            package_version="$(node -p "require('./package.json').version")"
+            gh release create "$GITHUB_REF_NAME" --draft --title "$package_version" --generate-notes \
+              --notes "macOS 版本未使用 Apple Developer ID，也未经过 Apple 公证；首次打开需按 README 的步骤使用系统设置中的‘仍要打开’。请仅从本项目 Release 下载并核对 SHA256SUMS.txt。"
+          fi
+
+      - name: Upload verified release assets
+        shell: bash
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          version="$(node -p "require('./package.json').version")"
+          gh release upload "$GITHUB_REF_NAME" \
+            "release/WenYao-$version-Setup.exe" \
+            "release/WenYao-$version-Setup.exe.blockmap" \
+            "release/latest.yml" \
+            "release/WenYao-$version-universal.dmg" \
+            "release/SHA256SUMS.txt" \
+            --clobber
+
+      - name: Verify uploaded assets and publish stable release
+        shell: bash
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          version="$(node -p "require('./package.json').version")"
+          files=(
+            "release/WenYao-$version-Setup.exe"
+            "release/WenYao-$version-Setup.exe.blockmap"
+            "release/latest.yml"
+            "release/WenYao-$version-universal.dmg"
+            "release/SHA256SUMS.txt"
+          )
+          for attempt in {1..12}; do
+            release_json="$(gh release view "$GITHUB_REF_NAME" --json isDraft,isPrerelease,assets)"
+            RELEASE_JSON="$release_json" FILES="$(printf '%s\n' "${files[@]}")" node <<'NODE' && ready=true || ready=false
+          const crypto = require('node:crypto');
+          const fs = require('node:fs');
+          const path = require('node:path');
+          const release = JSON.parse(process.env.RELEASE_JSON);
+          if (!release.isDraft || release.isPrerelease) process.exit(1);
+          const assets = new Map(release.assets.map((asset) => [asset.name, asset]));
+          for (const file of process.env.FILES.trim().split(/\r?\n/)) {
+            const asset = assets.get(path.basename(file));
+            const bytes = fs.readFileSync(file);
+            const digest = `sha256:${crypto.createHash('sha256').update(bytes).digest('hex')}`;
+            if (!asset || Number(asset.size) !== bytes.length || asset.digest !== digest) process.exit(1);
+          }
+          NODE
+            if [ "$ready" = true ]; then break; fi
+            if [ "$attempt" = 12 ]; then exit 1; fi
+            sleep 10
+          done
+          gh release edit "$GITHUB_REF_NAME" --draft=false --prerelease=false --latest

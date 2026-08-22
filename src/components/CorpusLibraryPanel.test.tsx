@@ -32,10 +32,10 @@ const status: CorpusStatus = {
 describe('CorpusLibraryPanel 古籍书库', () => {
   beforeEach(() => {
     vi.restoreAllMocks();
-    desktop.platform = 'win32';
     desktop.runtime = {
       kind: 'electron',
-      capabilities: { ai: true, corpusImport: true, nativeUpdates: true, secureKeyStorage: true },
+      platform: 'win32', arch: 'x64', isPackaged: true, updateMode: 'native', secureStorage: 'dpapi',
+      capabilities: { ai: true, corpusImport: true },
     };
     vi.spyOn(desktop.corpus, 'status').mockResolvedValue(status);
     vi.spyOn(desktop.corpus, 'books').mockResolvedValue({ items: [builtIn, localBook], total: 2 });
@@ -47,7 +47,8 @@ describe('CorpusLibraryPanel 古籍书库', () => {
   afterEach(() => {
     desktop.runtime = {
       kind: 'web',
-      capabilities: { ai: false, corpusImport: false, nativeUpdates: false, secureKeyStorage: false },
+      platform: 'browser', arch: 'web', isPackaged: false, updateMode: 'none', secureStorage: 'memory',
+      capabilities: { ai: false, corpusImport: false },
     };
   });
 

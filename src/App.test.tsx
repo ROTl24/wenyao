@@ -67,11 +67,14 @@ beforeEach(() => {
   vi.restoreAllMocks();
   desktop.runtime = {
     kind: 'electron',
+    platform: 'win32',
+    arch: 'x64',
+    isPackaged: true,
+    updateMode: 'native',
+    secureStorage: 'dpapi',
     capabilities: {
       ai: true,
       corpusImport: true,
-      nativeUpdates: true,
-      secureKeyStorage: true,
     },
   };
   vi.spyOn(desktop.aiConfig, 'getStatus').mockResolvedValue(structuredClone(readyAIStatus));
@@ -90,11 +93,14 @@ beforeEach(() => {
 afterEach(() => {
   desktop.runtime = {
     kind: 'web',
+    platform: 'browser',
+    arch: 'web',
+    isPackaged: false,
+    updateMode: 'none',
+    secureStorage: 'memory',
     capabilities: {
       ai: false,
       corpusImport: false,
-      nativeUpdates: false,
-      secureKeyStorage: false,
     },
   };
 });
@@ -225,6 +231,30 @@ describe('问爻桌面体验', () => {
     fireEvent.click(screen.getByRole('button', { name: '应用设置' }));
     expect(await screen.findByRole('heading', { name: '应用设置' })).toBeVisible();
     expect(screen.getByRole('region', { name: '找到作者' })).toHaveTextContent('问爻由「孤独的数字游民」开源制作');
+  });
+
+  it('opens Mac settings from the native application menu and links manual updates', async () => {
+    desktop.runtime = {
+      ...desktop.runtime,
+      platform: 'darwin',
+      arch: 'arm64',
+      updateMode: 'manual',
+      secureStorage: 'keychain',
+    };
+    let openSettings = () => {};
+    vi.spyOn(desktop.application, 'onOpenSettings').mockImplementation((listener) => {
+      openSettings = listener;
+      return () => {};
+    });
+    const openLink = vi.spyOn(desktop.externalLinks, 'open').mockResolvedValue(true);
+    render(<App />);
+
+    act(() => openSettings());
+    expect(await screen.findByRole('heading', { name: '应用设置' })).toBeVisible();
+    expect(screen.getByText(/macOS 开源版通过 GitHub Releases 手动更新/)).toBeVisible();
+    expect(screen.getByText(/macOS 钥匙串保护/)).toBeVisible();
+    fireEvent.click(screen.getByRole('button', { name: /查看最新版本/ }));
+    expect(openLink).toHaveBeenCalledWith('releases');
   });
 
   it('keeps an in-progress casting intact while consulting the calendar', async () => {

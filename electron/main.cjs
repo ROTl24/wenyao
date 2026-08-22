@@ -1,4 +1,4 @@
-const { app, BrowserWindow, dialog, ipcMain, safeStorage, shell } = require('electron');
+const { app, BrowserWindow, dialog, ipcMain, Menu, safeStorage, shell } = require('electron');
 const { autoUpdater } = require('electron-updater');
 const crypto = require('node:crypto');
 const fs = require('node:fs');
@@ -6,7 +6,7 @@ const path = require('node:path');
 const { pathToFileURL } = require('node:url');
 const { AIRuntime, runtimeError } = require('./services/ai-runtime.cjs');
 const { structuredProviderError } = require('./services/ai-provider.cjs');
-const { configureInstallDataPaths } = require('./services/install-data.cjs');
+const { configureApplicationPaths } = require('./services/app-paths.cjs');
 const { CorpusIndexCoordinator } = require('./services/corpus-index.cjs');
 const { CorpusLibrary } = require('./services/corpus-library.cjs');
 const { sanitizeRendererSession } = require('./services/ipc-payload.cjs');
@@ -15,6 +15,17 @@ const { JsonStore } = require('./services/store.cjs');
 const { createUpdateManager } = require('./services/update-manager.cjs');
 const { sanitizeUpdateState } = require('./services/update-state.cjs');
 const { allowedExternalUrl, openPublicLink } = require('./services/external-links.cjs');
+const { installApplicationMenu } = require('./services/application-menu.cjs');
+const { createRuntimeProfile, runtimeProfileArgument } = require('./services/runtime-profile.cjs');
+const { createSecretStore } = require('./services/secret-store.cjs');
+const { createWindowOptions } = require('./services/window-options.cjs');
+
+const runtimeProfile = createRuntimeProfile({
+  platform: process.platform,
+  arch: process.arch,
+  isPackaged: app.isPackaged,
+});
+const rendererRuntimeArgument = runtimeProfileArgument(runtimeProfile);
 
 const oneTimeSiliconFlowKey = process.argv.includes('--configure-api-keys-env')
   ? String(process.env.WENYAO_SILICONFLOW_KEY || '')
@@ -28,12 +39,12 @@ try {
   startup = prepareApplicationStartup({
     app,
     argv: process.argv,
-    configureDataPaths: configureInstallDataPaths,
+    configureDataPaths: configureApplicationPaths,
   });
 } catch (error) {
-  const message = error instanceof Error ? error.message : '无法初始化安装目录中的数据文件夹。';
+  const message = error instanceof Error ? error.message : '无法初始化本机数据目录。';
   process.stderr.write(`${message}\n`);
-  dialog.showErrorBox('问爻无法启动', `${message}\n\n请确认安装目录可写，或重新安装到当前用户拥有写入权限的目录。`);
+  dialog.showErrorBox('问爻无法启动', `${message}\n\n请确认当前用户的数据目录可写，然后重新启动问爻。`);
   app.exit(1);
 }
 
@@ -44,6 +55,7 @@ let corpusLibrary;
 let corpusIndex;
 let aiRuntime;
 let updateManager;
+let secretStore;
 
 function resourcePath(name) {
   const candidates = [
@@ -118,25 +130,12 @@ function corpusFailure(error, fallbackCode = 'CORPUS_ACTION_FAILED') {
 function createWindow() {
   const packagedEntryPath = path.join(app.getAppPath(), 'dist', 'index.html');
   const trustedEntryUrl = app.isPackaged ? pathToFileURL(packagedEntryPath).href : 'http://127.0.0.1:5173/';
-  mainWindow = new BrowserWindow({
-    width: 1480,
-    height: 920,
-    minWidth: 1120,
-    minHeight: 720,
-    backgroundColor: '#d8d2c5',
-    title: '问爻',
-    titleBarStyle: 'hidden',
-    titleBarOverlay: { color: '#232421', symbolColor: '#e8dfcf', height: 42 },
-    show: false,
-    webPreferences: {
-      preload: path.join(__dirname, 'preload.cjs'),
-      contextIsolation: true,
-      nodeIntegration: false,
-      sandbox: true,
-      webSecurity: true,
-    },
-  });
-  mainWindow.setMenuBarVisibility(false);
+  mainWindow = new BrowserWindow(createWindowOptions({
+    platform: process.platform,
+    preloadPath: path.join(__dirname, 'preload.cjs'),
+    runtimeArgument: rendererRuntimeArgument,
+  }));
+  if (process.platform !== 'darwin') mainWindow.setMenuBarVisibility(false);
   mainWindow.webContents.setWindowOpenHandler(({ url }) => {
     if (allowedExternalUrl(url, aiRuntime.getCatalog())) void shell.openExternal(url).catch((error) => console.error('无法打开外部链接', error));
     return { action: 'deny' };
@@ -152,6 +151,20 @@ function createWindow() {
   mainWindow.once('ready-to-show', () => mainWindow.show());
   if (app.isPackaged) mainWindow.loadFile(packagedEntryPath);
   else mainWindow.loadURL('http://127.0.0.1:5173');
+}
+
+function openSettingsFromMenu() {
+  if (!mainWindow || mainWindow.isDestroyed()) createWindow();
+  if (!mainWindow || mainWindow.isDestroyed()) return;
+  if (mainWindow.isMinimized()) mainWindow.restore();
+  mainWindow.show();
+  mainWindow.focus();
+  const sendOpenSettings = () => {
+    if (!mainWindow || mainWindow.isDestroyed() || mainWindow.webContents.isDestroyed()) return;
+    mainWindow.webContents.send('application:open-settings');
+  };
+  if (mainWindow.webContents.isLoadingMainFrame()) mainWindow.webContents.once('did-finish-load', sendOpenSettings);
+  else sendOpenSettings();
 }
 
 function registerIpc() {
@@ -286,6 +299,14 @@ function registerIpc() {
 }
 
 async function runCommandMode() {
+  if (process.argv.includes('--verify-platform-runtime')) {
+    process.stdout.write(`${JSON.stringify({
+      ...runtimeProfile,
+      userData: app.getPath('userData'),
+      sessionData: app.getPath('sessionData'),
+    })}\n`);
+    return;
+  }
   if (process.argv.includes('--configure-api-keys-env')) {
     if (!oneTimeSiliconFlowKey) throw new Error('未收到 WENYAO_SILICONFLOW_KEY');
     aiRuntime.saveDraft({
@@ -293,7 +314,7 @@ async function runCommandMode() {
       apiKey: oneTimeSiliconFlowKey,
       consentAccepted: true,
     });
-    process.stdout.write('SiliconFlow 访问密钥已由 Windows DPAPI 加密保存为待验证配置。\n');
+    process.stdout.write(`SiliconFlow 访问密钥已由${secretStore.name}加密保存为待验证配置。\n`);
     return;
   }
   if (process.argv.includes('--verify-model-stack')) {
@@ -387,9 +408,13 @@ if (startup.shouldStart) {
     corpusLibrary.initialize();
     corpusIndex = new CorpusIndexCoordinator({ indexRoot: path.join(app.getPath('userData'), 'vector-indexes') });
     for (const bookId of corpusLibrary.consumePurgedBookIds()) corpusIndex.purgeBook(bookId);
+    secretStore = createSecretStore({
+      safeStorage,
+      provider: runtimeProfile.secureStorage,
+    });
     aiRuntime = new AIRuntime({
       store,
-      safeStorage,
+      secretStore,
       corpusLibrary,
       corpusIndex,
       corpusHash,
@@ -412,13 +437,20 @@ if (startup.shouldStart) {
     }
 
     updateManager = createUpdateManager({
-      updater: app.isPackaged && process.platform === 'win32' ? autoUpdater : null,
+      updater: runtimeProfile.updateMode === 'native' ? autoUpdater : null,
       currentVersion: app.getVersion(),
-      supported: app.isPackaged && process.platform === 'win32',
+      supported: runtimeProfile.updateMode === 'native',
       broadcast: broadcastUpdateState,
     });
     registerIpc();
     createWindow();
+    if (process.platform === 'darwin') {
+      installApplicationMenu({
+        Menu,
+        appName: app.name,
+        onOpenSettings: openSettingsFromMenu,
+      });
+    }
     updateManager.start();
     app.on('activate', () => { if (BrowserWindow.getAllWindows().length === 0) createWindow(); });
   });

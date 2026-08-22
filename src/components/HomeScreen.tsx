@@ -65,7 +65,7 @@ export function HomeScreen({
       <section className="question-composition">
         <div className="brand-seal" aria-hidden="true">爻</div>
         <h1>心有所问</h1>
-        <p className="home-lead">{desktop.platform === 'browser'
+        <p className="home-lead">{desktop.runtime.kind === 'web'
           ? '一事一占，凝神明问。起卦、排盘、历史与内置古籍均在本机运行。'
           : '一事一占，凝神明问。六爻成象后，再由古籍证据与 AI 共同解读。'}</p>
         <PwaInstallPrompt />

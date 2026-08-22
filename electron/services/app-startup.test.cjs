@@ -73,6 +73,30 @@ test('maintenance commands keep their existing non-GUI startup path', () => {
   assert.equal(configureCount, 1);
 });
 
+test('packaged platform verification bypasses the GUI instance lock', () => {
+  let lockRequests = 0;
+  let configureCount = 0;
+  const startup = prepareApplicationStartup({
+    app: {
+      requestSingleInstanceLock() {
+        lockRequests += 1;
+        return false;
+      },
+      quit() {
+        assert.fail('platform verification must not be rejected by the GUI instance lock');
+      },
+    },
+    argv: ['问爻', '--verify-platform-runtime'],
+    configureDataPaths() {
+      configureCount += 1;
+    },
+  });
+
+  assert.deepEqual(startup, { shouldStart: true, commandMode: true });
+  assert.equal(lockRequests, 0);
+  assert.equal(configureCount, 1);
+});
+
 test('Chromium switches do not accidentally bypass the GUI instance lock', () => {
   let configureCount = 0;
   const app = {

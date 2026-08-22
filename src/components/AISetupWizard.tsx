@@ -42,6 +42,11 @@ export function AISetupWizard({ catalog, status, onStatus, onReady, onClose }: P
   const isCustom = choice === 'custom';
   const selected = fullStackPresets.find((preset) => preset.id === choice) || fullStackPresets[0];
   const isWeb = desktop.runtime.kind === 'web';
+  const secretStorageName = desktop.runtime.secureStorage === 'keychain'
+    ? 'macOS 钥匙串'
+    : desktop.runtime.secureStorage === 'dpapi'
+      ? 'Windows DPAPI'
+      : '系统安全存储';
   const candidateConnection = useMemo(() => {
     if (isCustom) return customResult?.connection || null;
     if (!selected) return null;
@@ -219,7 +224,7 @@ export function AISetupWizard({ catalog, status, onStatus, onReady, onClose }: P
             </div> : null}
             <label className="ai-setup-field">API 调用地址<input autoFocus value={apiUrl} onChange={(event) => { setApiUrl(event.target.value); setCustomResult(null); setError(''); }} placeholder="https://api.example.com/v1" /></label>
             <small className="ai-field-help">可粘贴 Base URL，也可直接粘贴以 /chat/completions 结尾的完整地址。</small>
-            <label className="ai-setup-field">API Key<input type="password" autoComplete="off" autoCapitalize="none" spellCheck={false} value={apiKey} onChange={(event) => setApiKey(event.target.value)} placeholder={isWeb ? '仅在当前页面会话中使用，刷新即清除' : '粘贴后由 Windows 加密保存'} /></label>
+            <label className="ai-setup-field">API Key<input type="password" autoComplete="off" autoCapitalize="none" spellCheck={false} value={apiKey} onChange={(event) => setApiKey(event.target.value)} placeholder={isWeb ? '仅在当前页面会话中使用，刷新即清除' : `粘贴后由${secretStorageName}加密保存`} /></label>
             {!customResult ? <div className="ai-discovery-note"><Sparkles /><p><strong>先识别，不产生对话或建库费用</strong>这一步只读取服务提供的模型目录。识别完成后，你会先看到结果和数据发送范围。</p></div> : null}
             {customResult ? <div className="ai-detection-summary" aria-label="自动识别结果"><header><Check /><div><strong>{customResult.missing.length ? '已连接，仍需补充能力' : '三项能力已自动识别'}</strong><span>{customResult.connection.baseUrl}</span></div></header>{capabilityOrder.map((capability) => <div key={capability}><span>{customCapabilityLabel[capability]}</span><strong>{customResult.detected[capability] || '未识别'}</strong></div>)}</div> : null}
             {customResult && !customResult.missing.length ? <>
@@ -244,7 +249,7 @@ export function AISetupWizard({ catalog, status, onStatus, onReady, onClose }: P
             {(selected.requiredFields || []).map((field) => (
               <label className="ai-setup-field" key={field.id}>{field.label}<input value={fields[field.id] || ''} onChange={(event) => setFields((current) => ({ ...current, [field.id]: event.target.value }))} placeholder={field.description} /></label>
             ))}
-            <label className="ai-setup-field">API Key<input type="password" autoComplete="off" autoCapitalize="none" spellCheck={false} value={apiKey} onChange={(event) => setApiKey(event.target.value)} placeholder={isWeb ? '仅在当前页面会话中使用，刷新即清除' : '粘贴后由 Windows 加密保存'} /></label>
+            <label className="ai-setup-field">API Key<input type="password" autoComplete="off" autoCapitalize="none" spellCheck={false} value={apiKey} onChange={(event) => setApiKey(event.target.value)} placeholder={isWeb ? '仅在当前页面会话中使用，刷新即清除' : `粘贴后由${secretStorageName}加密保存`} /></label>
             <div className="ai-data-boundary">
               <ShieldCheck /><div><strong>发送范围</strong><p>{isWeb ? '密钥不会写入浏览器存储；当前页会把密钥、检测内容、当前问题、排盘和命中的证据直接发送给下列服务商域名。刷新、关闭页面或应用更新会清除密钥。费用由服务商收取。' : '初次建库发送内置古籍片段；解卦时发送当前问题、排盘与命中的证据；不会发送全部历史。费用由服务商收取，问爻不会代扣。'}</p>{isWeb && webConnection ? <ul>{webConnection.origins.map((origin) => <li key={origin}><code>{origin}</code></li>)}</ul> : null}</div>
             </div>

@@ -14,10 +14,12 @@ interface MockCoinSceneProps {
 
 const sceneMock = vi.hoisted(() => ({
   latestProps: undefined as MockCoinSceneProps | undefined,
+  throwError: false,
 }));
 
 vi.mock('./CoinScene', () => ({
   default: (props: MockCoinSceneProps) => {
+    if (sceneMock.throwError) throw new Error('WebGL unavailable');
     sceneMock.latestProps = props;
     return <div data-testid="coin-scene" data-phase={props.phase}>{props.faces.join(',')}</div>;
   },
@@ -51,6 +53,7 @@ async function resolveLazyScene() {
 beforeEach(() => {
   reducedMotion = false;
   sceneMock.latestProps = undefined;
+  sceneMock.throwError = false;
   Object.defineProperty(window, 'matchMedia', {
     configurable: true,
     value: vi.fn(() => ({
@@ -71,6 +74,18 @@ afterEach(() => {
 });
 
 describe('起卦仪式物理事件契约', () => {
+  it('falls back to a confirmable static result when WebGL is unavailable', async () => {
+    sceneMock.throwError = true;
+    const consoleError = vi.spyOn(console, 'error').mockImplementation(() => {});
+    render(<RitualScreen session={firstLineSession()} onConfirm={vi.fn()} />);
+
+    await act(async () => Promise.resolve());
+    expect(screen.getByRole('status')).toHaveTextContent('已切换为静态结果');
+    expect(screen.getByRole('main')).toHaveAttribute('data-phase', 'revealed');
+    expect(screen.getByRole('button', { name: '定此爻' })).toBeEnabled();
+    consoleError.mockRestore();
+  });
+
   it('waits for all physical motion to settle before revealing and enabling confirmation', async () => {
     vi.useFakeTimers();
     const onConfirm = vi.fn();

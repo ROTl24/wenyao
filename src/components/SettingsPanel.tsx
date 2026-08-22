@@ -43,7 +43,13 @@ export function SettingsPanel({
   onClose,
 }: Props) {
   const [advancedOpen, setAdvancedOpen] = useState(false);
-  const { capabilities } = desktop.runtime;
+  const runtime = desktop.runtime;
+  const { capabilities } = runtime;
+  const secureStorageText = runtime.secureStorage === 'keychain'
+    ? '访问密钥由 macOS 钥匙串保护，历史、语料和向量索引保存在当前用户的 Application Support 中。'
+    : runtime.secureStorage === 'dpapi'
+      ? '访问密钥由 Windows DPAPI 加密，历史和向量索引留在本机。'
+      : '访问密钥由当前系统的安全存储保护，历史和向量索引留在本机。';
   const [corpus, setCorpus] = useState<CorpusStatus>({ count: 0, bookCount: 0, builtInBookCount: 0, userBookCount: 0, enabledBookCount: 0, chunkCount: 0, deletedBookCount: 0, pendingIndexCount: 0, originalCount: 0, summaryCount: 0, ruleCount: 0, caseCount: 0, doctrineCount: 0, vectorReady: false, vectorModel: '', readyShardIds: [], ready: false });
   useEffect(() => { void desktop.corpus.status().then(setCorpus); }, [aiStatus.status, aiStatus.activeFingerprint]);
   const usage = useMemo(() => aiStatus.usage.reduce((total, item) => total + item.totalTokens, 0), [aiStatus.usage]);
@@ -53,7 +59,7 @@ export function SettingsPanel({
   return (
     <div className="overlay" role="presentation" onMouseDown={(event) => { if (event.target === event.currentTarget) onClose(); }}>
       <aside className="side-panel settings-panel" aria-modal="true" role="dialog">
-        <header><div><h2>应用设置</h2><p>{capabilities.ai ? (desktop.runtime.kind === 'web' ? '会话级 AI 服务与本地知识库' : '软件更新、AI 服务与本地知识库') : '本地排盘、历史记录与内置古籍'}</p></div><button type="button" aria-label="关闭设置" onClick={onClose}><X /></button></header>
+        <header><div><h2>应用设置</h2><p>{capabilities.ai ? (runtime.kind === 'web' ? '会话级 AI 服务与本地知识库' : '软件更新、AI 服务与本地知识库') : '本地排盘、历史记录与内置古籍'}</p></div><button type="button" aria-label="关闭设置" onClick={onClose}><X /></button></header>
 
         <section className="settings-section">
           <AIStatusCard available={capabilities.ai} status={aiStatus} onConfigure={onConfigureAI} onAdvanced={() => setAdvancedOpen(true)} />
@@ -62,7 +68,7 @@ export function SettingsPanel({
           {capabilities.ai && usage > 0 ? <p className="ai-usage-summary">本机已记录 {aiStatus.usage.length} 次带用量响应，共 {usage.toLocaleString('zh-CN')} Tokens；不含未返回用量的服务。</p> : null}
         </section>
 
-        {capabilities.nativeUpdates ? <section className="settings-section update-settings">
+        {runtime.updateMode === 'native' ? <section className="settings-section update-settings">
           <div className="settings-heading"><RefreshCw /><div><strong>软件更新</strong><span>{updateStatusText(updateState)}</span></div></div>
           <div className="update-version-row"><span>当前版本</span><strong>{updateState.currentVersion ? `v${updateState.currentVersion}` : '未知'}</strong></div>
           {updateState.status === 'error' && updateState.manual ? <p className="settings-status" role="alert">{updateState.message}</p> : null}
@@ -70,6 +76,13 @@ export function SettingsPanel({
             {updateState.status === 'checking' ? '正在检查…' : updateState.status === 'downloading' ? `下载中 ${updateState.progress.toFixed(1)}%` : updateState.status === 'available' || updateState.status === 'downloaded' || (updateState.status === 'error' && updateState.operation === 'download') ? '查看更新' : updateState.status === 'error' ? '重新检查' : '检查更新'}
           </button>
           <p className="update-signing-note">当前版本尚未进行 Windows 代码签名，安装更新时仍可能出现 SmartScreen 提示；SHA-512 完整性校验不等同于发布者身份验证。</p>
+        </section> : null}
+
+        {runtime.updateMode === 'manual' ? <section className="settings-section update-settings">
+          <div className="settings-heading"><RefreshCw /><div><strong>软件更新</strong><span>macOS 开源版通过 GitHub Releases 手动更新</span></div></div>
+          <div className="update-version-row"><span>当前版本</span><strong>{updateState.currentVersion ? `v${updateState.currentVersion}` : '未知'}</strong></div>
+          <button className="index-button" type="button" onClick={() => void desktop.externalLinks.open('releases')}>查看最新版本 <ExternalLink size={13} /></button>
+          <p className="update-signing-note">免费发行版没有 Apple Developer ID 与公证票据。覆盖安装不会删除 Application Support 中的历史和语料；新版本首次打开时，macOS 可能再次要求在“隐私与安全性”中确认。</p>
         </section> : null}
 
         <section className="settings-section">
@@ -81,7 +94,7 @@ export function SettingsPanel({
 
         <CreatorLinks variant="panel" />
 
-        <div className="security-note"><ShieldCheck /><p><strong>隐私边界</strong>{capabilities.secureKeyStorage ? '访问密钥由 Windows DPAPI 加密，历史和向量索引留在本机。设置中可以随时查看当前问题、排盘、证据与追问分别发送给哪一家服务商。' : capabilities.ai ? '网页版密钥只保存在当前页面的隔离内存中，不写入浏览器存储；刷新、关页或应用更新会清除。AI 服务商会收到密钥和本次请求数据，浏览器扩展、设备或已被篡改的网页仍不属于问爻能够绝对防护的边界。' : '此预览域名不接收 AI 密钥；排盘与历史保存在当前浏览器，不需要账号，也不会同步到服务器。清除站点数据会同时删除本地历史。'}</p></div>
+        <div className="security-note"><ShieldCheck /><p><strong>隐私边界</strong>{runtime.kind === 'electron' ? `${secureStorageText}设置中可以随时查看当前问题、排盘、证据与追问分别发送给哪一家服务商。` : capabilities.ai ? '网页版密钥只保存在当前页面的隔离内存中，不写入浏览器存储；刷新、关页或应用更新会清除。AI 服务商会收到密钥和本次请求数据，浏览器扩展、设备或已被篡改的网页仍不属于问爻能够绝对防护的边界。' : '此预览域名不接收 AI 密钥；排盘与历史保存在当前浏览器，不需要账号，也不会同步到服务器。清除站点数据会同时删除本地历史。'}</p></div>
       </aside>
       {capabilities.ai && advancedOpen ? <AIAdvancedSettings catalog={aiCatalog} status={aiStatus} onStatus={onAIStatus} onClose={() => setAdvancedOpen(false)} /> : null}
     </div>

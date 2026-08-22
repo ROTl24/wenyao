@@ -6,6 +6,12 @@ const test = require('node:test');
 const { emptyAIState, normalizeAIState, publicAIState } = require('./ai-config.cjs');
 const { AIRuntime } = require('./ai-runtime.cjs');
 const { CorpusLibrary } = require('./corpus-library.cjs');
+const { createSecretStore } = require('./secret-store.cjs');
+
+const unavailableSecretStore = () => createSecretStore({
+  safeStorage: { isEncryptionAvailable: () => false },
+  provider: 'system',
+});
 
 class MemoryStore {
   constructor() { this.ai = emptyAIState(); }
@@ -33,7 +39,7 @@ test('runtime atomically activates a tested three-capability stack and forbids r
   };
   const runtime = new AIRuntime({
     store,
-    safeStorage: { isEncryptionAvailable: () => false },
+    secretStore: unavailableSecretStore(),
     corpus: [
       { id: 'E1', title: '事业章', text: '官鬼为事业用神', source: '甲书', location: '卷一', tags: ['事业'], sourceType: 'original', knowledgeKind: 'rule' },
       { id: 'E2', title: '求财章', text: '妻财为求财用神', source: '乙书', location: '卷二', tags: ['求财'], sourceType: 'original', knowledgeKind: 'rule' },
@@ -86,7 +92,7 @@ test('runtime discovers custom models and persists the embedding dimension found
   };
   const runtime = new AIRuntime({
     store,
-    safeStorage: { isEncryptionAvailable: () => false },
+    secretStore: unavailableSecretStore(),
     corpus: [{ id: 'E1', title: '测试', text: '世爻为自己', source: '甲书', location: '卷一', tags: [], sourceType: 'original', knowledgeKind: 'rule' }],
     corpusHash: 'corpus-test',
     indexRoot: fs.mkdtempSync(path.join(os.tmpdir(), 'wenyao-ai-discovery-')),
@@ -132,7 +138,7 @@ test('runtime indexes a newly imported book without rebuilding the active built-
   };
   const runtime = new AIRuntime({
     store,
-    safeStorage: { isEncryptionAvailable: () => false },
+    secretStore: unavailableSecretStore(),
     corpusLibrary: library,
     corpusHash: 'unused',
     indexRoot: path.join(root, 'indexes'),

@@ -1,5 +1,12 @@
 const { contextBridge, ipcRenderer, webUtils } = require('electron');
 const { sanitizeRendererSession } = require('./services/ipc-payload.cjs');
+const { runtimeProfileFromArguments } = require('./services/runtime-profile.cjs');
+
+const runtime = runtimeProfileFromArguments(process.argv, {
+  platform: process.platform,
+  arch: process.arch,
+  isPackaged: false,
+});
 
 const UPDATE_STATUSES = new Set([
   'idle',
@@ -74,6 +81,15 @@ function droppedFilePaths(files) {
 }
 
 contextBridge.exposeInMainWorld('wenyao', {
+  runtime,
+  application: {
+    onOpenSettings: (listener) => {
+      if (typeof listener !== 'function') return () => {};
+      const subscription = () => listener();
+      ipcRenderer.on('application:open-settings', subscription);
+      return () => ipcRenderer.removeListener('application:open-settings', subscription);
+    },
+  },
   externalLinks: {
     open: (id) => ipcRenderer.invoke('external-links:open', safeText(id, '', 32)).then(Boolean),
   },
@@ -156,5 +172,4 @@ contextBridge.exposeInMainWorld('wenyao', {
     analyze: (payload) => ipcRenderer.invoke('ai:analyze', payload),
     followUp: (payload) => ipcRenderer.invoke('ai:follow-up', payload),
   },
-  platform: process.platform,
 });

@@ -76,6 +76,7 @@ function renderResult(
     onRetryAnalysisSave = vi.fn(),
     targetAIStatus = readyAIStatus,
     aiAvailable = true,
+    onFollowUp = vi.fn(),
   }: {
     analyzing?: boolean;
     onAnalyze?: () => void;
@@ -87,6 +88,7 @@ function renderResult(
     onRetryAnalysisSave?: () => void;
     targetAIStatus?: AIConfigStatus;
     aiAvailable?: boolean;
+    onFollowUp?: (question: string) => void;
   } = {},
 ) {
   const view = render(
@@ -107,14 +109,27 @@ function renderResult(
       onRetrySessionSave={vi.fn()}
       onAnalyze={onAnalyze}
       onRetryAnalysisSave={onRetryAnalysisSave}
-      onFollowUp={vi.fn()}
+      onFollowUp={onFollowUp}
       onBack={vi.fn()}
     />,
   );
-  return { ...view, onAnalyze, onRetryAnalysisSave };
+  return { ...view, onAnalyze, onRetryAnalysisSave, onFollowUp };
 }
 
 describe('ResultScreen Markdown 解读', () => {
+  it('does not submit a follow-up while a CJK input method is composing', () => {
+    const onFollowUp = vi.fn();
+    renderResult(session, { onFollowUp });
+    const input = screen.getByRole('textbox', { name: '你的追问' });
+
+    fireEvent.change(input, { target: { value: '事业' } });
+    fireEvent.keyDown(input, { key: 'Enter', isComposing: true });
+    expect(onFollowUp).not.toHaveBeenCalled();
+
+    fireEvent.keyDown(input, { key: 'Enter', isComposing: false });
+    expect(onFollowUp).toHaveBeenCalledWith('事业');
+  });
+
   it('keeps the browser result local-only without AI setup or follow-up controls', () => {
     renderResult(session, { aiAvailable: false });
 

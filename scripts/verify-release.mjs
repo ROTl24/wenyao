@@ -13,7 +13,7 @@ const blockmapPath = `${installerPath}.blockmap`;
 const latestPath = path.join(releaseRoot, 'latest.yml');
 const packagedUpdateConfigPath = path.join(releaseRoot, 'win-unpacked', 'resources', 'app-update.yml');
 const installerBuildScriptPath = path.join(projectRoot, 'scripts', 'build-windows-installer.mjs');
-const releaseWorkflowPath = path.join(projectRoot, '.github', 'workflows', 'release-windows.yml');
+const releaseWorkflowPath = path.join(projectRoot, '.github', 'workflows', 'release-desktop.yml');
 
 function requireFile(filePath, minimumBytes = 1) {
   if (!existsSync(filePath)) throw new Error(`缺少发布产物：${path.relative(projectRoot, filePath)}`);
@@ -68,7 +68,7 @@ for (const expectedLine of ['provider: github', 'owner: ROTl24', 'repo: wenyao']
     throw new Error(`app-update.yml 缺少 ${expectedLine}`);
   }
 }
-const buildCommand = packageJson.scripts?.build || '';
+const buildCommand = packageJson.scripts?.['build:windows'] || '';
 const releaseCommand = packageJson.scripts?.['release:windows'] || '';
 if (!buildCommand.includes('scripts/build-windows-installer.mjs')) {
   throw new Error('默认构建未接入问爻安装器构建脚本');
@@ -76,23 +76,25 @@ if (!buildCommand.includes('scripts/build-windows-installer.mjs')) {
 if (!/(?:^|\s)--publish(?:=|\s+)never(?:\s|$)/.test(buildCommand)) {
   throw new Error('默认构建必须显式禁用发布，避免标签构建触发 electron-builder 隐式上传');
 }
-if (!releaseCommand.includes('scripts/build-windows-installer.mjs')) {
-  throw new Error('Windows 发布构建未接入问爻安装器构建脚本');
-}
-if (!/(?:^|\s)--publish(?:=|\s+)always(?:\s|$)/.test(releaseCommand)) {
-  throw new Error('Windows 发布构建必须显式启用发布');
+if (!/(?:^|\s)npm run build:windows(?:\s|$)/.test(releaseCommand)) {
+  throw new Error('Windows 发布命令必须复用无上传副作用的构建命令');
 }
 if (packageJson.build?.electronDist != null) {
   throw new Error('标准 Electron 构建不应配置自定义 electronDist；应由 electron-builder 获取匹配版本');
 }
 for (const expectedLine of [
-  'gh release create "$env:GITHUB_REF_NAME" --draft --title "$packageVersion" --generate-notes',
+  'needs:',
+  '- verify-macos-intel',
+  'gh release create "$GITHUB_REF_NAME" --draft --title "$package_version" --generate-notes',
+  'macOS 版本未使用 Apple Developer ID',
   'gh release upload',
-  'release/WenYao-$packageVersion-Setup.exe',
-  'release/WenYao-$packageVersion-Setup.exe.blockmap',
+  'release/WenYao-$version-Setup.exe',
+  'release/WenYao-$version-Setup.exe.blockmap',
   'release/latest.yml',
-  '$remoteAsset.digest',
-  'gh release edit "$env:GITHUB_REF_NAME" --draft=false --prerelease=false --latest',
+  'release/WenYao-$version-universal.dmg',
+  'release/SHA256SUMS.txt',
+  'asset.digest !== digest',
+  'gh release edit "$GITHUB_REF_NAME" --draft=false --prerelease=false --latest',
 ]) {
   if (!releaseWorkflow.includes(expectedLine)) {
     throw new Error(`Windows 发布工作流缺少 ${expectedLine}`);

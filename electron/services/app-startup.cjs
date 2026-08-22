@@ -4,6 +4,7 @@ const COMMAND_MODE_FLAGS = new Set([
   '--verify-model-stack',
   '--verify-hybrid-retrieval',
   '--verify-analysis',
+  '--verify-platform-runtime',
 ]);
 
 function prepareApplicationStartup({ app, argv, configureDataPaths }) {

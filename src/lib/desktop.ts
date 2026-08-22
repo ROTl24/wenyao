@@ -26,20 +26,14 @@ const browserAIEnabled = isTrustedWebAIOrigin();
 const webAI = browserAIEnabled ? new WebAIClient() : null;
 const browserRuntime: PlatformRuntime = {
   kind: 'web',
+  platform: 'browser',
+  arch: 'web',
+  isPackaged: false,
+  updateMode: 'none',
+  secureStorage: 'memory',
   capabilities: {
     ai: browserAIEnabled,
     corpusImport: false,
-    nativeUpdates: false,
-    secureKeyStorage: false,
-  },
-};
-const electronRuntime: PlatformRuntime = {
-  kind: 'electron',
-  capabilities: {
-    ai: true,
-    corpusImport: true,
-    nativeUpdates: true,
-    secureKeyStorage: true,
   },
 };
 const browserUpdateState: UpdateState = {
@@ -130,6 +124,9 @@ function storedSessionId(value: unknown): unknown {
 
 const browserFallback: DesktopApi = {
   runtime: browserRuntime,
+  application: {
+    onOpenSettings() { return () => {}; },
+  },
   externalLinks: {
     async open(id) {
       const url = publicLinks[id]?.url;
@@ -236,15 +233,10 @@ const browserFallback: DesktopApi = {
     async analyze(payload) { return webAI ? webAI.analyze(payload) : { ok: false, error: { code: 'WEB_AI_ORIGIN_DISABLED', message: '此域名不发送 AI 请求。', dataSafe: true, nextAction: '请使用问爻正式发布地址。' } }; },
     async followUp(payload) { return webAI ? webAI.followUp(payload) : { ok: false, error: { code: 'WEB_AI_ORIGIN_DISABLED', message: '此域名不发送 AI 请求。', dataSafe: true, nextAction: '请使用问爻正式发布地址。' } }; },
   },
-  platform: 'browser',
 };
 
 export function resolvePlatformApi(bridge?: ElectronBridge): DesktopApi {
-  if (!bridge) return browserFallback;
-  return {
-    ...bridge,
-    runtime: bridge.runtime || electronRuntime,
-  };
+  return bridge || browserFallback;
 }
 
 export const desktop = resolvePlatformApi(window.wenyao);

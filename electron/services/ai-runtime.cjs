@@ -63,7 +63,7 @@ function staticCorpusLibrary(corpus, corpusHash) {
 class AIRuntime {
   constructor({
     store,
-    safeStorage,
+    secretStore,
     corpus = [],
     corpusHash = '',
     corpusLibrary = null,
@@ -74,7 +74,7 @@ class AIRuntime {
     onStatus = () => {},
   }) {
     this.store = store;
-    this.safeStorage = safeStorage;
+    this.secretStore = secretStore;
     this.corpusLibrary = corpusLibrary || staticCorpusLibrary(corpus, corpusHash);
     this.corpusHash = corpusHash;
     this.indexRoot = indexRoot;
@@ -127,24 +127,11 @@ class AIRuntime {
   }
 
   #encryptSecret(secret) {
-    const normalized = String(secret || '').trim();
-    if (!normalized) return '';
-    if (!this.safeStorage?.isEncryptionAvailable()) {
-      throw runtimeError(
-        '当前 Windows 环境无法启用 DPAPI 密钥保护',
-        'SECRET_STORAGE_UNAVAILABLE',
-        '请在当前 Windows 用户的正常桌面会话中运行问爻。',
-      );
-    }
-    return this.safeStorage.encryptString(normalized).toString('base64');
+    return this.secretStore.encrypt(secret);
   }
 
   #decryptSecret(connection) {
-    const encrypted = String(connection?.encryptedApiKey || '');
-    if (!encrypted) return '';
-    if (!this.safeStorage?.isEncryptionAvailable()) return '';
-    try { return this.safeStorage.decryptString(Buffer.from(encrypted, 'base64')); }
-    catch { return ''; }
+    return this.secretStore.decrypt(connection?.encryptedApiKey);
   }
 
   #connectionsFor(state, draftConnection = null) {

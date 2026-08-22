@@ -23,9 +23,12 @@
     "typecheck": "tsc -b",
     "build:renderer": "tsc -b && vite build",
     "preview:web": "vite preview --host 0.0.0.0",
-    "build": "npm run build:renderer && node scripts/build-windows-installer.mjs --publish never",
-    "release:windows": "npm run build:renderer && node scripts/build-windows-installer.mjs --publish always",
+    "build": "npm run build:windows",
+    "build:windows": "npm run build:renderer && node scripts/build-windows-installer.mjs --publish never",
+    "build:macos": "npm run build:renderer && node scripts/build-macos.mjs",
+    "release:windows": "npm run build:windows",
     "verify:release": "node scripts/verify-release.mjs",
+    "verify:macos-release": "node scripts/verify-macos-release.mjs",
     "verify:web": "node scripts/verify-web-release.mjs",
     "start": "electron ."
   },
@@ -101,6 +104,37 @@
         }
       ],
       "artifactName": "WenYao-${version}-Setup.${ext}"
+    },
+    "mac": {
+      "icon": "build/icon.icns",
+      "identity": "-",
+      "hardenedRuntime": false,
+      "minimumSystemVersion": "13.0",
+      "category": "public.app-category.lifestyle",
+      "target": [
+        {
+          "target": "dmg",
+          "arch": [
+            "universal"
+          ]
+        }
+      ],
+      "artifactName": "WenYao-${version}-universal.${ext}"
+    },
+    "dmg": {
+      "title": "问爻 ${version}",
+      "contents": [
+        {
+          "x": 140,
+          "y": 220
+        },
+        {
+          "x": 400,
+          "y": 220,
+          "type": "link",
+          "path": "/Applications"
+        }
+      ]
     },
     "nsis": {
       "oneClick": false,

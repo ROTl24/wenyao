@@ -4,17 +4,20 @@ import type { AnalysisReport } from '../lib/types';
 
 export type AICapability = 'generation' | 'embedding' | 'rerank';
 export type AIProtocol = 'openai-chat' | 'openai-embeddings' | 'cohere-rerank' | 'alibaba-rerank';
-export type PublicLinkId = 'repository' | 'xiaohongshu';
+export type PublicLinkId = 'repository' | 'releases' | 'xiaohongshu';
 
 export interface PlatformCapabilities {
   ai: boolean;
   corpusImport: boolean;
-  nativeUpdates: boolean;
-  secureKeyStorage: boolean;
 }
 
 export interface PlatformRuntime {
   kind: 'electron' | 'web';
+  platform: 'win32' | 'darwin' | 'linux' | 'browser';
+  arch: string;
+  isPackaged: boolean;
+  updateMode: 'native' | 'manual' | 'none';
+  secureStorage: 'dpapi' | 'keychain' | 'system' | 'memory';
   capabilities: PlatformCapabilities;
 }
 
@@ -175,6 +178,9 @@ export type UpdateState =
 
 export interface DesktopApi {
   runtime: PlatformRuntime;
+  application: {
+    onOpenSettings(listener: () => void): () => void;
+  };
   externalLinks: {
     open(id: PublicLinkId): Promise<boolean>;
   };
@@ -231,12 +237,9 @@ export interface DesktopApi {
     analyze(payload: { question: string; category: string; castingMethod: DivinationSession['castingMethod']; castingBasis: DivinationSession['castingBasis']; plate: DivinationSession['plate']; evidence: EvidenceEntry[]; retrievalDiagnostics?: RetrievalDiagnostics }): Promise<{ ok: boolean; report?: AnalysisReport; error?: DesktopError }>;
     followUp(payload: { question: string; session: DivinationSession; evidence: EvidenceEntry[] }): Promise<{ ok: boolean; answer?: { content: string }; error?: DesktopError }>;
   };
-  platform: string;
 }
 
-export type ElectronBridge = Omit<DesktopApi, 'runtime'> & {
-  runtime?: PlatformRuntime;
-};
+export type ElectronBridge = DesktopApi;
 
 declare global {
   interface Window { wenyao?: ElectronBridge }

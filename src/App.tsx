@@ -187,6 +187,12 @@ export function App() {
     });
   }, []);
 
+  useEffect(() => desktop.application.onOpenSettings(() => {
+    setHistoryOpen(false);
+    setLibraryOpen(false);
+    setSettingsOpen(true);
+  }), []);
+
   useEffect(() => {
     let active = true;
     const acceptUpdateState = (next: UpdateState) => {
@@ -666,7 +672,7 @@ export function App() {
       next = savedWithQuestion;
       const result = await desktop.ai.followUp({ question: followQuestion, session: next, evidence });
       const answer = result.ok && result.answer ? result.answer : {
-        content: desktop.platform === 'browser' ? '浏览器预览不会发送 AI 请求；桌面应用会沿用本次排盘和古籍证据继续回答。' : `${result.error?.message || '追问失败'} ${result.error?.nextAction || ''}`,
+        content: desktop.runtime.kind === 'web' ? '浏览器预览不会发送 AI 请求；桌面应用会沿用本次排盘和古籍证据继续回答。' : `${result.error?.message || '追问失败'} ${result.error?.nextAction || ''}`,
       };
       next = mergeCompleteSessionState(
         latestSessionsRef.current.get(targetId),

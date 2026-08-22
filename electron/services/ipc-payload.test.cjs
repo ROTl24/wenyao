@@ -133,7 +133,11 @@ test('preload independently sanitizes session save payloads', async () => {
     preloadSource.matchAll(/require\((['"])(.*?)\1\)/g),
     (match) => match[2],
   );
-  assert.deepEqual(requiredModules, ['electron', './services/ipc-payload.cjs']);
+  assert.deepEqual(requiredModules, [
+    'electron',
+    './services/ipc-payload.cjs',
+    './services/runtime-profile.cjs',
+  ]);
   delete require.cache[preloadPath];
   Module._load = function load(request, parent, isMain) {
     if (request === 'electron') return electron;
@@ -197,6 +201,15 @@ test('preload independently sanitizes session save payloads', async () => {
     channel: 'external-links:open',
     args: ['repository'],
   });
+
+  assert.equal(exposed.runtime.kind, 'electron');
+  assert.equal(exposed.runtime.platform, process.platform);
+  let settingsOpenCount = 0;
+  const unsubscribeSettings = exposed.application.onOpenSettings(() => { settingsOpenCount += 1; });
+  listeners.get('application:open-settings')();
+  assert.equal(settingsOpenCount, 1);
+  unsubscribeSettings();
+  assert.equal(listeners.has('application:open-settings'), false);
 
   const updateStates = [];
   const currentUpdateState = await exposed.updates.getState();

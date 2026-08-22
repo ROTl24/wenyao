@@ -1,4 +1,5 @@
-import { lazy, Suspense, useCallback, useEffect, useState } from 'react';
+import { Component, lazy, Suspense, useCallback, useEffect, useState } from 'react';
+import type { ErrorInfo, ReactNode } from 'react';
 import { tossForLine } from '../lib/casting';
 import type { DivinationSession } from '../lib/session';
 import { CastingProgress } from './CastingProgress';
@@ -15,6 +16,43 @@ interface RitualSequence {
 }
 
 interface Props { session: DivinationSession; onConfirm(): void }
+
+interface CoinSceneBoundaryProps {
+  faces: readonly ('text' | 'reverse')[];
+  onUnavailable(): void;
+  resetKey: string;
+  children: ReactNode;
+}
+
+class CoinSceneBoundary extends Component<CoinSceneBoundaryProps, { unavailable: boolean }> {
+  state = { unavailable: false };
+
+  static getDerivedStateFromError() {
+    return { unavailable: true };
+  }
+
+  componentDidCatch(_error: Error, _info: ErrorInfo) {
+    this.props.onUnavailable();
+  }
+
+  componentDidUpdate(previous: CoinSceneBoundaryProps) {
+    if (previous.resetKey !== this.props.resetKey && this.state.unavailable) {
+      this.setState({ unavailable: false });
+    }
+  }
+
+  render() {
+    if (!this.state.unavailable) return this.props.children;
+    return (
+      <div className="coin-scene-fallback" role="status">
+        <span>当前设备未启用立体钱象，已切换为静态结果</span>
+        <div aria-hidden="true">
+          {this.props.faces.map((face, index) => <i key={index}>{face === 'text' ? '字' : '背'}</i>)}
+        </div>
+      </div>
+    );
+  }
+}
 
 export function RitualScreen({ session, onConfirm }: Props) {
   const current = session.currentLine!;
@@ -51,6 +89,9 @@ export function RitualScreen({ session, onConfirm }: Props) {
       ? { ...value, phase: 'revealed' }
       : value);
   }, [current.id]);
+  const handleVisualUnavailable = useCallback(() => {
+    setSequence((value) => value.tossId === current.id ? { ...value, phase: 'revealed' } : value);
+  }, [current.id]);
   const textCount = current.faces.filter((face) => face === 'text').length;
   const reverseCount = current.faces.length - textCount;
   const phaseCopy = phase === 'gathering'
@@ -78,16 +119,18 @@ export function RitualScreen({ session, onConfirm }: Props) {
           <span className="ritual-halo ritual-halo--cinnabar" />
           <span className="ritual-stage-ring" />
         </div>
-        <Suspense fallback={<div className="coin-scene-loading">三钱入盘</div>}>
-          <CoinScene
-            key={current.id}
-            faces={current.faces}
-            phase={phase}
-            visualSeed={current.visualSeed}
-            onSettling={handleSettling}
-            onSettled={handleSettled}
-          />
-        </Suspense>
+        <CoinSceneBoundary faces={current.faces} onUnavailable={handleVisualUnavailable} resetKey={current.id}>
+          <Suspense fallback={<div className="coin-scene-loading">三钱入盘</div>}>
+            <CoinScene
+              key={current.id}
+              faces={current.faces}
+              phase={phase}
+              visualSeed={current.visualSeed}
+              onSettling={handleSettling}
+              onSettled={handleSettled}
+            />
+          </Suspense>
+        </CoinSceneBoundary>
         <span className="ritual-stage-caption">
           {phase === 'gathering' ? '蓄势' : phase === 'casting' ? '翻飞' : phase === 'settling' ? '落定中' : '近观钱象'}
         </span>

@@ -1,4 +1,4 @@
-# 问爻 macOS 零成本开源发行方案
+# 问爻 macOS 零成本开源发行与验证
 
 > 调研基准日：2026-08-23
 
@@ -25,21 +25,21 @@ Electron 官方明确说明，未使用 Developer ID 签名和公证的应用仍
 
 项目不会要求用户全局关闭 Gatekeeper，也不会分发需要用户安装的自签根证书。安装指南只使用 Apple 提供的单应用“仍要打开”机制。命令行清理 quarantine 仅作为校验过 SHA-256 后的高级故障排查，不作为标准安装步骤。
 
-## 仓库现状
+## 系统实现
 
 | 领域 | 当前证据 | macOS 影响 |
 | --- | --- | --- |
 | 业务核心 | React、TypeScript、排盘、历史、古籍与 AI 编排没有 Windows 原生依赖 | 继续复用同一 renderer 和领域逻辑 |
 | Electron 安全 | `contextIsolation`、`sandbox`、`webSecurity` 已启用，`nodeIntegration` 已关闭 | 保留现有安全基线 |
 | 生命周期 | 已处理 Darwin 下关闭窗口不退出和 Dock `activate` 重建窗口 | 基础行为可复用 |
-| 数据目录 | packaged 模式把 `userData`、`sessionData` 指向 `process.execPath` 旁的 `data` | Mac 会尝试写入 `.app/Contents/MacOS`，属于启动阻塞项 |
-| 密钥 | 使用 Electron `safeStorage`，界面和错误文案写死为 Windows DPAPI | Mac 使用 Keychain，需要平台化状态和失败恢复 |
-| 更新 | 更新器仅对 Windows 启用 | Mac 保持关闭，改用 GitHub Release 手动更新 |
-| 打包 | 只有 Windows NSIS x64 | 增加 universal DMG 与 ad-hoc sealing |
-| 发布 | Windows job 独立发布 stable | 改成多平台资产聚合后一次发布 |
-| 标题栏 | 右侧为 Windows window controls 预留 142px | Mac 左侧 traffic lights 会发生布局冲突 |
-| 图形 | WebGL 初始化没有可操作降级 | GPU 故障可能阻断核心起卦流程 |
-| 内部脚本 | 多处写死 `electron.exe` | Mac runner 无法执行相同验证命令 |
+| 数据目录 | `app-paths.cjs` 保留 Windows 安装目录数据契约，Mac 使用用户 Application Support 与 Cache | 持久数据和 Chromium 会话均不写入 `.app` |
+| 密钥 | `secret-store.cjs` 通过 runtime profile 选择 DPAPI、Keychain 或系统安全存储 | 解密失败保留密文并允许恢复 |
+| 更新 | Windows 使用原生更新器，Mac 设置页打开 GitHub 最新 Release | Mac 覆盖安装不触碰用户数据 |
+| 打包 | Windows NSIS x64 与 macOS universal DMG | Mac 使用明确的 ad-hoc identity，不使用公证秘密 |
+| 发布 | Windows、Mac ARM 构建和 Mac Intel 冒烟均通过后，由唯一 publish job 发布 | 任一平台失败都不会公开不完整 Release |
+| 窗口 | Darwin 使用 `hiddenInset`、左侧 traffic lights 安全区和原生菜单 | Windows 保留现有右侧 overlay |
+| 图形与输入 | WebGL 错误切换静态钱象，IME composition 不提交追问 | 起卦随机结果不因降级而改变 |
+| 文件文本 | 导入文本统一为 Unicode NFC | APFS 分解式文件名得到稳定标题与检索键 |
 
 ## 产物设计
 
@@ -87,7 +87,7 @@ Mac 构建在 macOS runner 上完成。所有 Mach-O、Electron Framework、Help
 
 ### 数据路径
 
-新增 `electron/services/app-paths.cjs` 统一解析数据目录：
+`electron/services/app-paths.cjs` 统一解析数据目录：
 
 - Mac durable data 使用 Electron `app.getPath('userData')`，通常位于 `~/Library/Application Support/问爻`。
 - Chromium `sessionData` 与可再生缓存分离，不放进 `.app` 或 DMG。
@@ -97,9 +97,9 @@ Mac 构建在 macOS runner 上完成。所有 Mach-O、Electron Framework、Help
 
 ### Keychain
 
-新增 `electron/services/secret-store.cjs` 包装 `safeStorage`：
+`electron/services/secret-store.cjs` 在主进程包装 `safeStorage`：
 
-- preload 对 renderer 提供 Promise 接口和可恢复错误。
+- renderer 只接收脱敏状态和可恢复错误，不接触密文。
 - UI 根据 runtime profile 显示“macOS 钥匙串”或“Windows DPAPI”。
 - Keychain 锁定、拒绝、条目缺失或升级后无法解密时保留原密文，提示重新输入密钥。
 - ad-hoc signature 的代码身份不具备 Developer ID 的跨版本稳定性，因此每个社区候选版本都必须验证覆盖安装后的密钥读取；失败时只影响 AI 密钥，不得损坏历史、排盘或语料。
@@ -117,20 +117,13 @@ Mac 构建在 macOS runner 上完成。所有 Mach-O、Electron Framework、Help
 - WebGL 初始化失败、上下文丢失或 GPU 子进程退出时切换到确定性 2D/文本投币表现，不能重新随机。
 - 中文输入法 composition 期间按 Enter 只确认候选，不提交 AI 追问。
 - 导入文件名统一为 Unicode NFC，覆盖 APFS NFD 文件名和大小写敏感卷。
-- 数据增加根 schema 版本、迁移前备份、原子写入和未来 schema 拒绝写入。
 - 睡眠、唤醒、网络切换和显示器切换不得重复发送 AI 请求。
 
 ## 更新策略
 
 Mac 的 `electron-updater` 保持禁用。无稳定 Developer ID 身份的自动替换链难以提供可靠的签名连续性，也会把安全风险隐藏在后台更新中。
 
-应用只提供显式的“检查新版本”操作：
-
-1. 用户主动点击后读取 GitHub 最新 Release 版本号。
-2. 有新版本时展示版本号、发布日期和变更摘要。
-3. 点击下载后在默认浏览器打开对应 Release。
-4. 用户下载新 DMG 并覆盖 `/Applications/问爻.app`。
-5. 应用数据继续从 Application Support 读取；新版本不得把缺失 Keychain 权限误判为数据损坏。
+应用只提供显式的手动更新入口：用户从设置页打开 GitHub 最新 Release，下载新 DMG 并覆盖 `/Applications/问爻.app`。应用数据继续从 Application Support 读取；新版本不得把缺失 Keychain 权限误判为数据损坏。
 
 不在后台轮询 GitHub，不使用未经认证的自建更新服务器，不在应用内绕过 Gatekeeper。
 
@@ -138,14 +131,13 @@ Mac 的 `electron-updater` 保持禁用。无稳定 Developer ID 身份的自动
 
 公开仓库可免费使用 GitHub 标准 macOS runner。工作流使用明确的 `macos-15` Apple Silicon 与 `macos-15-intel` 标签，不依赖架构可能变化的 `macos-latest`。
 
-推荐拓扑：
+发布拓扑：
 
 ```text
 版本/tag 一致性检查
   -> Windows 测试与构建 --------+
-  -> macOS ARM 测试 ------------+-> universal DMG 构建与校验
-  -> macOS Intel 测试 ----------+-> 资产聚合校验 -> 唯一发布作业 -> stable
-  -> Linux 大小写/路径检查 -----+
+  -> macOS ARM 构建与验收 -------+-> 资产聚合校验 -> 唯一发布作业 -> stable
+  -> macOS Intel 原生启动冒烟 --+
 ```
 
 安全要求：
@@ -182,15 +174,9 @@ GitHub runner 不能替代真实 Gatekeeper、Keychain、输入法和显示环�
 
 在 Intel、Apple Silicon 和最低 macOS 13 都获得真实通过记录之前，Release 标记为 prerelease。进入 stable 只表示项目已完成自身支持矩阵，不表示 Apple 已签名或公证该应用。
 
-## 实施顺序
+## 发布前真机边界
 
-1. 修复 Mac 数据目录和平台无关 Electron 可执行文件解析。
-2. 建立 runtime profile、Keychain adapter、Darwin 标题栏和原生菜单。
-3. 增加 WebGL 降级、IME、Unicode、schema 和恢复测试。
-4. 配置 universal DMG、ad-hoc sealing、SHA-256 与 Mac 产物验证脚本。
-5. 重构 Windows/Mac 原子发布工作流，Mac 更新入口改为 GitHub Release。
-6. 发布 prerelease，完成 Intel、Apple Silicon 和 macOS 13 社区验收。
-7. 完成覆盖安装与数据保留验证后发布 stable。
+源码侧适配、通用 DMG 构建、双架构 CI 冒烟和原子发布链已经由仓库实现。真实 Gatekeeper、Keychain、Retina/外接屏、企业设备策略以及 macOS 13 最低版本仍需对应真机验证；CI 结果不能替代这些用户环境证据。
 
 ## 完成定义
 

@@ -1,6 +1,11 @@
 const test = require('node:test');
 const assert = require('node:assert/strict');
-const { parseBook, classifyKnowledge } = require('./corpus-parser.cjs');
+const { parseBook, classifyKnowledge, normalizeLine } = require('./corpus-parser.cjs');
+
+test('macOS 分解式 Unicode 文件名会归一化为稳定标题', () => {
+  assert.equal(normalizeLine('周易\u0301'), '周易́'.normalize('NFC'));
+  assert.equal(normalizeLine('Cafe\u0301'), 'Café');
+});
 
 test('TXT 解析保留章节、行号和技术元数据', () => {
   const text = [
