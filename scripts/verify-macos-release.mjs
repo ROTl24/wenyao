@@ -54,7 +54,7 @@ if (process.platform !== 'darwin') {
 }
 
 const dmgBytes = requireFile(dmgPath, 10 * 1024 * 1024);
-requireFile(executablePath, 1024 * 1024);
+requireFile(executablePath, 64 * 1024);
 requireFile(infoPlistPath, 100);
 requireFile(checksumPath, 64);
 
