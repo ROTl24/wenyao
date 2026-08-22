@@ -2,6 +2,7 @@ import type { AIConfigStatus, DesktopApi, DesktopError } from '../../types/deskt
 
 export type WebAICommand =
   | 'getStatus'
+  | 'discoverModels'
   | 'saveDraft'
   | 'testDraft'
   | 'buildAndActivate'

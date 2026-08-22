@@ -144,7 +144,7 @@ export function validateWebConnection(input: AIConnection): ValidatedWebConnecti
   if (generation && (generation.protocol !== 'openai-chat' || !generation.model.trim())) {
     throw new WebAIError(publicError('WEB_AI_GENERATION_INVALID', '解读能力必须配置 OpenAI Chat 兼容模型。', '请填写解读模型名称。'));
   }
-  if (embedding && (embedding.protocol !== 'openai-embeddings' || !embedding.model.trim() || !Number.isInteger(embedding.dimensions) || Number(embedding.dimensions) < 1 || Number(embedding.dimensions) > 8192)) {
+  if (embedding && (embedding.protocol !== 'openai-embeddings' || !embedding.model.trim() || (embedding.dimensions !== undefined && (!Number.isInteger(embedding.dimensions) || Number(embedding.dimensions) < 1 || Number(embedding.dimensions) > 8192)))) {
     throw new WebAIError(publicError('WEB_AI_EMBEDDING_INVALID', '向量能力的模型或维度无效。', '请填写 OpenAI Embeddings 兼容模型及 1–8192 的维度。'));
   }
   if (rerank && (!['cohere-rerank', 'alibaba-rerank'].includes(rerank.protocol) || !rerank.model.trim())) {

@@ -182,6 +182,16 @@ test('preload independently sanitizes session save payloads', async () => {
     }],
   }]);
 
+  await exposed.aiConfig.discoverModels({
+    baseUrl: 'https://api.example.com/v1',
+    apiKey: 'secret',
+    authorization: 'must-not-cross-preload',
+  });
+  assert.deepEqual(calls.at(-1), {
+    channel: 'ai-config:discover-models',
+    args: [{ baseUrl: 'https://api.example.com/v1', apiKey: 'secret' }],
+  });
+
   assert.equal(await exposed.externalLinks.open('repository'), true);
   assert.deepEqual(calls.at(-1), {
     channel: 'external-links:open',

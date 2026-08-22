@@ -67,7 +67,7 @@ export function AIAdvancedSettings({ catalog, status, onStatus, onClose }: Props
       id: `custom-${crypto.randomUUID()}`,
       providerId: 'custom',
       presetId: null,
-      label: '自定义服务',
+      label: '手动配置 API',
       region: '',
       baseUrl: 'https://',
       fields: {},
@@ -167,7 +167,8 @@ export function AIAdvancedSettings({ catalog, status, onStatus, onClose }: Props
         </section>
 
         <section>
-          <div className="ai-advanced-heading"><strong>已保存连接</strong><button type="button" onClick={newCustom}><Plus size={14} />自定义连接</button></div>
+          <div className="ai-advanced-heading"><strong>已保存连接</strong><button type="button" onClick={newCustom}><Plus size={14} />手动配置 API</button></div>
+          <p className="ai-manual-note">已有 API 地址和 API Key 时，优先使用“连接服务”里的自定义 API 自动识别。这里只用于接口无法识别或需要跨服务商组合时。</p>
           <div className="ai-preset-add-list" aria-label="从内置预设添加连接">
             {catalog.presets.map((preset) => <button type="button" key={preset.id} onClick={() => editPreset(preset)}><Plus size={13} />{preset.name}</button>)}
           </div>
@@ -180,7 +181,7 @@ export function AIAdvancedSettings({ catalog, status, onStatus, onClose }: Props
 
         {editing ? (
           <section className="ai-connection-editor">
-            <div className="ai-advanced-heading"><strong>{status.connections.some((item) => item.id === editing.id) ? '编辑连接' : '新建连接'}</strong><button type="button" onClick={() => setEditing(null)}><X size={14} />取消</button></div>
+            <div className="ai-advanced-heading"><strong>{status.connections.some((item) => item.id === editing.id) ? '编辑连接' : '手动配置模型与能力'}</strong><button type="button" onClick={() => setEditing(null)}><X size={14} />取消</button></div>
             <label>名称<input value={editing.label} onChange={(event) => setEditing({ ...editing, label: event.target.value })} /></label>
             <label>基础 API 地址<input value={editing.baseUrl} onChange={(event) => setEditing({ ...editing, baseUrl: event.target.value })} /></label>
             {(editingPreset?.requiredFields || []).map((field) => <label key={field.id}>{field.label}<input value={String(editing.fields[field.id] || '')} onChange={(event) => changePresetField(field.id, event.target.value)} placeholder={field.description} /></label>)}

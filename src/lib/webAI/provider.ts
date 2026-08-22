@@ -1,5 +1,5 @@
 import type { AIConnection } from '../../types/desktop';
-import { toDesktopError, validateWebConnection, WebAIError } from './security';
+import { normalizeHttpsUrl, toDesktopError, validateWebConnection, WebAIError } from './security';
 
 interface UsageRecord {
   capability: 'generation' | 'embedding' | 'rerank';
@@ -116,6 +116,27 @@ export async function secureJsonRequest(
   }
 }
 
+export async function discoverWebModels(baseUrl: string, apiKey: string): Promise<string[]> {
+  const base = normalizeHttpsUrl(baseUrl).toString().replace(/\/$/, '');
+  const json = await secureJsonRequest(`${base}/models`, apiKey, undefined, { method: 'GET' });
+  const source = Array.isArray(json.data) ? json.data : Array.isArray(json.models) ? json.models : [];
+  const modelIds = [...new Set(source.map((item: unknown) => {
+    if (typeof item === 'string') return item;
+    if (!item || typeof item !== 'object') return '';
+    const record = item as Record<string, unknown>;
+    return record.id || record.model || record.name || '';
+  }).map((item: unknown) => String(item || '').trim()).filter(Boolean))].slice(0, 500);
+  if (!modelIds.length) {
+    throw new WebAIError({
+      code: 'WEB_AI_MODELS_NOT_DISCOVERED',
+      message: '服务已连接，但没有返回可识别的模型列表。',
+      dataSafe: true,
+      nextAction: '请确认这是 OpenAI 兼容 API 地址，或在高级设置中手动填写模型。',
+    });
+  }
+  return modelIds;
+}
+
 export function createWebProvider(
   connection: AIConnection,
   apiKey: string,
@@ -149,12 +170,12 @@ export function createWebProvider(
       const json = await secureJsonRequest(validated.endpoints.embedding!, apiKey, {
         model: definition.model,
         input: values,
-        dimensions: definition.dimensions,
+        ...(definition.dimensions ? { dimensions: definition.dimensions } : {}),
         encoding_format: 'float',
       }, { signal });
       recordUsage('embedding', definition.model, json);
       const ordered = [...(json.data || [])].sort((left, right) => Number(left.index) - Number(right.index));
-      if (ordered.length !== values.length || ordered.some((item) => !Array.isArray(item.embedding) || item.embedding.length !== definition.dimensions)) {
+      if (ordered.length !== values.length || ordered.some((item) => !Array.isArray(item.embedding) || (definition.dimensions && item.embedding.length !== definition.dimensions))) {
         throw new WebAIError({ code: 'WEB_AI_EMBEDDING_INVALID_RESPONSE', message: '向量响应数量或维度与配置不一致。', dataSafe: true, nextAction: '请核对向量模型维度，修改后重新建库。' });
       }
       return ordered.map((item) => item.embedding as number[]);

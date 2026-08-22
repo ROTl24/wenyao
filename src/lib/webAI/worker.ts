@@ -15,7 +15,7 @@ import type {
 } from '../../types/desktop';
 import type { EvidenceEntry, RetrievalDiagnostics } from '../retrieval';
 import { searchEvidence } from '../retrieval';
-import { createWebProvider } from './provider';
+import { createWebProvider, discoverWebModels } from './provider';
 import type { SaveDraftPayload, WebAIRequest, WebAIResponse, WebAIStatusEvent } from './protocol';
 import {
   assertConfirmedOrigins,
@@ -192,7 +192,17 @@ async function testDraft(): Promise<{ ok: boolean; status: AIConfigStatus; error
       await provider(connections.generation).chat({ messages: [{ role: 'user', content: '仅回复：问爻连接正常' }], maxTokens: 20 });
       status.draft.testResult.capabilities.generation = { ok: true, checkedAt: new Date().toISOString() };
       emitStatus();
-      await provider(connections.embedding).embed('六爻向量连接检测');
+      const embeddings = await provider(connections.embedding).embed('六爻向量连接检测');
+      const dimensions = embeddings[0]?.length;
+      if (!Number.isInteger(dimensions) || dimensions <= 0 || dimensions > 8192) throw new Error('向量模型没有返回有效维度。');
+      if (!connections.embedding.capabilities.embedding!.dimensions) {
+        connections.embedding.capabilities.embedding!.dimensions = dimensions;
+        if (status.draft?.connection.id === connections.embedding.id && status.draft.connection.capabilities.embedding) {
+          status.draft.connection.capabilities.embedding.dimensions = dimensions;
+        }
+        const saved = status.connections.find((item) => item.id === connections.embedding.id);
+        if (saved?.capabilities.embedding) saved.capabilities.embedding.dimensions = dimensions;
+      }
       status.draft.testResult.capabilities.embedding = { ok: true, checkedAt: new Date().toISOString() };
       emitStatus();
       await provider(connections.rerank).rerank('六爻重排连接检测', ['世爻为自己', '用神按占问选择'], { topN: 1 });
@@ -485,6 +495,11 @@ workerScope.addEventListener('message', (event: MessageEvent<WebAIRequest>) => {
       let value: unknown;
       switch (command) {
         case 'getStatus': value = structuredClone(status); break;
+        case 'discoverModels': {
+          const request = payload as Parameters<DesktopApi['aiConfig']['discoverModels']>[0];
+          value = { ok: true, modelIds: await discoverWebModels(request.baseUrl, request.apiKey) };
+          break;
+        }
         case 'saveDraft': value = saveDraft(payload as SaveDraftPayload); break;
         case 'testDraft': value = await testDraft(); break;
         case 'buildAndActivate': value = await buildAndActivate(); break;

@@ -104,6 +104,28 @@ async function requestJson({ url, apiKey, method = 'POST', body, signal, fetchIm
   }
 }
 
+async function discoverModels({ baseUrl, apiKey = '', signal, fetchImpl = fetch }) {
+  const json = await requestJson({
+    url: endpoint(baseUrl, '/models'),
+    apiKey,
+    method: 'GET',
+    signal,
+    fetchImpl,
+    label: '自定义 AI 服务',
+  });
+  const source = Array.isArray(json.data) ? json.data : Array.isArray(json.models) ? json.models : [];
+  const modelIds = [...new Set(source.map((item) => (
+    typeof item === 'string' ? item : item?.id || item?.model || item?.name || ''
+  )).map((item) => String(item || '').trim()).filter(Boolean))].slice(0, 500);
+  if (!modelIds.length) {
+    const error = new Error('服务已连接，但没有返回可识别的模型列表');
+    error.publicCode = 'AI_MODELS_NOT_DISCOVERED';
+    error.publicNextAction = '请确认这是 OpenAI 兼容 API 地址，或在高级设置中手动填写模型。';
+    throw error;
+  }
+  return modelIds;
+}
+
 function isTransientProviderError(error) {
   return error?.publicCode === 'AI_NETWORK_FAILED'
     || error?.publicCode === 'AI_TIMEOUT'
@@ -196,7 +218,7 @@ function createProviderClient({ connection, apiKey = '', fetchImpl = fetch, usag
       body: {
         model: definition.model,
         input: values,
-        dimensions: definition.dimensions,
+        ...(definition.dimensions ? { dimensions: definition.dimensions } : {}),
         encoding_format: 'float',
       },
     });
@@ -205,7 +227,7 @@ function createProviderClient({ connection, apiKey = '', fetchImpl = fetch, usag
     if (ordered.length !== values.length || ordered.some((item) => !Array.isArray(item.embedding))) {
       throw new Error(`${label}向量响应数量或格式不正确`);
     }
-    if (ordered.some((item) => item.embedding.length !== definition.dimensions)) {
+    if (definition.dimensions && ordered.some((item) => item.embedding.length !== definition.dimensions)) {
       const error = new Error(`${label}返回的向量维度与配置不一致`);
       error.publicCode = 'AI_EMBEDDING_DIMENSION_MISMATCH';
       error.publicNextAction = '请恢复推荐维度，或重新配置后构建新索引。';
@@ -265,6 +287,7 @@ function structuredProviderError(error, fallbackCode = 'AI_OPERATION_FAILED') {
 
 module.exports = {
   createProviderClient,
+  discoverModels,
   endpoint,
   isTransientProviderError,
   normalizeUsage,

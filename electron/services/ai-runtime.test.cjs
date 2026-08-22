@@ -75,6 +75,39 @@ test('runtime atomically activates a tested three-capability stack and forbids r
   );
 });
 
+test('runtime discovers custom models and persists the embedding dimension found during testing', async () => {
+  const store = new MemoryStore();
+  const fetchImpl = async (url, options) => {
+    if (String(url).endsWith('/models')) return json(200, { data: [{ id: 'chat-test' }, { id: 'embed-test' }, { id: 'rerank-test' }] });
+    const body = JSON.parse(options.body);
+    if (String(url).endsWith('/chat/completions')) return json(200, { choices: [{ message: { content: '连接成功' } }] });
+    if (String(url).endsWith('/embeddings')) return json(200, { data: body.input.map((_, index) => ({ index, embedding: [1, 0, 0] })) });
+    return json(200, { results: [{ index: 0, relevance_score: 1 }] });
+  };
+  const runtime = new AIRuntime({
+    store,
+    safeStorage: { isEncryptionAvailable: () => false },
+    corpus: [{ id: 'E1', title: '测试', text: '世爻为自己', source: '甲书', location: '卷一', tags: [], sourceType: 'original', knowledgeKind: 'rule' }],
+    corpusHash: 'corpus-test',
+    indexRoot: fs.mkdtempSync(path.join(os.tmpdir(), 'wenyao-ai-discovery-')),
+    fetchImpl,
+  });
+  runtime.initialize();
+  assert.deepEqual(await runtime.discoverModels({ baseUrl: 'http://localhost:11434/v1' }), ['chat-test', 'embed-test', 'rerank-test']);
+  const connection = {
+    id: 'local-auto', providerId: 'custom', presetId: null, label: '自动识别', region: '', baseUrl: 'http://localhost:11434/v1', fields: {},
+    capabilities: {
+      generation: { protocol: 'openai-chat', model: 'chat-test' },
+      embedding: { protocol: 'openai-embeddings', model: 'embed-test', batchSize: 1 },
+      rerank: { protocol: 'cohere-rerank', model: 'rerank-test', path: '/rerank' },
+    },
+  };
+  const pipeline = Object.fromEntries(['generation', 'embedding', 'rerank'].map((capability) => [capability, { connectionId: connection.id }]));
+  runtime.saveDraft({ connection, pipeline, consentAccepted: true });
+  assert.equal((await runtime.testDraft()).ok, true);
+  assert.equal(store.getRawAIState().draft.connection.capabilities.embedding.dimensions, 3);
+});
+
 test('runtime indexes a newly imported book without rebuilding the active built-in shard', async () => {
   const root = fs.mkdtempSync(path.join(os.tmpdir(), 'wenyao-ai-user-book-'));
   const builtInCorpus = [

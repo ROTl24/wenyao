@@ -13,6 +13,7 @@ const {
 } = require('./ai-config.cjs');
 const {
   createProviderClient,
+  discoverModels,
   structuredProviderError,
   validateBaseUrl,
   withTransientRetry,
@@ -289,6 +290,20 @@ class AIRuntime {
     };
   }
 
+  async discoverModels(payload) {
+    const baseUrl = validateBaseUrl(payload?.baseUrl);
+    const apiKey = String(payload?.apiKey || '').trim();
+    if (!apiKey && !isLocalUrl(baseUrl)) {
+      throw runtimeError('请粘贴 API Key', 'AI_KEY_REQUIRED', 'API Key 可在服务商控制台的 API Keys 或密钥管理页面创建。');
+    }
+    return discoverModels({
+      baseUrl,
+      apiKey,
+      signal: AbortSignal.timeout(30000),
+      fetchImpl: this.fetchImpl,
+    });
+  }
+
   saveDraft(payload) {
     const state = this.store.getRawAIState();
     let connection;
@@ -355,10 +370,21 @@ class AIRuntime {
             signal: AbortSignal.timeout(60000),
           });
         } else if (capability === 'embedding') {
-          await withTransientRetry(
+          const embeddings = await withTransientRetry(
             () => client.embed(['六爻模型连接测试'], { signal: AbortSignal.timeout(30000) }),
             { retries: 2 },
           );
+          const dimensions = embeddings[0]?.length;
+          if (!Number.isInteger(dimensions) || dimensions <= 0 || dimensions > 8192) {
+            throw runtimeError('向量模型没有返回有效维度', 'AI_EMBEDDING_DIMENSION_MISSING', '请在高级设置中核对向量模型。');
+          }
+          if (!item.definition.dimensions) {
+            state = this.store.getRawAIState();
+            if (state.draft?.connection.id === item.connection.id && state.draft.connection.capabilities.embedding) {
+              state.draft.connection.capabilities.embedding.dimensions = dimensions;
+              this.store.saveAIState(state);
+            }
+          }
         } else {
           await withTransientRetry(
             () => client.rerank('事业', ['官鬼为事业用神', '妻财为求财用神'], { topN: 1, signal: AbortSignal.timeout(30000) }),

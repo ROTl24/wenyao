@@ -115,6 +115,10 @@ export class WebAIClient {
   }
 
   getStatus = async (): Promise<AIConfigStatus> => structuredClone(this.status);
+  discoverModels: DesktopApi['aiConfig']['discoverModels'] = async (payload) => {
+    try { return await this.call('discoverModels', payload); }
+    catch (error) { return { ok: false, error: desktopError(error) }; }
+  };
   saveDraft: DesktopApi['aiConfig']['saveDraft'] = async (payload) => {
     try { return await this.call('saveDraft', payload); }
     catch (error) { return { ok: false, error: desktopError(error) }; }

@@ -175,6 +175,7 @@ const browserFallback: DesktopApi = {
   aiConfig: {
     async getCatalog() { return structuredClone(browserProviderCatalog); },
     async getStatus() { return webAI ? { ...(await webAI.getStatus()), corpusCount: corpus.length } : structuredClone(browserAIStatus); },
+    async discoverModels(payload) { return webAI ? webAI.discoverModels(payload) : { ok: false, error: { code: 'WEB_AI_ORIGIN_DISABLED', message: '此域名未启用 AI 服务。', dataSafe: true, nextAction: '请使用问爻正式发布地址。' } }; },
     async saveDraft(payload) { return webAI ? webAI.saveDraft(payload) : { ok: false, error: { code: 'WEB_AI_ORIGIN_DISABLED', message: '此域名未启用 AI 密钥输入。', dataSafe: true, nextAction: '请使用问爻正式发布地址。' } }; },
     async testDraft() { return webAI ? webAI.testDraft() : { ok: false, error: { code: 'WEB_AI_ORIGIN_DISABLED', message: '此域名未启用 AI 服务。', dataSafe: true, nextAction: '请使用问爻正式发布地址。' } }; },
     async buildAndActivate() { return webAI ? webAI.buildAndActivate() : { ok: false, error: { code: 'WEB_AI_ORIGIN_DISABLED', message: '此域名未启用 AI 服务。', dataSafe: true, nextAction: '请使用问爻正式发布地址。' } }; },

@@ -194,6 +194,7 @@ export interface DesktopApi {
   aiConfig: {
     getCatalog(): Promise<AIProviderCatalog>;
     getStatus(): Promise<AIConfigStatus>;
+    discoverModels(payload: { baseUrl: string; apiKey: string }): Promise<{ ok: boolean; modelIds?: string[]; error?: DesktopError }>;
     saveDraft(payload: { presetId?: string; fields?: Record<string, string>; connection?: Partial<AIConnection>; pipeline?: AIPipeline; apiKey?: string; consentAccepted?: boolean; webSecurity?: { confirmedOrigins: string[]; bulkEmbeddingAccepted?: boolean } }): Promise<{ ok: boolean; status?: AIConfigStatus; error?: DesktopError }>;
     testDraft(): Promise<{ ok: boolean; status?: AIConfigStatus; error?: DesktopError }>;
     buildAndActivate(): Promise<{ ok: boolean; status?: AIConfigStatus; error?: DesktopError }>;

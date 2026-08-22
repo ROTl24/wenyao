@@ -26,19 +26,20 @@ const ready: AIConfigStatus = {
 describe('AI 连接向导', () => {
   beforeEach(() => vi.restoreAllMocks());
 
-  it('only offers complete beginner stacks and explains API keys in plain language', async () => {
+  it('offers recommended stacks and a discoverable two-field custom API path', async () => {
     const openExternal = vi.spyOn(desktop.aiConfig, 'openExternal').mockResolvedValue(true);
     render(<AISetupWizard catalog={catalog} status={unconfigured} onStatus={vi.fn()} onReady={vi.fn()} onClose={vi.fn()} />);
 
     expect(screen.getByRole('button', { name: /SiliconFlow/ })).toBeVisible();
     expect(screen.getByRole('button', { name: /阿里云百炼/ })).toBeVisible();
+    expect(screen.getByRole('button', { name: /自定义 API/ })).toBeVisible();
     expect(screen.queryByRole('button', { name: /DeepSeek 官方/ })).not.toBeInTheDocument();
-    expect(screen.getByText(/三项能力缺一不可/)).toBeVisible();
+    expect(screen.getByText(/已有 API 地址和 Key/)).toBeVisible();
 
     fireEvent.click(screen.getByRole('button', { name: '继续' }));
     expect(screen.getByText(/不是登录密码/)).toBeVisible();
     expect(screen.getByText(/不会写入浏览器存储/)).toBeVisible();
-    fireEvent.click(screen.getByRole('button', { name: /打开官方密钥页面/ }));
+    fireEvent.click(screen.getByRole('button', { name: /创建 API Key/ }));
     await waitFor(() => expect(openExternal).toHaveBeenCalledWith('https://cloud.siliconflow.cn/account/ak'));
     expect(screen.getByRole('button', { name: /保存并检测三项能力/ })).toBeDisabled();
   });
@@ -51,7 +52,7 @@ describe('AI 连接向导', () => {
     render(<AISetupWizard catalog={catalog} status={unconfigured} onStatus={vi.fn()} onReady={onReady} onClose={vi.fn()} />);
 
     fireEvent.click(screen.getByRole('button', { name: '继续' }));
-    fireEvent.change(screen.getByLabelText('访问密钥'), { target: { value: 'sf-test-key' } });
+    fireEvent.change(screen.getByLabelText('API Key'), { target: { value: 'sf-test-key' } });
     screen.getAllByRole('checkbox').forEach((checkbox) => fireEvent.click(checkbox));
     fireEvent.click(screen.getByRole('button', { name: /保存并检测三项能力/ }));
 
@@ -69,5 +70,28 @@ describe('AI 连接向导', () => {
     expect(buildAndActivate).toHaveBeenCalledTimes(1);
     fireEvent.click(screen.getByRole('button', { name: '开始解读' }));
     expect(onReady).toHaveBeenCalledTimes(1);
+  });
+
+  it('normalizes a complete call URL and auto-detects all models from only URL and key', async () => {
+    const discoverModels = vi.spyOn(desktop.aiConfig, 'discoverModels').mockResolvedValue({
+      ok: true,
+      modelIds: ['deepseek-ai/DeepSeek-V4-Pro', 'Qwen/Qwen3-Embedding-4B', 'Qwen/Qwen3-Reranker-8B'],
+    });
+    render(<AISetupWizard catalog={catalog} status={unconfigured} onStatus={vi.fn()} onReady={vi.fn()} onClose={vi.fn()} />);
+
+    fireEvent.click(screen.getByRole('button', { name: /自定义 API/ }));
+    fireEvent.click(screen.getByRole('button', { name: '继续' }));
+    expect(screen.getByText(/还没有 API 地址和 Key/)).toBeVisible();
+    expect(screen.getAllByRole('textbox')).toHaveLength(1);
+
+    fireEvent.change(screen.getByLabelText('API 调用地址'), { target: { value: 'https://relay.example.com/v1/chat/completions' } });
+    fireEvent.change(screen.getByLabelText('API Key'), { target: { value: 'relay-test-key' } });
+    fireEvent.click(screen.getByRole('button', { name: '识别 API' }));
+
+    await waitFor(() => expect(discoverModels).toHaveBeenCalledWith({ baseUrl: 'https://relay.example.com/v1', apiKey: 'relay-test-key' }));
+    expect(await screen.findByText('三项能力已自动识别')).toBeVisible();
+    expect(screen.queryByText(/还没有 API 地址和 Key/)).not.toBeInTheDocument();
+    expect(screen.getByText('deepseek-ai/DeepSeek-V4-Pro')).toBeVisible();
+    expect(screen.getByRole('button', { name: /确认并连接/ })).toBeDisabled();
   });
 });

@@ -2,6 +2,7 @@ const assert = require('node:assert/strict');
 const test = require('node:test');
 const {
   createProviderClient,
+  discoverModels,
   providerError,
   validateBaseUrl,
   withTransientRetry,
@@ -41,6 +42,40 @@ test('provider client supports chat, embedding, rerank, exact model listing and 
   assert.deepEqual(await client.rerank('问题', ['甲', '乙']), [{ index: 1, score: 0.9 }]);
   assert.equal(usage[0].totalTokens, 3);
   assert.equal(requests.every((item) => item.options.headers.authorization === 'Bearer secret'), true);
+});
+
+test('custom model discovery reads a generic OpenAI-compatible catalog with an authenticated GET', async () => {
+  let request;
+  const modelIds = await discoverModels({
+    baseUrl: 'https://relay.example.com/v1',
+    apiKey: 'secret-key',
+    fetchImpl: async (url, options) => {
+      request = { url: String(url), options };
+      return response(200, { data: [{ id: 'chat-model' }, { model: 'embed-model' }, 'rerank-model', { id: 'chat-model' }] });
+    },
+  });
+  assert.deepEqual(modelIds, ['chat-model', 'embed-model', 'rerank-model']);
+  assert.equal(request.url, 'https://relay.example.com/v1/models');
+  assert.equal(request.options.method, 'GET');
+  assert.equal(request.options.headers.authorization, 'Bearer secret-key');
+});
+
+test('embedding dimension can be discovered from the first response', async () => {
+  let body;
+  const client = createProviderClient({
+    connection: {
+      id: 'custom', label: '自定义', providerId: 'custom', baseUrl: 'https://relay.example.com/v1',
+      capabilities: { embedding: { protocol: 'openai-embeddings', model: 'embed-auto' } },
+    },
+    apiKey: 'secret',
+    fetchImpl: async (_url, options) => {
+      body = JSON.parse(options.body);
+      return response(200, { data: [{ index: 0, embedding: [0, 1, 0] }] });
+    },
+  });
+  const vectors = await client.embed('测试');
+  assert.equal(Object.hasOwn(body, 'dimensions'), false);
+  assert.equal(vectors[0].length, 3);
 });
 
 test('provider errors are categorized and transient operations retry without retrying auth failures', async () => {

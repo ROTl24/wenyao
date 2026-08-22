@@ -169,6 +169,10 @@ function registerIpc() {
 
   ipcMain.handle('ai-config:get-catalog', () => aiRuntime.getCatalog());
   ipcMain.handle('ai-config:get-status', () => aiRuntime.getStatus());
+  ipcMain.handle('ai-config:discover-models', async (_event, payload) => {
+    try { return { ok: true, modelIds: await aiRuntime.discoverModels(payload) }; }
+    catch (error) { return { ok: false, error: structuredProviderError(error, 'AI_MODEL_DISCOVERY_FAILED') }; }
+  });
   ipcMain.handle('ai-config:save-draft', (_event, payload) => {
     try { return { ok: true, status: aiRuntime.saveDraft(payload) }; }
     catch (error) { return { ok: false, error: structuredProviderError(error, 'AI_DRAFT_INVALID') }; }

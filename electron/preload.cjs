@@ -98,6 +98,7 @@ contextBridge.exposeInMainWorld('wenyao', {
   aiConfig: {
     getCatalog: () => ipcRenderer.invoke('ai-config:get-catalog'),
     getStatus: () => ipcRenderer.invoke('ai-config:get-status'),
+    discoverModels: (payload) => ipcRenderer.invoke('ai-config:discover-models', pickOwn(payload, ['baseUrl', 'apiKey'])),
     saveDraft: (payload) => ipcRenderer.invoke('ai-config:save-draft', pickOwn(payload, [
       'presetId',
       'fields',
