@@ -2,7 +2,9 @@
 
 import corpus from '../../../resources/corpus.json';
 import vectorMetadata from '../../../resources/corpus-vectors.json';
+import corpusManifest from '../../../resources/corpus-manifest.json';
 import aiCore from '../../../electron/services/ai.cjs';
+import retrievalCore from '../../../shared/retrieval-core.cjs';
 import providerCatalog from '../../../config/ai-providers.json';
 import type {
   AICapability,
@@ -13,8 +15,7 @@ import type {
   DesktopApi,
   DesktopError,
 } from '../../types/desktop';
-import type { EvidenceEntry, RetrievalDiagnostics } from '../retrieval';
-import { searchEvidence } from '../retrieval';
+import type { EvidenceEntry } from '../retrieval';
 import { createWebProvider, discoverWebModels } from './provider';
 import type { SaveDraftPayload, WebAIRequest, WebAIResponse, WebAIStatusEvent } from './protocol';
 import {
@@ -369,42 +370,20 @@ function cosine(values: Float32Array, offset: number, query: number[]): number {
 async function search(payload: Parameters<DesktopApi['retrieval']['search']>[0]) {
   return withPaidOperation('古籍检索', async () => {
     const active = activePipeline();
-    const lexical = searchEvidence(corpus as EvidenceEntry[], payload.query, payload.domainTerms, 40);
-    const queryVector = (await provider(active.connections.embedding).embed(payload.query))[0];
-    if (!vectors || queryVector.length !== vectors.dimensions) throw new Error('查询向量与本地索引维度不一致。');
-    const vectorRank = vectors.ids.map((id, index) => ({ id, score: cosine(vectors!.values, index * vectors!.dimensions, queryVector) }))
-      .sort((left, right) => right.score - left.score).slice(0, 40);
-    const fused = new Map<string, number>();
-    lexical.forEach((item, index) => fused.set(item.id, (fused.get(item.id) || 0) + 1 / (61 + index)));
-    vectorRank.forEach((item, index) => fused.set(item.id, (fused.get(item.id) || 0) + 1 / (61 + index)));
-    const candidates = [...fused.entries()].sort((left, right) => right[1] - left[1]).slice(0, 24)
-      .map(([id, score]) => ({ entry: corpus.find((item) => item.id === id) as EvidenceEntry, score }))
-      .filter((item) => item.entry);
-    const ranked = await provider(active.connections.rerank).rerank(payload.query, candidates.map((item) => `${item.entry.source} ${item.entry.location}\n${item.entry.text}`), { topN: payload.limit || 8 });
-    const evidence = ranked.slice(0, payload.limit || 8).map((item) => {
-      const candidate = candidates[item.index];
-      const lexicalItem = lexical.find((entry) => entry.id === candidate.entry.id);
-      const vectorItem = vectorRank.find((entry) => entry.id === candidate.entry.id);
-      return {
-        ...candidate.entry,
-        retrieval: {
-          lexicalScore: lexicalItem?.score || 0,
-          vectorScore: vectorItem?.score || 0,
-          fusionScore: candidate.score,
-          rerankScore: item.score,
-        },
-      };
+    const result = await retrievalCore.hybridSearch({
+      corpus: corpus as EvidenceEntry[],
+      query: payload.query,
+      domainTerms: payload.domainTerms,
+      vectorSearch: async (query: string) => {
+        const queryVector = (await provider(active.connections.embedding).embed(query))[0];
+        if (!vectors || queryVector.length !== vectors.dimensions) throw new Error('查询向量与本地索引维度不一致。');
+        return vectors.ids.map((id, index) => ({ id, score: cosine(vectors!.values, index * vectors!.dimensions, queryVector) }))
+          .sort((left, right) => right.score - left.score).slice(0, 40);
+      },
+      rerank: (query: string, documents: string[]) => provider(active.connections.rerank).rerank(query, documents, { topN: 16 }),
     });
-    const diagnostics: RetrievalDiagnostics = {
-      mode: 'hybrid-reranked',
-      lexicalCandidates: lexical.length,
-      vectorCandidates: vectorRank.length,
-      fusedCandidates: candidates.length,
-      vectorUsed: true,
-      rerankUsed: true,
-      warnings: [],
-    };
-    return { evidence, diagnostics };
+    result.diagnostics.corpusVersion = corpusManifest.corpusVersion;
+    return result;
   });
 }
 
@@ -427,6 +406,10 @@ async function followUp(payload: Parameters<DesktopApi['ai']['followUp']>[0]) {
     try {
       const active = activePipeline();
       const answer = await aiCore.followUpCloud({ ...payload, chat: provider(active.connections.generation).chat });
+      answer.provider = Object.fromEntries((['generation', 'embedding', 'rerank'] as const).map((capability) => {
+        const connection = active.connections[capability];
+        return [capability, { providerId: connection.providerId, connectionLabel: connection.label, model: connection.capabilities[capability]!.model }];
+      }));
       return { ok: true, answer };
     } catch (error) { return { ok: false, error: toDesktopError(error, 'WEB_AI_FOLLOW_UP_FAILED') }; }
   });

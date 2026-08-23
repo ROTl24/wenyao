@@ -1,6 +1,7 @@
 import type { EvidenceEntry, RetrievalDiagnostics } from '../lib/retrieval';
 import type { DivinationSession } from '../lib/session';
 import type { AnalysisReport } from '../lib/types';
+import type { FeedbackApi } from '../lib/feedback';
 
 export type AICapability = 'generation' | 'embedding' | 'rerank';
 export type AIProtocol = 'openai-chat' | 'openai-embeddings' | 'cohere-rerank' | 'alibaba-rerank';
@@ -197,6 +198,7 @@ export interface DesktopApi {
     save(session: DivinationSession): Promise<DivinationSession>;
     delete(id: string): Promise<boolean>;
   };
+  feedback: FeedbackApi;
   aiConfig: {
     getCatalog(): Promise<AIProviderCatalog>;
     getStatus(): Promise<AIConfigStatus>;
@@ -235,7 +237,7 @@ export interface DesktopApi {
   };
   ai: {
     analyze(payload: { question: string; category: string; castingMethod: DivinationSession['castingMethod']; castingBasis: DivinationSession['castingBasis']; plate: DivinationSession['plate']; evidence: EvidenceEntry[]; retrievalDiagnostics?: RetrievalDiagnostics }): Promise<{ ok: boolean; report?: AnalysisReport; error?: DesktopError }>;
-    followUp(payload: { question: string; session: DivinationSession; evidence: EvidenceEntry[] }): Promise<{ ok: boolean; answer?: { content: string }; error?: DesktopError }>;
+    followUp(payload: { question: string; session: DivinationSession; evidence: EvidenceEntry[] }): Promise<{ ok: boolean; answer?: { content: string; provider?: AnalysisReport['provider'] }; error?: DesktopError }>;
   };
 }
 

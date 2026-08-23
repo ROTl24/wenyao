@@ -221,6 +221,22 @@ button:focus-visible, input:focus-visible, textarea:focus-visible { outline: 2px
 .history-panel > header { padding: 28px 32px 22px; }
 .history-panel h2 { font-family: var(--font-display); font-weight: 400; }
 .history-panel .panel-search { margin: 16px 32px 6px; }
+.feedback-panel { width: min(700px, 96vw); padding: 0; }
+.feedback-panel > header { padding: 28px 32px 22px; }
+.feedback-privacy { margin: 18px 32px; padding: 16px; border: 1px solid var(--line); display: flex; align-items: center; justify-content: space-between; gap: 16px; }
+.feedback-privacy button, .feedback-panel .feedback-actions button, .feedback-record-sentiment button { min-height: 36px; padding: 7px 12px; border: 1px solid rgba(145,36,30,.35); background: transparent; color: var(--cinnabar); cursor: pointer; }
+.feedback-records { padding: 0 32px 32px; }
+.feedback-records article { padding: 20px 0; border-top: 1px solid var(--line); }
+.feedback-record-heading, .feedback-record-sentiment, .feedback-panel .feedback-actions { display: flex; align-items: center; justify-content: space-between; gap: 8px; }
+.feedback-record-heading strong { overflow-wrap: anywhere; }
+.feedback-record-heading span { color: var(--muted); font-size: 12px; white-space: nowrap; }
+.feedback-record-sentiment { justify-content: flex-start; margin: 12px 0; }
+.feedback-record-sentiment button.is-active { background: var(--cinnabar); color: #f5ead7; }
+.feedback-panel textarea { width: 100%; min-height: 70px; margin: 12px 0; padding: 10px; border: 1px solid var(--line); background: rgba(255,255,255,.35); resize: vertical; }
+.feedback-panel .feedback-reasons { display: flex; flex-wrap: wrap; gap: 8px 14px; }
+.feedback-panel .feedback-reasons label { color: var(--muted); font-size: 12px; }
+.feedback-panel .feedback-actions { justify-content: flex-end; }
+.feedback-panel > .feedback-error { margin: 0 32px 16px; color: #9a2f29; }
 .history-list { min-height: 0; padding: 2px 32px 32px; overflow-y: auto; }
 .history-row { position: relative; border-bottom: 1px solid rgba(63,58,48,.16); transition: background-color var(--motion-fast) ease; }
 .history-row:hover, .history-row:focus-within { background: rgba(248,243,233,.42); }
@@ -644,6 +660,9 @@ button:focus-visible, input:focus-visible, textarea:focus-visible { outline: 2px
   .physical-review-editor { grid-template-columns: repeat(2, minmax(0, 1fr)); }
   .side-panel { width: 100%; max-width: none; }
   .history-panel { width: 100%; max-width: none; }
+  .feedback-panel { width: 100%; max-width: none; }
+  .feedback-panel > header, .feedback-records { padding-left: 18px; padding-right: 18px; }
+  .feedback-privacy { margin-left: 18px; margin-right: 18px; align-items: flex-start; flex-direction: column; }
   .history-panel > header { padding: 22px 18px 18px; }
   .history-panel .panel-search { margin: 14px 18px 4px; }
   .history-list { padding: 2px 18px 24px; }

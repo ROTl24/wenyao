@@ -704,27 +704,15 @@ class AIRuntime {
       hydrate: (ids) => this.corpusLibrary.hydrateEntries(ids, shards),
       query: String(payload.query || ''),
       domainTerms: Array.isArray(payload.domainTerms) ? payload.domainTerms : [],
-      limit: Math.min(12, Math.max(1, Number(payload.limit) || 8)),
       vectorSearch: async (query) => {
-        const [vector] = await withTransientRetry(
-          () => embeddingClient.embed([query], { signal: AbortSignal.timeout(30000) }),
-          { retries: 2 },
-        );
+        const [vector] = await embeddingClient.embed([query], { signal: AbortSignal.timeout(30000) });
         return this.corpusIndex.search(identity, shards, vector, 40);
       },
-      rerank: (query, documents) => withTransientRetry(
-        () => rerankClient.rerank(query, documents, { topN: 12, signal: AbortSignal.timeout(60000) }),
-        { retries: 2 },
-      ),
+      rerank: (query, documents) => rerankClient.rerank(query, documents, { topN: 16, signal: AbortSignal.timeout(60000) }),
     });
-    if (!result.diagnostics.vectorUsed || !result.diagnostics.rerankUsed) {
-      const reason = result.diagnostics.warnings.join(' ');
-      throw runtimeError(
-        `本次检索未完成必选的向量召回与重排。${reason ? ` ${reason}` : ''}`,
-        'AI_RETRIEVAL_REQUIRED',
-        '请检查向量与重排服务后重试；问爻不会降级生成报告。',
-      );
-    }
+    result.diagnostics.corpusVersion = crypto.createHash('sha256')
+      .update(shards.map((shard) => `${shard.id}:${shard.contentHash}`).sort().join('|'))
+      .digest('hex');
     return result;
   }
 
@@ -753,11 +741,17 @@ class AIRuntime {
   async followUp(payload) {
     const { resolved } = this.#activeRuntime();
     const generationClient = this.#client(resolved.generation.connection, resolved.generation.apiKey);
-    return followUpCloud({
+    const answer = await followUpCloud({
       ...payload,
       chat: (request) => generationClient.chat(request),
       signal: AbortSignal.timeout(180000),
     });
+    answer.provider = Object.fromEntries(CAPABILITIES.map((capability) => [capability, {
+      providerId: resolved[capability].connection.providerId,
+      connectionLabel: resolved[capability].connection.label,
+      model: resolved[capability].definition.model,
+    }]));
+    return answer;
   }
 }
 

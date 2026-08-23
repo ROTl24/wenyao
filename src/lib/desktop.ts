@@ -1,6 +1,8 @@
 import corpus from '../../resources/corpus.json';
+import corpusManifest from '../../resources/corpus-manifest.json';
 import aiProviderCatalog from '../../config/ai-providers.json';
 import publicLinks from '../../config/public-links.json';
+import feedbackConfig from '../../config/feedback.json';
 import type {
   AIConfigStatus,
   AIProviderCatalog,
@@ -12,9 +14,10 @@ import type {
 } from '../types/desktop';
 import type { UpdateState } from '../types/desktop';
 import type { DivinationSession } from './session';
-import { searchEvidence } from './retrieval';
+import { searchLocalEvidence } from './retrieval';
 import { WebAIClient, emptyWebAIStatus } from './webAI/client';
 import { isTrustedWebAIOrigin } from './webAI/security';
+import { createBrowserFeedbackApi } from './feedback';
 import {
   normalizeStoredSession,
   sanitizeRendererSession,
@@ -24,6 +27,7 @@ import {
 const STORAGE_KEY = 'wenyao-browser-sessions';
 const browserAIEnabled = isTrustedWebAIOrigin();
 const webAI = browserAIEnabled ? new WebAIClient() : null;
+const browserFeedback = createBrowserFeedbackApi(feedbackConfig.endpoint);
 const browserRuntime: PlatformRuntime = {
   kind: 'web',
   platform: 'browser',
@@ -225,10 +229,13 @@ const browserFallback: DesktopApi = {
   retrieval: {
     async search(payload) {
       if (webAI && (await webAI.getStatus()).status === 'ready') return webAI.search(payload);
-      const evidence = searchEvidence(corpus as import('./retrieval').EvidenceEntry[], payload.query, payload.domainTerms, payload.limit || 8);
-      return { evidence, diagnostics: { mode: 'lexical-fallback', lexicalCandidates: evidence.length, vectorCandidates: 0, fusedCandidates: evidence.length, vectorUsed: false, rerankUsed: false, warnings: ['AI 未就绪时仅展示本地关键词检索结果，不会据此生成 AI 报告。'] } };
+      const result = await searchLocalEvidence(corpus as import('./retrieval').EvidenceEntry[], payload.query, payload.domainTerms);
+      result.diagnostics.corpusVersion = corpusManifest.corpusVersion;
+      result.diagnostics.warnings.push('AI 检索服务未就绪，当前结果来自本地 BM25。');
+      return result;
     },
   },
+  feedback: browserFeedback,
   ai: {
     async analyze(payload) { return webAI ? webAI.analyze(payload) : { ok: false, error: { code: 'WEB_AI_ORIGIN_DISABLED', message: '此域名不发送 AI 请求。', dataSafe: true, nextAction: '请使用问爻正式发布地址。' } }; },
     async followUp(payload) { return webAI ? webAI.followUp(payload) : { ok: false, error: { code: 'WEB_AI_ORIGIN_DISABLED', message: '此域名不发送 AI 请求。', dataSafe: true, nextAction: '请使用问爻正式发布地址。' } }; },

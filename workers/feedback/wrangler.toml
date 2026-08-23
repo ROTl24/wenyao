@@ -1,0 +1,18 @@
+name = "wenyao-feedback"
+main = "src/index.ts"
+compatibility_date = "2026-08-23"
+workers_dev = false
+preview_urls = false
+
+[[d1_databases]]
+binding = "DB"
+database_name = "wenyao-feedback"
+database_id = "REPLACE_AFTER_D1_CREATE"
+
+[triggers]
+crons = ["17 3 * * *"]
+
+[vars]
+ALLOWED_ORIGINS = "https://wenyao-9pu.pages.dev"
+ADMIN_EMAILS = ""
+DETAIL_RETENTION_DAYS = "90"

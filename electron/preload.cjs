@@ -111,6 +111,14 @@ contextBridge.exposeInMainWorld('wenyao', {
     save: (session) => ipcRenderer.invoke('sessions:save', sanitizeRendererSession(session)),
     delete: (id) => ipcRenderer.invoke('sessions:delete', id),
   },
+  feedback: {
+    getState: () => ipcRenderer.invoke('feedback:get-state'),
+    submit: (payload) => ipcRenderer.invoke('feedback:submit', structuredClone(payload)),
+    setConsent: (enabled) => ipcRenderer.invoke('feedback:set-consent', Boolean(enabled)),
+    retry: (feedbackId) => ipcRenderer.invoke('feedback:retry', safeText(feedbackId, '', 100)),
+    cancel: (feedbackId) => ipcRenderer.invoke('feedback:cancel', safeText(feedbackId, '', 100)),
+    delete: (feedbackId) => ipcRenderer.invoke('feedback:delete', safeText(feedbackId, '', 100)),
+  },
   aiConfig: {
     getCatalog: () => ipcRenderer.invoke('ai-config:get-catalog'),
     getStatus: () => ipcRenderer.invoke('ai-config:get-status'),

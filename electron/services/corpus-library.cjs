@@ -1,7 +1,7 @@
 const crypto = require('node:crypto');
 const fs = require('node:fs');
 const path = require('node:path');
-const { lexicalSearch } = require('./retrieval.cjs');
+const { buildBM25Index, lexicalSearch } = require('./retrieval.cjs');
 const { normalizeLine, parseBook, sha256 } = require('./corpus-parser.cjs');
 
 const LIBRARY_SCHEMA_VERSION = 1;
@@ -58,6 +58,7 @@ class CorpusLibrary {
     this.builtInManifest = builtInManifest && typeof builtInManifest === 'object' ? builtInManifest : {};
     this.builtInBooks = this.#buildBuiltInBooks();
     this.state = { schemaVersion: LIBRARY_SCHEMA_VERSION, builtinEnabled: {}, books: [] };
+    this.bm25Cache = null;
     this.lastPurgedBookIds = [];
   }
 
@@ -261,7 +262,13 @@ class CorpusLibrary {
 
   lexicalSearch({ shards, query, domainTerms, limit = 40 }) {
     const entries = shards.flatMap((shard) => shard.entries.filter((entry) => shard.enabledEntryIds.has(entry.id)));
-    return lexicalSearch(entries, query, domainTerms, limit);
+    const identity = crypto.createHash('sha256').update(shards.map((shard) => (
+      `${shard.id}:${shard.contentHash}:${[...shard.enabledEntryIds].sort().join(',')}`
+    )).sort().join('|')).digest('hex');
+    if (!this.bm25Cache || this.bm25Cache.identity !== identity) {
+      this.bm25Cache = { identity, index: buildBM25Index(entries) };
+    }
+    return lexicalSearch(entries, query, domainTerms, limit, this.bm25Cache.index);
   }
 
   hydrateEntries(ids, shards) {

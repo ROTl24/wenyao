@@ -1124,6 +1124,18 @@
   font: var(--text-meta)/1.55 var(--result-ui);
 }
 
+.retrieval-status button {
+  min-height: 32px;
+  padding: 5px 9px;
+  border: 1px solid rgba(145, 36, 30, .28);
+  background: transparent;
+  color: var(--result-cinnabar);
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  cursor: pointer;
+}
+
 .evidence-origin-label {
   display: inline-flex;
   margin-right: 7px;
@@ -1370,6 +1382,60 @@
   color: #62645e;
   font: var(--text-meta)/1.65 var(--result-ui);
 }
+
+.feedback-control {
+  margin-top: 28px;
+  padding-top: 18px;
+  border-top: 1px solid rgba(63, 58, 48, .14);
+  color: var(--result-muted);
+  font: var(--text-meta)/1.6 var(--result-ui);
+}
+
+.feedback-question,
+.feedback-actions {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 9px;
+}
+
+.feedback-question > span {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  margin-right: 4px;
+}
+
+.feedback-question button,
+.feedback-actions button,
+.feedback-consent button {
+  min-height: 34px;
+  padding: 6px 11px;
+  border: 1px solid rgba(145, 36, 30, .28);
+  background: rgba(255, 255, 255, .25);
+  color: var(--result-cinnabar);
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  cursor: pointer;
+}
+
+.feedback-question button.is-active {
+  background: var(--result-cinnabar);
+  color: #f7ead7;
+}
+
+.feedback-question .feedback-edit { border: 0; background: transparent; }
+.feedback-editor, .feedback-consent { max-width: 760px; margin-top: 14px; padding: 16px; background: rgba(99, 82, 57, .055); }
+.feedback-reasons { display: flex; flex-wrap: wrap; gap: 8px 16px; margin-bottom: 13px; }
+.feedback-reasons label { display: inline-flex; align-items: center; gap: 5px; }
+.feedback-editor > label { display: grid; gap: 6px; margin: 10px 0; }
+.feedback-editor textarea { min-height: 76px; padding: 9px; border: 1px solid rgba(63, 58, 48, .2); background: rgba(255,255,255,.35); resize: vertical; }
+.feedback-editor .feedback-content-opt-in { display: flex; align-items: center; gap: 7px; }
+.feedback-preview { max-height: 220px; margin: 10px 0; overflow: auto; }
+.feedback-preview p { white-space: pre-wrap; }
+.feedback-consent p { margin: 6px 0 12px; }
+.feedback-error { display: block; margin-top: 10px; color: #9a2f29; }
 
 @media (max-width: 1120px) {
   .result-hero-body {

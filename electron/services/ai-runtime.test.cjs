@@ -25,15 +25,17 @@ function json(status, value) {
   return { ok: status >= 200 && status < 300, status, text: async () => JSON.stringify(value) };
 }
 
-test('runtime atomically activates a tested three-capability stack and forbids retrieval fallback', async () => {
+test('runtime atomically activates a tested stack and degrades without retry when rerank is unavailable', async () => {
   const store = new MemoryStore();
   let rerankAvailable = true;
+  let rerankCalls = 0;
   const fetchImpl = async (url, options) => {
     const body = JSON.parse(options.body);
     if (String(url).endsWith('/chat/completions')) return json(200, { choices: [{ message: { content: '连接成功' } }] });
     if (String(url).endsWith('/embeddings')) {
       return json(200, { data: body.input.map((text, index) => ({ index, embedding: text.includes('财') ? [0, 1] : [1, 0] })) });
     }
+    rerankCalls += 1;
     if (!rerankAvailable) return json(503, { message: 'maintenance' });
     return json(200, { results: body.documents.map((_, index) => ({ index, relevance_score: 1 - index * 0.1 })) });
   };
@@ -75,10 +77,14 @@ test('runtime atomically activates a tested three-capability stack and forbids r
   assert.equal(result.diagnostics.rerankUsed, true);
 
   rerankAvailable = false;
-  await assert.rejects(
-    () => runtime.search({ query: '事业是否顺利', domainTerms: ['事业'], limit: 2 }),
-    (error) => error.publicCode === 'AI_RETRIEVAL_REQUIRED' && /不会降级/.test(error.publicNextAction),
-  );
+  const rerankCallsBeforeDegradation = rerankCalls;
+  const degraded = await runtime.search({ query: '事业是否顺利', domainTerms: ['事业'], limit: 2 });
+  assert.equal(degraded.diagnostics.mode, 'hybrid-fused');
+  assert.equal(degraded.diagnostics.vectorUsed, true);
+  assert.equal(degraded.diagnostics.rerankUsed, false);
+  assert.match(degraded.diagnostics.warnings.join(''), /重排暂不可用/);
+  assert.ok(degraded.evidence.length > 0);
+  assert.equal(rerankCalls, rerankCallsBeforeDegradation + 1);
 });
 
 test('runtime discovers custom models and persists the embedding dimension found during testing', async () => {

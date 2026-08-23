@@ -10,7 +10,7 @@ import {
   type LineRecord,
   type PreparedCoinLine,
 } from './casting';
-import type { AnalysisReport } from './types';
+import type { AnalysisEvidenceSnapshot, AnalysisReport } from './types';
 
 export {
   CASTING_METHOD_LABELS,
@@ -30,6 +30,8 @@ export interface ChatMessage {
   kind?: 'markdown-answer' | 'system-notice';
   content: string;
   createdAt: string;
+  evidenceSnapshot?: AnalysisEvidenceSnapshot;
+  provider?: AnalysisReport['provider'];
 }
 
 export interface DivinationSession {

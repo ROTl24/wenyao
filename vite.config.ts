@@ -7,7 +7,7 @@ const maximumFileSizeToCacheInBytes = 10 * 1024 * 1024;
 export default defineConfig({
   build: {
     commonjsOptions: {
-      include: [/electron[\\/]services/, /node_modules/],
+      include: [/electron[\\/]services/, /shared[\\/]retrieval-core\.cjs/, /node_modules/],
     },
   },
   plugins: [
@@ -55,6 +55,6 @@ export default defineConfig({
     setupFiles: ['./src/test/setup.ts'],
     css: true,
     globals: true,
-    exclude: ['electron/**/*.test.cjs', 'node_modules/**', 'dist/**', 'release/**'],
+    exclude: ['electron/**/*.test.cjs', '**/node_modules/**', 'dist/**', 'release/**'],
   },
 });

@@ -3,6 +3,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { App } from './App';
 import { desktop } from './lib/desktop';
 import { buildPlate, createTossFromValue } from './lib/divination';
+import type { EvidenceEntry, RetrievalDiagnostics } from './lib/retrieval';
 import type { DivinationSession } from './lib/session';
 import type { AIConfigStatus } from './types/desktop';
 
@@ -306,6 +307,7 @@ describe('问爻桌面体验', () => {
     const savedSession = completedHistorySession('历史记录是否应保持原样');
     localStorage.setItem('wenyao-browser-sessions', JSON.stringify([savedSession]));
     const analyze = vi.spyOn(desktop.ai, 'analyze');
+    const retrieve = vi.spyOn(desktop.retrieval, 'search');
 
     render(<App />);
     fireEvent.click(screen.getByRole('button', { name: '历史记录' }));
@@ -317,6 +319,7 @@ describe('问爻桌面体验', () => {
       await new Promise((resolve) => setTimeout(resolve, 0));
     });
     expect(analyze).not.toHaveBeenCalled();
+    expect(retrieve).not.toHaveBeenCalled();
   });
 
   it('shows an explicit AI error without creating a local substitute report', async () => {
@@ -463,6 +466,46 @@ describe('问爻桌面体验', () => {
     });
     expect(await screen.findByRole('heading', { name: '并发主报告' })).toBeVisible();
     expect(screen.getByRole('heading', { name: '追问答复' })).toBeVisible();
+  });
+
+  it('reuses the latest evidence snapshot for clarification and runs full retrieval for a new concern', async () => {
+    const savedSession = completedHistorySession('当前工作是否适合继续');
+    const snapshotEvidence: EvidenceEntry[] = [
+      { id: 'E1', title: '官鬼用神', source: '易隐', location: '卷一', text: '事业占以官鬼为用神。', tags: ['事业', '官鬼'], sourceType: 'original' },
+      { id: 'E2', title: '世爻旺衰', source: '增删卜易', location: '卷二', text: '世爻代表占问者自身。', tags: ['世爻'], sourceType: 'original' },
+    ];
+    const diagnostics: RetrievalDiagnostics = {
+      mode: 'hybrid-reranked', lexicalCandidates: 40, vectorCandidates: 40, fusedCandidates: 30,
+      rerankedCandidates: 16, selectedCandidates: 2, vectorUsed: true, rerankUsed: true,
+      stages: ['BM25 召回 40'], warnings: [], corpusVersion: 'corpus-1',
+      rankings: { bm25: [], vector: [], fusion: [], rerank: [], final: snapshotEvidence.map((item, index) => ({ id: item.id, rank: index + 1, score: 1 - index * 0.1 })) },
+    };
+    savedSession.analysis = {
+      mode: 'cloud', analysisId: 'analysis-1', markdown: '## 当前解读\n\n官鬼代表事业。', generatedAt: new Date().toISOString(),
+      evidenceSnapshot: { capturedAt: new Date().toISOString(), appVersion: '0.5.1', corpusVersion: 'corpus-1', category: 'career', evidence: snapshotEvidence, retrieval: diagnostics },
+    };
+    localStorage.setItem('wenyao-browser-sessions', JSON.stringify([savedSession]));
+    const newEvidence = [{ ...snapshotEvidence[1], id: 'E3', title: '换工作判断' }];
+    const retrieve = vi.spyOn(desktop.retrieval, 'search').mockResolvedValue({ evidence: newEvidence, diagnostics: { ...diagnostics, selectedCandidates: 1 } });
+    const follow = vi.spyOn(desktop.ai, 'followUp').mockResolvedValue({ ok: true, answer: { content: '### 追问答复\n\n已回答。' } });
+
+    render(<App />);
+    fireEvent.click(screen.getByRole('button', { name: '历史记录' }));
+    fireEvent.click((await screen.findByText('当前工作是否适合继续')).closest('button')!);
+    const input = await screen.findByRole('textbox', { name: '你的追问' });
+    fireEvent.change(input, { target: { value: '你说的官鬼具体是什么意思' } });
+    fireEvent.click(screen.getByRole('button', { name: '继续追问' }));
+    await waitFor(() => expect(follow).toHaveBeenCalledTimes(1));
+    expect(retrieve).not.toHaveBeenCalled();
+    expect(follow.mock.calls[0][0].evidence[0].id).toBe('E1');
+
+    fireEvent.change(input, { target: { value: '明年换到另一家公司会怎样' } });
+    await waitFor(() => expect(screen.getByRole('button', { name: '继续追问' })).toBeEnabled());
+    fireEvent.click(screen.getByRole('button', { name: '继续追问' }));
+    await waitFor(() => expect(retrieve).toHaveBeenCalledTimes(1));
+    await waitFor(() => expect(follow).toHaveBeenCalledTimes(2));
+    expect(retrieve).toHaveBeenCalledWith(expect.objectContaining({ query: '明年换到另一家公司会怎样' }));
+    expect(follow.mock.calls[1][0].evidence[0].id).toBe('E3');
   });
 
   it('unlocks follow-up and reports the error when its save fails', async () => {

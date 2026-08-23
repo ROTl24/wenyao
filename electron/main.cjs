@@ -19,6 +19,8 @@ const { installApplicationMenu } = require('./services/application-menu.cjs');
 const { createRuntimeProfile, runtimeProfileArgument } = require('./services/runtime-profile.cjs');
 const { createSecretStore } = require('./services/secret-store.cjs');
 const { createWindowOptions } = require('./services/window-options.cjs');
+const { FeedbackService } = require('./services/feedback.cjs');
+const feedbackConfig = require('../config/feedback.json');
 
 const runtimeProfile = createRuntimeProfile({
   platform: process.platform,
@@ -56,6 +58,7 @@ let corpusIndex;
 let aiRuntime;
 let updateManager;
 let secretStore;
+let feedbackService;
 
 function resourcePath(name) {
   const candidates = [
@@ -177,6 +180,13 @@ function registerIpc() {
   ipcMain.handle('sessions:get', (_event, id) => store.getSession(id));
   ipcMain.handle('sessions:save', (_event, session) => store.saveSession(sanitizeRendererSession(session)));
   ipcMain.handle('sessions:delete', (_event, id) => store.deleteSession(id));
+
+  ipcMain.handle('feedback:get-state', () => feedbackService.getState());
+  ipcMain.handle('feedback:submit', (_event, payload) => feedbackService.submit(payload));
+  ipcMain.handle('feedback:set-consent', (_event, enabled) => feedbackService.setConsent(Boolean(enabled)));
+  ipcMain.handle('feedback:retry', (_event, feedbackId) => feedbackService.retry(String(feedbackId || '') || undefined));
+  ipcMain.handle('feedback:cancel', (_event, feedbackId) => feedbackService.cancel(String(feedbackId || '')));
+  ipcMain.handle('feedback:delete', (_event, feedbackId) => feedbackService.delete(String(feedbackId || '')));
 
   ipcMain.handle('external-links:open', (_event, id) => openPublicLink(id, (url) => shell.openExternal(url)));
 
@@ -398,6 +408,7 @@ if (startup.shouldStart) {
 
   app.whenReady().then(async () => {
     store = new JsonStore(dataPath());
+    feedbackService = new FeedbackService({ store, endpoint: feedbackConfig.endpoint });
     corpus = loadCorpus();
     const corpusHash = hashCorpus(corpus);
     corpusLibrary = new CorpusLibrary({
@@ -444,6 +455,7 @@ if (startup.shouldStart) {
     });
     registerIpc();
     createWindow();
+    void feedbackService.retry();
     if (process.platform === 'darwin') {
       installApplicationMenu({
         Menu,
