@@ -16,6 +16,7 @@ const capabilityOrder: AICapability[] = ['generation', 'embedding', 'rerank'];
 const endpointSuffix = /\/(?:v\d+\/)?chat\/completions\/?$/i;
 const modelsSuffix = /\/models\/?$/i;
 const secretQueryField = /^(?:api[-_]?key|key|access[-_]?token|token|authorization|signature|sig|secret|password|credential)$/i;
+const alibabaBeijingWorkspaceHost = /^([a-z\d](?:[a-z\d-]{0,61}[a-z\d])?)\.cn-beijing\.maas\.aliyuncs\.com$/i;
 
 function normalizedUrl(value: string): URL {
   let url: URL;
@@ -56,12 +57,24 @@ export function parseCustomApiUrl(value: string): CustomApiLocation {
   };
 }
 
-export function presetForApiLocation(location: CustomApiLocation, presets: AIProviderPreset[]): AIProviderPreset | null {
+function presetFieldsForApiLocation(location: CustomApiLocation, preset: AIProviderPreset): Record<string, string> | null {
   const normalizedBase = location.baseUrl.replace(/\/$/, '').toLowerCase();
+  if (preset.baseUrl.replace(/\/$/, '').toLowerCase() === normalizedBase && !(preset.requiredFields || []).length) {
+    return {};
+  }
+  if (preset.providerId !== 'alibaba' || !(preset.requiredFields || []).some((field) => field.id === 'workspaceId')) {
+    return null;
+  }
+  const url = new URL(location.baseUrl);
+  const workspace = url.hostname.match(alibabaBeijingWorkspaceHost)?.[1];
+  if (!workspace || url.pathname.replace(/\/+$/, '') !== '/compatible-mode/v1') return null;
+  return { workspaceId: workspace };
+}
+
+export function presetForApiLocation(location: CustomApiLocation, presets: AIProviderPreset[]): AIProviderPreset | null {
   return presets.find((preset) => (
-    preset.baseUrl.replace(/\/$/, '').toLowerCase() === normalizedBase
-    && !(preset.requiredFields || []).length
-    && capabilityOrder.every((capability) => preset.capabilities[capability])
+    capabilityOrder.every((capability) => preset.capabilities[capability])
+    && presetFieldsForApiLocation(location, preset) !== null
   )) || null;
 }
 
@@ -156,7 +169,17 @@ export function connectionFromKnownPreset(
 ): InferredCustomConnection {
   const now = new Date().toISOString();
   const capabilities = structuredClone(preset.capabilities);
-  if (capabilities.generation) capabilities.generation.path = location.generationPath;
+  const fields = presetFieldsForApiLocation(location, preset);
+  if (!fields) throw new Error('API 调用地址与已识别的完整方案不匹配');
+  const usesPresetBase = preset.baseUrl.replace(/\/$/, '').toLowerCase() !== location.baseUrl.replace(/\/$/, '').toLowerCase();
+  if (capabilities.generation && !usesPresetBase) capabilities.generation.path = location.generationPath;
+  if (capabilities.rerank?.urlTemplate) {
+    capabilities.rerank.url = capabilities.rerank.urlTemplate.replace(
+      '{workspaceId}',
+      encodeURIComponent(fields.workspaceId || ''),
+    );
+    delete capabilities.rerank.urlTemplate;
+  }
   return {
     connection: {
       id: existingId,
@@ -164,8 +187,8 @@ export function connectionFromKnownPreset(
       presetId: preset.id,
       label: preset.name,
       region: preset.region,
-      baseUrl: location.baseUrl,
-      fields: {},
+      baseUrl: usesPresetBase ? preset.baseUrl : location.baseUrl,
+      fields,
       capabilities,
       hasApiKey: false,
       createdAt: now,

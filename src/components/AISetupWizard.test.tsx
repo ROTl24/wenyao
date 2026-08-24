@@ -94,4 +94,23 @@ describe('AI 连接向导', () => {
     expect(screen.getByText('deepseek-ai/DeepSeek-V4-Pro')).toBeVisible();
     expect(screen.getByRole('button', { name: /确认并连接/ })).toBeDisabled();
   });
+
+  it('recognizes an Alibaba workspace URL as the browser-compatible complete preset without probing its model catalog', async () => {
+    const discoverModels = vi.spyOn(desktop.aiConfig, 'discoverModels');
+    render(<AISetupWizard catalog={catalog} status={unconfigured} onStatus={vi.fn()} onReady={vi.fn()} onClose={vi.fn()} />);
+
+    fireEvent.click(screen.getByRole('button', { name: /自定义 API/ }));
+    fireEvent.click(screen.getByRole('button', { name: '继续' }));
+    fireEvent.change(screen.getByLabelText('API 调用地址'), {
+      target: { value: 'https://llm-example123.cn-beijing.maas.aliyuncs.com/compatible-mode/v1' },
+    });
+    fireEvent.change(screen.getByLabelText('API Key'), { target: { value: 'alibaba-test-key' } });
+    fireEvent.click(screen.getByRole('button', { name: '识别 API' }));
+
+    expect(await screen.findByText('三项能力已自动识别')).toBeVisible();
+    expect(screen.getByText('qwen3.7-plus')).toBeVisible();
+    expect(screen.getByText('text-embedding-v4')).toBeVisible();
+    expect(screen.getByText('qwen3-rerank')).toBeVisible();
+    expect(discoverModels).not.toHaveBeenCalled();
+  });
 });

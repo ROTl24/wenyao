@@ -225,7 +225,7 @@ export function AISetupWizard({ catalog, status, onStatus, onReady, onClose }: P
             <label className="ai-setup-field">API 调用地址<input autoFocus value={apiUrl} onChange={(event) => { setApiUrl(event.target.value); setCustomResult(null); setError(''); }} placeholder="https://api.example.com/v1" /></label>
             <small className="ai-field-help">可粘贴 Base URL，也可直接粘贴以 /chat/completions 结尾的完整地址。</small>
             <label className="ai-setup-field">API Key<input type="password" autoComplete="off" autoCapitalize="none" spellCheck={false} value={apiKey} onChange={(event) => setApiKey(event.target.value)} placeholder={isWeb ? '仅在当前页面会话中使用，刷新即清除' : `粘贴后由${secretStorageName}加密保存`} /></label>
-            {!customResult ? <div className="ai-discovery-note"><Sparkles /><p><strong>先识别，不产生对话或建库费用</strong>这一步只读取服务提供的模型目录。识别完成后，你会先看到结果和数据发送范围。</p></div> : null}
+            {!customResult ? <div className="ai-discovery-note"><Sparkles /><p><strong>先识别，不产生对话或建库费用</strong>这一步只识别服务地址，必要时读取模型目录。识别完成后，你会先看到结果和数据发送范围。</p></div> : null}
             {customResult ? <div className="ai-detection-summary" aria-label="自动识别结果"><header><Check /><div><strong>{customResult.missing.length ? '已连接，仍需补充能力' : '三项能力已自动识别'}</strong><span>{customResult.connection.baseUrl}</span></div></header>{capabilityOrder.map((capability) => <div key={capability}><span>{customCapabilityLabel[capability]}</span><strong>{customResult.detected[capability] || '未识别'}</strong></div>)}</div> : null}
             {customResult && !customResult.missing.length ? <>
               <div className="ai-data-boundary">

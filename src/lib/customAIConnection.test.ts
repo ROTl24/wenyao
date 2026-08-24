@@ -7,6 +7,7 @@ import {
 } from './customAIConnection';
 import catalog from '../../config/ai-providers.json';
 import type { AIProviderCatalog } from '../types/desktop';
+import { validateWebConnection } from './webAI/security';
 
 describe('自定义 API 两字段解析', () => {
   it('accepts both a base URL and a complete chat-completions URL', () => {
@@ -37,6 +38,43 @@ describe('自定义 API 两字段解析', () => {
     const inferred = connectionFromKnownPreset(preset!, location, 'known-id');
     expect(inferred.missing).toEqual([]);
     expect(inferred.connection.capabilities.embedding?.model).toBe('Qwen/Qwen3-Embedding-4B');
+  });
+
+  it('maps an Alibaba Beijing workspace URL to browser-compatible generation, embedding, and rerank endpoints', () => {
+    const providerCatalog = catalog as unknown as AIProviderCatalog;
+    const location = parseCustomApiUrl('https://llm-example123.cn-beijing.maas.aliyuncs.com/compatible-mode/v1');
+    const preset = presetForApiLocation(location, providerCatalog.presets);
+    expect(preset?.id).toBe('alibaba-cn-quality');
+
+    const inferred = connectionFromKnownPreset(preset!, location, 'alibaba-id');
+
+    expect(inferred.missing).toEqual([]);
+    expect(inferred.connection).toMatchObject({
+      id: 'alibaba-id',
+      providerId: 'alibaba',
+      presetId: 'alibaba-cn-quality',
+      baseUrl: 'https://dashscope.aliyuncs.com/compatible-mode/v1',
+      fields: { workspaceId: 'llm-example123' },
+      capabilities: {
+        generation: { protocol: 'openai-chat', model: 'qwen3.7-plus' },
+        embedding: { protocol: 'openai-embeddings', model: 'text-embedding-v4' },
+        rerank: {
+          protocol: 'alibaba-rerank',
+          model: 'qwen3-rerank',
+          url: 'https://llm-example123.cn-beijing.maas.aliyuncs.com/compatible-api/v1/reranks',
+        },
+      },
+    });
+    expect(inferred.connection.capabilities.rerank?.urlTemplate).toBeUndefined();
+    expect(validateWebConnection(inferred.connection).endpoints).toEqual({
+      generation: 'https://dashscope.aliyuncs.com/compatible-mode/v1/chat/completions',
+      embedding: 'https://dashscope.aliyuncs.com/compatible-mode/v1/embeddings',
+      rerank: 'https://llm-example123.cn-beijing.maas.aliyuncs.com/compatible-api/v1/reranks',
+    });
+    expect(presetForApiLocation(
+      parseCustomApiUrl('https://llm-example123.cn-beijing.maas.aliyuncs.com.evil.example/compatible-mode/v1'),
+      providerCatalog.presets,
+    )).toBeNull();
   });
 
   it('classifies a generic model catalog into the three required capabilities', () => {
