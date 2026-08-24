@@ -43,7 +43,7 @@ describe('网页自定义 AI 模型发现', () => {
     });
   });
 
-  it('keeps an active chat stream alive beyond the JSON request deadline', async () => {
+  it('keeps a continuously active chat stream alive without a total deadline', async () => {
     vi.useFakeTimers();
     const usageRecords: unknown[] = [];
     const encoder = new TextEncoder();
@@ -52,13 +52,19 @@ describe('网页自定义 AI 模型发现', () => {
         start(controller) {
           const chunks = [
             'data: {"choices":[{"delta":{"reasoning_content":"分析中"},"finish_reason":null}]}\n\n',
-            'data: {"choices":[{"delta":{"content":"完整"},"finish_reason":null}]}\n\n',
-            'data: {"choices":[{"delta":{"content":"解读"},"finish_reason":"stop"}],"usage":{"prompt_tokens":120,"completion_tokens":80,"total_tokens":200}}\n\n',
+            'data: {"choices":[{"delta":{"reasoning_content":"继续分析"},"finish_reason":null}]}\n\n',
+            'data: {"choices":[{"delta":{"content":"持"},"finish_reason":null}]}\n\n',
+            'data: {"choices":[{"delta":{"content":"续"},"finish_reason":null}]}\n\n',
+            'data: {"choices":[{"delta":{"reasoning_content":"核对中"},"finish_reason":null}]}\n\n',
+            'data: {"choices":[{"delta":{"content":"输"},"finish_reason":null}]}\n\n',
+            'data: {"choices":[{"delta":{"content":"出"},"finish_reason":null}]}\n\n',
+            'data: {"choices":[{"delta":{"content":"完"},"finish_reason":null}]}\n\n',
+            'data: {"choices":[{"delta":{"content":"整"},"finish_reason":"stop"}],"usage":{"prompt_tokens":120,"completion_tokens":80,"total_tokens":200}}\n\n',
             'data: [DONE]\n\n',
           ];
           chunks.forEach((chunk, index) => {
             setTimeout(() => {
-              controller.enqueue(encoder.encode(chunk));
+              if (!init?.signal?.aborted) controller.enqueue(encoder.encode(chunk));
             }, 80_000 * (index + 1));
           });
           init?.signal?.addEventListener('abort', () => controller.error(init.signal?.reason), { once: true });
@@ -81,9 +87,9 @@ describe('网页自定义 AI 模型发现', () => {
     });
     const captured = pending.catch((error) => error);
 
-    await vi.advanceTimersByTimeAsync(320_000);
+    await vi.advanceTimersByTimeAsync(800_000);
 
-    await expect(captured).resolves.toMatchObject({ content: '完整解读' });
+    await expect(captured).resolves.toMatchObject({ content: '持续输出完整' });
     expect(fetchMock).toHaveBeenCalledTimes(1);
     const request = fetchMock.mock.calls[0][1] as RequestInit;
     expect(JSON.parse(String(request.body))).toMatchObject({
@@ -94,6 +100,48 @@ describe('网页自定义 AI 模型发现', () => {
     expect(usageRecords).toEqual([expect.objectContaining({
       capability: 'generation', model: 'chat-model', totalTokens: 200,
     })]);
+  });
+
+  it('allows a complex analysis stream to take two minutes before its first chunk', async () => {
+    vi.useFakeTimers();
+    const encoder = new TextEncoder();
+    const fetchMock = vi.fn((_url: string | URL | Request, init?: RequestInit) => {
+      const body = new ReadableStream<Uint8Array>({
+        start(controller) {
+          const chunks = [
+            'data: {"choices":[{"delta":{"content":"完整"},"finish_reason":null}]}\n\n',
+            'data: {"choices":[{"delta":{"content":"解读"},"finish_reason":"stop"}]}\n\n',
+            'data: [DONE]\n\n',
+          ];
+          chunks.forEach((chunk, index) => {
+            setTimeout(() => {
+              if (!init?.signal?.aborted) controller.enqueue(encoder.encode(chunk));
+            }, 120_000 + (index * 10_000));
+          });
+          init?.signal?.addEventListener('abort', () => controller.error(init.signal?.reason), { once: true });
+        },
+      });
+      return Promise.resolve(new Response(body, {
+        status: 200,
+        headers: { 'content-type': 'text/event-stream' },
+      }));
+    });
+    vi.stubGlobal('fetch', fetchMock);
+    const connection: AIConnection = {
+      id: 'custom', providerId: 'custom', presetId: null, label: '自定义', region: '',
+      baseUrl: 'https://api.example.com/v1', fields: {}, hasApiKey: true,
+      capabilities: { generation: { protocol: 'openai-chat', model: 'chat-model' } },
+      createdAt: '', updatedAt: '',
+    };
+    const pending = createWebProvider(connection, 'secret').chat({
+      messages: [{ role: 'user', content: '生成完整解读' }],
+    });
+    const captured = pending.catch((error) => error);
+
+    await vi.advanceTimersByTimeAsync(140_000);
+
+    await expect(captured).resolves.toMatchObject({ content: '完整解读' });
+    expect(fetchMock).toHaveBeenCalledTimes(1);
   });
 
   it('rejects an incomplete chat stream without retrying the billable request', async () => {

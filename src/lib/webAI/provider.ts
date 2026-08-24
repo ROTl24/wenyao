@@ -11,9 +11,8 @@ interface UsageRecord {
 
 const MAX_RESPONSE_BYTES = 4 * 1024 * 1024;
 const JSON_REQUEST_TIMEOUT_MS = 90_000;
-const STREAM_CONNECT_TIMEOUT_MS = 90_000;
+const STREAM_CONNECT_TIMEOUT_MS = 3 * 60_000;
 const STREAM_IDLE_TIMEOUT_MS = 90_000;
-const STREAM_TOTAL_TIMEOUT_MS = 10 * 60_000;
 
 function usage(value: unknown): Omit<UsageRecord, 'capability' | 'model'> | null {
   if (!value || typeof value !== 'object') return null;
@@ -82,7 +81,6 @@ function streamSignal(outer?: AbortSignal): { signal: AbortSignal; receivedChunk
   const controller = new AbortController();
   const timeout = (message: string) => controller.abort(new DOMException(message, 'TimeoutError'));
   const connectTimer = setTimeout(() => timeout('AI stream did not start in time'), STREAM_CONNECT_TIMEOUT_MS);
-  const totalTimer = setTimeout(() => timeout('AI stream exceeded the total deadline'), STREAM_TOTAL_TIMEOUT_MS);
   let idleTimer: ReturnType<typeof setTimeout> | null = null;
   const abort = () => controller.abort(outer?.reason);
   if (outer?.aborted) abort();
@@ -96,7 +94,6 @@ function streamSignal(outer?: AbortSignal): { signal: AbortSignal; receivedChunk
     },
     dispose() {
       clearTimeout(connectTimer);
-      clearTimeout(totalTimer);
       if (idleTimer) clearTimeout(idleTimer);
       outer?.removeEventListener('abort', abort);
     },
