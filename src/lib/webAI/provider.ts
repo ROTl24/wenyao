@@ -10,7 +10,10 @@ interface UsageRecord {
 }
 
 const MAX_RESPONSE_BYTES = 4 * 1024 * 1024;
-const REQUEST_TIMEOUT_MS = 90_000;
+const JSON_REQUEST_TIMEOUT_MS = 90_000;
+const STREAM_CONNECT_TIMEOUT_MS = 90_000;
+const STREAM_IDLE_TIMEOUT_MS = 90_000;
+const STREAM_TOTAL_TIMEOUT_MS = 10 * 60_000;
 
 function usage(value: unknown): Omit<UsageRecord, 'capability' | 'model'> | null {
   if (!value || typeof value !== 'object') return null;
@@ -23,7 +26,7 @@ function usage(value: unknown): Omit<UsageRecord, 'capability' | 'model'> | null
     : null;
 }
 
-async function boundedText(response: Response): Promise<string> {
+async function boundedText(response: Response, onChunk: () => void = () => {}): Promise<string> {
   const declared = Number(response.headers.get('content-length') || 0);
   if (declared > MAX_RESPONSE_BYTES) throw new Error('AI 服务响应超过 4 MB 安全上限。');
   if (!response.body) {
@@ -38,6 +41,7 @@ async function boundedText(response: Response): Promise<string> {
     const { value, done } = await reader.read();
     if (done) break;
     if (!value) continue;
+    onChunk();
     received += value.byteLength;
     if (received > MAX_RESPONSE_BYTES) {
       await reader.cancel();
@@ -61,9 +65,10 @@ function providerFailure(status: number): WebAIError {
 
 function combinedSignal(outer?: AbortSignal): { signal: AbortSignal; dispose(): void } {
   const controller = new AbortController();
-  const timer = setTimeout(() => controller.abort(new DOMException('Timeout', 'TimeoutError')), REQUEST_TIMEOUT_MS);
+  const timer = setTimeout(() => controller.abort(new DOMException('Timeout', 'TimeoutError')), JSON_REQUEST_TIMEOUT_MS);
   const abort = () => controller.abort(outer?.reason);
-  outer?.addEventListener('abort', abort, { once: true });
+  if (outer?.aborted) abort();
+  else outer?.addEventListener('abort', abort, { once: true });
   return {
     signal: controller.signal,
     dispose() {
@@ -71,6 +76,164 @@ function combinedSignal(outer?: AbortSignal): { signal: AbortSignal; dispose(): 
       outer?.removeEventListener('abort', abort);
     },
   };
+}
+
+function streamSignal(outer?: AbortSignal): { signal: AbortSignal; receivedChunk(): void; dispose(): void } {
+  const controller = new AbortController();
+  const timeout = (message: string) => controller.abort(new DOMException(message, 'TimeoutError'));
+  const connectTimer = setTimeout(() => timeout('AI stream did not start in time'), STREAM_CONNECT_TIMEOUT_MS);
+  const totalTimer = setTimeout(() => timeout('AI stream exceeded the total deadline'), STREAM_TOTAL_TIMEOUT_MS);
+  let idleTimer: ReturnType<typeof setTimeout> | null = null;
+  const abort = () => controller.abort(outer?.reason);
+  if (outer?.aborted) abort();
+  else outer?.addEventListener('abort', abort, { once: true });
+  return {
+    signal: controller.signal,
+    receivedChunk() {
+      clearTimeout(connectTimer);
+      if (idleTimer) clearTimeout(idleTimer);
+      idleTimer = setTimeout(() => timeout('AI stream stopped producing data'), STREAM_IDLE_TIMEOUT_MS);
+    },
+    dispose() {
+      clearTimeout(connectTimer);
+      clearTimeout(totalTimer);
+      if (idleTimer) clearTimeout(idleTimer);
+      outer?.removeEventListener('abort', abort);
+    },
+  };
+}
+
+interface StreamedChatState {
+  content: string;
+  usageValue?: unknown;
+  completed: boolean;
+  finishReason: string;
+}
+
+function consumeStreamEvent(event: string, state: StreamedChatState): void {
+  const data = event.replace(/\r\n/g, '\n').split('\n')
+    .filter((line) => line.startsWith('data:'))
+    .map((line) => line.slice(5).trimStart())
+    .join('\n')
+    .trim();
+  if (!data) return;
+  if (data === '[DONE]') {
+    state.completed = true;
+    return;
+  }
+  let chunk: Record<string, any>;
+  try {
+    chunk = JSON.parse(data) as Record<string, any>;
+  } catch {
+    throw new WebAIError({ code: 'WEB_AI_INVALID_RESPONSE', message: 'AI 服务返回了无法解析的流式数据。', dataSafe: true, nextAction: '请确认自定义服务兼容 OpenAI Chat 流式协议。' });
+  }
+  const choice = chunk.choices?.[0];
+  const delta = choice?.delta?.content;
+  if (typeof delta === 'string') state.content += delta;
+  if (typeof choice?.finish_reason === 'string' && choice.finish_reason) state.finishReason = choice.finish_reason;
+  if (chunk.usage) state.usageValue = chunk.usage;
+}
+
+function streamedChatResult(state: StreamedChatState): Record<string, any> {
+  if (!state.completed && !state.finishReason) {
+    throw new WebAIError({ code: 'WEB_AI_STREAM_INCOMPLETE', message: 'AI 服务在解读完成前中断了流式响应。', dataSafe: true, nextAction: '请先到服务商控制台确认用量，再决定是否手动重试；问爻不会自动重试。' });
+  }
+  return {
+    choices: [{ message: { content: state.content }, finish_reason: state.finishReason || null }],
+    ...(state.usageValue ? { usage: state.usageValue } : {}),
+  };
+}
+
+function parseStreamedChat(text: string): Record<string, any> {
+  const state: StreamedChatState = { content: '', completed: false, finishReason: '' };
+  text.replace(/\r\n/g, '\n').split(/\n\n+/).forEach((event) => consumeStreamEvent(event, state));
+  return streamedChatResult(state);
+}
+
+async function readStreamedChat(response: Response, onChunk: () => void): Promise<Record<string, any>> {
+  const declared = Number(response.headers.get('content-length') || 0);
+  if (declared > MAX_RESPONSE_BYTES) throw new Error('AI 服务响应超过 4 MB 安全上限。');
+  if (!response.body) return parseStreamedChat(await response.text());
+  const reader = response.body.getReader();
+  const decoder = new TextDecoder();
+  const state: StreamedChatState = { content: '', completed: false, finishReason: '' };
+  let buffer = '';
+  let received = 0;
+  while (true) {
+    const { value, done } = await reader.read();
+    if (done) break;
+    if (!value) continue;
+    onChunk();
+    received += value.byteLength;
+    if (received > MAX_RESPONSE_BYTES) {
+      await reader.cancel();
+      throw new Error('AI 服务响应超过 4 MB 安全上限。');
+    }
+    buffer += decoder.decode(value, { stream: true });
+    while (true) {
+      const boundary = /\r?\n\r?\n/.exec(buffer);
+      if (!boundary || boundary.index === undefined) break;
+      const event = buffer.slice(0, boundary.index);
+      buffer = buffer.slice(boundary.index + boundary[0].length);
+      consumeStreamEvent(event, state);
+      if (state.completed) {
+        await reader.cancel();
+        return streamedChatResult(state);
+      }
+    }
+  }
+  buffer += decoder.decode();
+  if (buffer.trim()) consumeStreamEvent(buffer, state);
+  return streamedChatResult(state);
+}
+
+async function streamChatRequest(
+  url: string,
+  apiKey: string,
+  body: unknown,
+  options: { signal?: AbortSignal; fetchImpl?: typeof fetch } = {},
+): Promise<Record<string, any>> {
+  const timeout = streamSignal(options.signal);
+  try {
+    const response = await (options.fetchImpl || fetch)(url, {
+      method: 'POST',
+      mode: 'cors',
+      credentials: 'omit',
+      cache: 'no-store',
+      redirect: 'error',
+      referrerPolicy: 'no-referrer',
+      headers: {
+        accept: 'text/event-stream',
+        authorization: `Bearer ${apiKey}`,
+        'content-type': 'application/json',
+      },
+      body: JSON.stringify(body),
+      signal: timeout.signal,
+    });
+    if (!response.ok) {
+      await boundedText(response, timeout.receivedChunk);
+      throw providerFailure(response.status);
+    }
+    if (response.headers.get('content-type')?.includes('text/event-stream')) {
+      return await readStreamedChat(response, timeout.receivedChunk);
+    }
+    const text = await boundedText(response, timeout.receivedChunk);
+    if (text.trimStart().startsWith('data:')) return parseStreamedChat(text);
+    try {
+      return text ? JSON.parse(text) as Record<string, any> : {};
+    } catch {
+      throw new WebAIError({ code: 'WEB_AI_INVALID_RESPONSE', message: 'AI 服务返回了无法解析的数据。', dataSafe: true, nextAction: '请确认自定义服务兼容所选协议。' });
+    }
+  } catch (error) {
+    if (error instanceof WebAIError) throw error;
+    if (timeout.signal.aborted) throw timeout.signal.reason instanceof DOMException ? timeout.signal.reason : new DOMException('Aborted', 'AbortError');
+    const detail = toDesktopError(error, 'WEB_AI_NETWORK_FAILED');
+    detail.message = '无法连接 AI 服务。';
+    detail.nextAction = '请确认服务商允许浏览器 CORS 访问，且网络和域名均正常；问爻不会改用公共代理。';
+    throw new WebAIError(detail);
+  } finally {
+    timeout.dispose();
+  }
 }
 
 export async function secureJsonRequest(
@@ -152,11 +315,13 @@ export function createWebProvider(
     origins: validated.origins,
     async chat({ messages, signal, maxTokens = 8192, temperature = 0 }: { messages: Array<{ role: string; content: string }>; signal?: AbortSignal; maxTokens?: number; temperature?: number }) {
       const definition = validated.connection.capabilities.generation!;
-      const json = await secureJsonRequest(validated.endpoints.generation!, apiKey, {
+      const json = await streamChatRequest(validated.endpoints.generation!, apiKey, {
         model: definition.model,
         messages,
         temperature,
         max_tokens: maxTokens,
+        stream: true,
+        stream_options: { include_usage: true },
       }, { signal });
       recordUsage('generation', definition.model, json);
       const content = json.choices?.[0]?.message?.content;

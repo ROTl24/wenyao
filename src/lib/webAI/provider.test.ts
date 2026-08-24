@@ -3,7 +3,10 @@ import { createWebProvider, discoverWebModels } from './provider';
 import type { AIConnection } from '../../types/desktop';
 
 describe('网页自定义 AI 模型发现', () => {
-  afterEach(() => vi.unstubAllGlobals());
+  afterEach(() => {
+    vi.useRealTimers();
+    vi.unstubAllGlobals();
+  });
 
   it('reads model IDs through a credentialed GET request', async () => {
     const fetchMock = vi.fn().mockResolvedValue(new Response(JSON.stringify({
@@ -38,5 +41,115 @@ describe('网页自定义 AI 模型发现', () => {
     expect(JSON.parse(String(request.body))).toEqual({
       model: 'embed-model', input: ['测试'], encoding_format: 'float',
     });
+  });
+
+  it('keeps an active chat stream alive beyond the JSON request deadline', async () => {
+    vi.useFakeTimers();
+    const usageRecords: unknown[] = [];
+    const encoder = new TextEncoder();
+    const fetchMock = vi.fn((_url: string | URL | Request, init?: RequestInit) => {
+      const body = new ReadableStream<Uint8Array>({
+        start(controller) {
+          const chunks = [
+            'data: {"choices":[{"delta":{"reasoning_content":"分析中"},"finish_reason":null}]}\n\n',
+            'data: {"choices":[{"delta":{"content":"完整"},"finish_reason":null}]}\n\n',
+            'data: {"choices":[{"delta":{"content":"解读"},"finish_reason":"stop"}],"usage":{"prompt_tokens":120,"completion_tokens":80,"total_tokens":200}}\n\n',
+            'data: [DONE]\n\n',
+          ];
+          chunks.forEach((chunk, index) => {
+            setTimeout(() => {
+              controller.enqueue(encoder.encode(chunk));
+            }, 80_000 * (index + 1));
+          });
+          init?.signal?.addEventListener('abort', () => controller.error(init.signal?.reason), { once: true });
+        },
+      });
+      return Promise.resolve(new Response(body, {
+        status: 200,
+        headers: { 'content-type': 'text/event-stream' },
+      }));
+    });
+    vi.stubGlobal('fetch', fetchMock);
+    const connection: AIConnection = {
+      id: 'custom', providerId: 'custom', presetId: null, label: '自定义', region: '',
+      baseUrl: 'https://api.example.com/v1', fields: {}, hasApiKey: true,
+      capabilities: { generation: { protocol: 'openai-chat', model: 'chat-model' } },
+      createdAt: '', updatedAt: '',
+    };
+    const pending = createWebProvider(connection, 'secret', (item) => usageRecords.push(item)).chat({
+      messages: [{ role: 'user', content: '生成完整解读' }],
+    });
+    const captured = pending.catch((error) => error);
+
+    await vi.advanceTimersByTimeAsync(320_000);
+
+    await expect(captured).resolves.toMatchObject({ content: '完整解读' });
+    expect(fetchMock).toHaveBeenCalledTimes(1);
+    const request = fetchMock.mock.calls[0][1] as RequestInit;
+    expect(JSON.parse(String(request.body))).toMatchObject({
+      model: 'chat-model',
+      stream: true,
+      stream_options: { include_usage: true },
+    });
+    expect(usageRecords).toEqual([expect.objectContaining({
+      capability: 'generation', model: 'chat-model', totalTokens: 200,
+    })]);
+  });
+
+  it('rejects an incomplete chat stream without retrying the billable request', async () => {
+    const fetchMock = vi.fn().mockResolvedValue(new Response(
+      'data: {"choices":[{"delta":{"content":"未完成"},"finish_reason":null}]}\n\n',
+      { status: 200, headers: { 'content-type': 'text/event-stream' } },
+    ));
+    vi.stubGlobal('fetch', fetchMock);
+    const connection: AIConnection = {
+      id: 'custom', providerId: 'custom', presetId: null, label: '自定义', region: '',
+      baseUrl: 'https://api.example.com/v1', fields: {}, hasApiKey: true,
+      capabilities: { generation: { protocol: 'openai-chat', model: 'chat-model' } },
+      createdAt: '', updatedAt: '',
+    };
+
+    await expect(createWebProvider(connection, 'secret').chat({
+      messages: [{ role: 'user', content: '生成完整解读' }],
+    })).rejects.toMatchObject({
+      detail: {
+        code: 'WEB_AI_STREAM_INCOMPLETE',
+        nextAction: expect.stringContaining('问爻不会自动重试'),
+      },
+    });
+    expect(fetchMock).toHaveBeenCalledTimes(1);
+  });
+
+  it('times out a stalled chat stream without retrying the billable request', async () => {
+    vi.useFakeTimers();
+    const encoder = new TextEncoder();
+    const fetchMock = vi.fn((_url: string | URL | Request, init?: RequestInit) => {
+      const body = new ReadableStream<Uint8Array>({
+        start(controller) {
+          controller.enqueue(encoder.encode('data: {"choices":[{"delta":{"content":"开始"},"finish_reason":null}]}\n\n'));
+          init?.signal?.addEventListener('abort', () => controller.error(init.signal?.reason), { once: true });
+        },
+      });
+      return Promise.resolve(new Response(body, {
+        status: 200,
+        headers: { 'content-type': 'text/event-stream' },
+      }));
+    });
+    vi.stubGlobal('fetch', fetchMock);
+    const connection: AIConnection = {
+      id: 'custom', providerId: 'custom', presetId: null, label: '自定义', region: '',
+      baseUrl: 'https://api.example.com/v1', fields: {}, hasApiKey: true,
+      capabilities: { generation: { protocol: 'openai-chat', model: 'chat-model' } },
+      createdAt: '', updatedAt: '',
+    };
+    const pending = createWebProvider(connection, 'secret').chat({
+      messages: [{ role: 'user', content: '生成完整解读' }],
+    });
+    const captured = pending.catch((error) => error);
+
+    await vi.advanceTimersByTimeAsync(90_000);
+
+    await expect(captured).resolves.toMatchObject({ name: 'TimeoutError' });
+    expect(fetchMock).toHaveBeenCalledTimes(1);
   });
 });
