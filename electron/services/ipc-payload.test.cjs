@@ -93,7 +93,7 @@ test('sanitizer retains an explicitly supplied physical visualSeed so validation
   assert.equal(Object.hasOwn(sanitized.lines[0].coin, 'visualSeed'), true);
 });
 
-test('preload independently sanitizes session save payloads', async () => {
+test('sandboxed preload exposes the desktop bridge and independently sanitizes session payloads', async () => {
   const calls = [];
   const listeners = new Map();
   let exposed;
@@ -133,14 +133,13 @@ test('preload independently sanitizes session save payloads', async () => {
     preloadSource.matchAll(/require\((['"])(.*?)\1\)/g),
     (match) => match[2],
   );
-  assert.deepEqual(requiredModules, [
-    'electron',
-    './services/ipc-payload.cjs',
-    './services/runtime-profile.cjs',
-  ]);
+  assert.deepEqual(requiredModules, ['electron']);
   delete require.cache[preloadPath];
   Module._load = function load(request, parent, isMain) {
     if (request === 'electron') return electron;
+    if (parent?.filename === preloadPath) {
+      throw new Error(`Sandboxed preload cannot load ${request}`);
+    }
     return originalLoad.call(this, request, parent, isMain);
   };
   try {
