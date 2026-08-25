@@ -25,4 +25,5 @@ Windows 与 macOS 共用的预加载入口能够在沙箱限制下暴露真实 E
 - `npm.cmd test`：35 个 Vitest 文件、222 项测试和 120 项 Electron 服务测试通过。
 - `npm.cmd run typecheck`：通过。
 - `npm.cmd run build:renderer`：生产渲染构建通过。
-- 当前 Windows 环境未生成或安装新的 Windows 安装包，也无法验证 macOS DMG 的实际启动；平台发行产物仍需在对应发布流程中验收。
+- `npm.cmd run build:windows` 与 `npm.cmd run verify:release`：生成并验收 151,235,519 字节的 `WenYao-0.5.1-Setup.exe`、blockmap、更新元数据与 SHA-512；打包后的 `app.asar` 预加载入口只有一个 `electron` 模块依赖，并包含运行时与 AI 配置桥接。
+- Windows 安装包未安装、未签名且未发布。macOS DMG 必须由 macOS 构建机生成，并继续通过通用二进制、ad-hoc 签名、Gatekeeper 预期拒绝和双架构启动验收。
