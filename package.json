@@ -13,6 +13,7 @@
     "test:unit": "vitest run",
     "test:electron": "node --test electron/services/*.test.cjs",
     "test:watch": "vitest",
+    "build:classics": "node scripts/build-classics.mjs",
     "build:corpus": "node scripts/build-corpus.mjs",
     "build:knowledge": "node scripts/build-knowledge.mjs",
     "eval:retrieval": "node scripts/evaluate-retrieval.cjs",

@@ -17,7 +17,7 @@ import { UpdatePrompt, type PromptUpdateState } from './components/UpdatePrompt'
 import { desktop } from './lib/desktop';
 import { currentAlmanacSelection, type AlmanacSelection } from './lib/almanac';
 import { isAIUsable } from './lib/aiStatus';
-import { randomToss, upgradePlate } from './lib/divination';
+import { randomToss } from './lib/divination';
 import { generateRandomCasting } from './lib/casting';
 import { isValidQuestion } from './lib/question';
 import {
@@ -203,10 +203,7 @@ export function App() {
 
   useEffect(() => {
     void desktop.sessions.list().then((sessions) => {
-      const normalized = sessions.map((stored) => {
-        const saved = normalizeSession(stored);
-        return saved.plate ? { ...saved, plate: upgradePlate(saved.plate) } : saved;
-      });
+      const normalized = sessions.map(normalizeSession);
       setHistory((current) => {
         const merged = new Map(normalized.map((saved) => [saved.id, saved]));
         for (const saved of current) {
@@ -633,8 +630,7 @@ export function App() {
     if (physicalDraft?.lines.length && !window.confirm('线下起卦尚未保存，确定放弃并打开这条历史记录吗？')) {
       return;
     }
-    const normalized = normalizeSession(saved);
-    let next = normalized.plate ? { ...normalized, plate: upgradePlate(normalized.plate) } : normalized;
+    let next = normalizeSession(saved);
     if (next.status === 'casting' && next.castingMethod !== 'digital') {
       console.error('Refused to resume an incomplete physical casting session');
       return;

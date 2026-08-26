@@ -32,6 +32,27 @@ describe('起卦会话', () => {
     }
   });
 
+  it('rebuilds a missing historical plate only from a complete replayable line sequence', () => {
+    let complete = createSession('可重放历史', 'other', new Date('2026-07-11T12:00:00+08:00'));
+    const values = [6, 7, 8, 9, 7, 8] as const;
+    for (const [index, value] of values.entries()) {
+      const faces = value === 6 ? ['text', 'text', 'text'] as const
+        : value === 7 ? ['text', 'text', 'reverse'] as const
+          : value === 8 ? ['text', 'reverse', 'reverse'] as const
+            : ['reverse', 'reverse', 'reverse'] as const;
+      complete = confirmCurrentToss(prepareToss(complete, createToss(faces), `history-${index}`));
+    }
+    const originalPlate = complete.plate;
+    const rebuilt = normalizeSession({ ...complete, plate: undefined });
+
+    expect(rebuilt.plate?.baseHexagram.name).toBe(originalPlate?.baseHexagram.name);
+    expect(rebuilt.plate?.changedHexagram.name).toBe(originalPlate?.changedHexagram.name);
+    expect(rebuilt.plate?.movingLines).toEqual([1, 4]);
+
+    const incomplete = normalizeSession({ ...complete, plate: undefined, lines: complete.lines.slice(0, 5) });
+    expect(incomplete.plate).toBeUndefined();
+  });
+
   it('reuses an unconfirmed toss instead of rerolling', () => {
     const session = createSession('近期事业是否会出现新的发展机会？', 'career', new Date('2026-07-11T12:00:00+08:00'));
     const toss = createToss(['text', 'text', 'reverse']);

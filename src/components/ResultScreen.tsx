@@ -14,6 +14,7 @@ import { desktop } from '../lib/desktop';
 import './ResultScreen.css';
 import { StemBranchText } from './StemBranchText';
 import { FeedbackControl } from './FeedbackControl';
+import { PlateCopyControl } from './PlateCopyControl';
 
 interface Props {
   session: DivinationSession;
@@ -198,7 +199,10 @@ export function ResultScreen({ session, evidence, retrievalDiagnostics, aiStatus
             className="plate-column result-leaf"
             data-folio="卷一"
           >
-            <h2 className="section-title" id="plate-heading"><i aria-hidden="true" />排盘</h2>
+            <div className="plate-heading">
+              <h2 className="section-title" id="plate-heading"><i aria-hidden="true" />排盘</h2>
+              <PlateCopyControl session={session} />
+            </div>
             <div className="calendar-board" aria-label="四柱历法">
               <div className="calendar-grid calendar-grid--header">
                 <span>历法</span>

@@ -29,6 +29,7 @@
 - 检索以 BM25 和用户问题为主；已配置的向量与重排各调用一次，远程检索失败时明确显示降级状态并继续生成，不追加付费重试
 - API 密钥使用 Windows DPAPI 或 macOS 钥匙串加密，历史、古籍、结构化索引和向量索引保存在本机
 - 历史搜索、生成时证据快照、四种来源标记、版本化成卦依据、旧会话无损读取、恢复和二次确认删除
+- 排盘可一键复制为纯文本、Markdown 或 JSON；三种格式共享同一份结构化事实、相关《周易》经文和外部模型解卦约束
 - 主报告与每条追问的独立反馈；默认本地保存，明确授权后只上传脱敏技术快照，原问题和回答需要逐次单独选择
 - Windows NSIS 安装包与 macOS Intel/Apple Silicon 通用 DMG
 - 可安装的手机 PWA：四种起卦、排盘、日历、历史与内置古籍可在首次完整加载后离线使用
@@ -127,6 +128,8 @@ npm run verify:macos-release
 仓库的 `Release desktop applications` 工作流可以从 GitHub Actions 手动运行。手动运行只生成经过双架构验收的 Windows 与 macOS 候选安装包，不创建公开 Release；只有与 `package.json` 版本一致的 `v*.*.*` 标签才会进入正式发布任务。
 
 ## 古籍证据包
+
+排盘复制使用独立的六十四卦卦辞、三百八十四爻爻辞数据。经文来自固定修订的维基文库《周易》页面，数据内保存逐卦修订号以保证重建可复现；来源与转录许可见 [`resources/classics/NOTICE.md`](resources/classics/NOTICE.md)，可运行 `npm.cmd run build:classics` 按固定修订重新生成。
 
 `resources/corpus.json` 已收入用户提供的《易隐》《卜筮正宗》《易冒》《火珠林》《增删卜易》五本纯文本古籍，共 1263 条原文证据。每条证据保留书名、章节标题和原始文本行号；`resources/corpus-manifest.json` 记录原文件名、SHA-256、编码、行数和条目数，便于复核与重建。
 
