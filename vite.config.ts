@@ -1,16 +1,28 @@
 import react from '@vitejs/plugin-react';
+import commonjs from 'vite-plugin-commonjs';
 import { defineConfig } from 'vitest/config';
 import { VitePWA } from 'vite-plugin-pwa';
 
 const maximumFileSizeToCacheInBytes = 10 * 1024 * 1024;
+const localCommonJSModules = [/electron[\\/]services/, /shared[\\/].*\.cjs/];
+const browserCommonJS = Object.assign(commonjs({
+  filter(id) {
+    const cleanId = id.split('?', 1)[0];
+    return localCommonJSModules.some((pattern) => pattern.test(cleanId));
+  },
+}), { apply: 'serve' as const });
 
 export default defineConfig({
+  resolve: {
+    extensions: ['.mjs', '.js', '.mts', '.ts', '.jsx', '.tsx', '.json', '.cjs'],
+  },
   build: {
     commonjsOptions: {
-      include: [/electron[\\/]services/, /shared[\\/]retrieval-core\.cjs/, /node_modules/],
+      include: [...localCommonJSModules, /node_modules/],
     },
   },
   plugins: [
+    browserCommonJS,
     react(),
     VitePWA({
       injectRegister: null,
