@@ -5,6 +5,7 @@ import type { WebAICommand, WebAIResponse } from './protocol';
 
 const posted: Array<WebAIResponse | { event: 'status'; status: unknown }> = [];
 const calls = { generation: 0, embedding: 0, rerank: 0, bundled: 0 };
+const generationBodies: Array<Record<string, unknown>> = [];
 let sequence = 0;
 
 function providerResponse(value: unknown) {
@@ -45,7 +46,17 @@ describe('PWA 隔离 Worker 的可选能力链路', () => {
       const body = JSON.parse(String(init?.body || '{}'));
       if (url.endsWith('/chat/completions')) {
         calls.generation += 1;
-        return providerResponse({ choices: [{ message: { content: '## 模拟解读' } }] });
+        generationBodies.push(body);
+        const deepSeek = new URL(url).hostname === 'api.deepseek.com';
+        const thinkingDisabled = (body.thinking as { type?: string } | undefined)?.type === 'disabled';
+        return providerResponse({
+          choices: [{
+            finish_reason: deepSeek && !thinkingDisabled ? 'length' : 'stop',
+            message: deepSeek && !thinkingDisabled
+              ? { content: '', reasoning_content: '正在思考如何回答' }
+              : { content: '## 模拟解读' },
+          }],
+        });
       }
       if (url.endsWith('/embeddings')) {
         calls.embedding += 1;
@@ -61,6 +72,7 @@ describe('PWA 隔离 Worker 的可选能力链路', () => {
   beforeEach(async () => {
     posted.length = 0;
     calls.generation = 0; calls.embedding = 0; calls.rerank = 0; calls.bundled = 0;
+    generationBodies.length = 0;
     await call('clear');
     posted.length = 0;
   });
@@ -94,5 +106,23 @@ describe('PWA 隔离 Worker 的可选能力链路', () => {
     const reranked = await call<{ diagnostics: { vectorUsed: boolean; rerankUsed: boolean } }>('search', { query: '事业', domainTerms: ['官鬼'] });
     expect(reranked.diagnostics).toMatchObject({ vectorUsed: true, rerankUsed: true });
     expect(calls.rerank).toBe(2);
+  });
+
+  it('DeepSeek 最小测试关闭默认思考模式并且只发一次请求', async () => {
+    const result = await call<{ ok: boolean }>('testCapability', {
+      capability: 'generation',
+      apiUrl: 'https://api.deepseek.com',
+      model: 'deepseek-v4-flash',
+      apiKey: 'session-key',
+      consentAccepted: true,
+      webSecurity: { confirmedOrigins: ['https://api.deepseek.com'] },
+    });
+
+    expect(result.ok).toBe(true);
+    expect(calls.generation).toBe(1);
+    expect(generationBodies[0]).toMatchObject({
+      max_tokens: 16,
+      thinking: { type: 'disabled' },
+    });
   });
 });

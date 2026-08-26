@@ -182,7 +182,7 @@ function createProviderClient({ connection, apiKey = '', fetchImpl = fetch, usag
     return Array.isArray(json.data) ? json.data.map((item) => String(item.id || '')).filter(Boolean) : [];
   }
 
-  async function chat({ messages, signal, maxTokens = 8192, temperature = 0 }) {
+  async function chat({ messages, signal, maxTokens = 8192, temperature = 0, thinking }) {
     const definition = connection.capabilities?.generation;
     if (!definition || definition.protocol !== 'openai-chat') throw new Error(`${label}未配置兼容的解读能力`);
     const json = await requestJson({
@@ -196,6 +196,7 @@ function createProviderClient({ connection, apiKey = '', fetchImpl = fetch, usag
         messages,
         temperature,
         max_tokens: maxTokens,
+        ...(thinking === undefined ? {} : { thinking: { type: thinking ? 'enabled' : 'disabled' } }),
       },
     });
     record('generation', definition.model, json);

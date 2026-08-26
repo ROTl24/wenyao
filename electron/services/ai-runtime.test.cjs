@@ -185,6 +185,45 @@ test('生成、向量和重排最小测试失败都不会自动重试', async ()
   }
 });
 
+test('DeepSeek 最小测试关闭默认思考模式并在极短预算内读取最终正文', async () => {
+  let requestBody = null;
+  let requests = 0;
+  const { runtime } = runtimeFixture({
+    secretStore: {
+      provider: 'test',
+      name: '测试安全存储',
+      encrypt: (value) => `encrypted:${value}`,
+      decrypt: (value) => String(value).replace(/^encrypted:/, ''),
+    },
+    fetchImpl: async (_url, options = {}) => {
+      requests += 1;
+      requestBody = JSON.parse(options.body || '{}');
+      const thinkingDisabled = requestBody.thinking?.type === 'disabled';
+      return json(200, {
+        choices: [{
+          finish_reason: thinkingDisabled ? 'stop' : 'length',
+          message: thinkingDisabled
+            ? { content: '连接成功' }
+            : { content: '', reasoning_content: '正在思考如何回答' },
+        }],
+      });
+    },
+  });
+
+  const result = await runtime.testCapability({
+    capability: 'generation',
+    apiUrl: 'https://api.deepseek.com',
+    model: 'deepseek-v4-flash',
+    apiKey: 'session-key',
+    consentAccepted: true,
+  });
+
+  assert.equal(result.ok, true, JSON.stringify(result));
+  assert.equal(requests, 1);
+  assert.equal(requestBody.max_tokens, 16);
+  assert.deepEqual(requestBody.thinking, { type: 'disabled' });
+});
+
 test('没有向量模型时用户古籍参与本地检索且远程建库被禁止', async () => {
   const root = fs.mkdtempSync(path.join(os.tmpdir(), 'wenyao-ai-local-book-'));
   const library = new CorpusLibrary({

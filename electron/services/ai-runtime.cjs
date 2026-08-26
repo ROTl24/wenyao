@@ -12,6 +12,7 @@ const {
 const {
   capabilityConnection,
   filterModels,
+  generationProbeOptions,
   normalizeCapabilityLocation,
 } = require('../../shared/ai-setup-core.cjs');
 const {
@@ -409,7 +410,7 @@ class AIRuntime {
       if (capability === 'generation') {
         await client.chat({
           messages: [{ role: 'user', content: '只回复：连接成功' }],
-          maxTokens: 16,
+          ...generationProbeOptions(connection),
           signal: AbortSignal.timeout(60000),
         });
       } else if (capability === 'embedding') {

@@ -315,13 +315,14 @@ export function createWebProvider(
 
   return {
     origins: validated.origins,
-    async chat({ messages, signal, maxTokens = 8192, temperature = 0 }: { messages: Array<{ role: string; content: string }>; signal?: AbortSignal; maxTokens?: number; temperature?: number }) {
+    async chat({ messages, signal, maxTokens = 8192, temperature = 0, thinking }: { messages: Array<{ role: string; content: string }>; signal?: AbortSignal; maxTokens?: number; temperature?: number; thinking?: boolean }) {
       const definition = validated.connection.capabilities.generation!;
       const json = await streamChatRequest(validated.endpoints.generation!, apiKey, {
         model: definition.model,
         messages,
         temperature,
         max_tokens: maxTokens,
+        ...(thinking === undefined ? {} : { thinking: { type: thinking ? 'enabled' : 'disabled' } }),
         stream: true,
         stream_options: { include_usage: true },
       }, { signal });

@@ -146,7 +146,7 @@ npm.cmd run build:corpus -- "C:\path\易隐.txt" "C:\path\卜筮正宗.txt" "C:\
 
 第一次点击“开始解读”时，问爻会打开三步连接向导。API Key 是给软件调用 AI 的专用密码，不是服务商登录密码；问爻不会索取账号密码，也不会读取剪贴板。
 
-第一步配置负责最终回复的主模型，是唯一必填能力。填写 API 地址和 Key 后可读取模型目录，也可以手动填写模型名称；最小测试只发送一次极短生成请求。完成这一步即可选择“关键词检索”模式并开始生成解读。
+第一步配置负责最终回复的主模型，是唯一必填能力。填写 API 地址和 Key 后可读取模型目录，也可以手动填写模型名称；最小测试只发送一次极短生成请求。DeepSeek 官方模型的最小测试会关闭默认思考模式，确保有限输出预算用于验证最终正文；正式解读仍保留模型默认思考能力。完成这一步即可选择“关键词检索”模式并开始生成解读。
 
 第二步可选配置向量模型，用于从古籍中寻找语义相关证据，例如阿里云 `text-embedding-v4` 或 SiliconFlow `Qwen/Qwen3-Embedding-4B`。最小测试只嵌入一条短文本并读取真实维度。第三步可选配置重排模型，例如阿里云 `qwen3-rerank` 或 SiliconFlow `Qwen/Qwen3-Reranker-8B`；最小测试只发送一个查询和两条短候选。向量模型可沿用主模型的地址与安全密钥引用，重排模型也可沿用向量连接；React 页面不会读回密钥明文。模型示例以[阿里云 Embedding/Rerank 说明](https://help.aliyun.com/zh/model-studio/embedding-rerank-model)、[SiliconFlow Embeddings](https://docs.siliconflow.cn/cn/api-reference/embeddings/create-embeddings)和[SiliconFlow Rerank](https://docs.siliconflow.cn/cn/api-reference/rerank/create-rerank)为准。
 

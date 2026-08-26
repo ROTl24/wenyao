@@ -117,10 +117,18 @@ function filterModels(capability, values) {
   return models.filter((model) => !isNonChatModel(model));
 }
 
+function generationProbeOptions(connection) {
+  return {
+    maxTokens: 16,
+    ...(connection?.providerId === 'deepseek' ? { thinking: false } : {}),
+  };
+}
+
 module.exports = {
   CAPABILITIES,
   capabilityConnection,
   filterModels,
+  generationProbeOptions,
   normalizeCapabilityLocation,
   providerIdentity,
 };

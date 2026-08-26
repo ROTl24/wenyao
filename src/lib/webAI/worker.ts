@@ -14,9 +14,10 @@ import { assertConfirmedOrigins, toDesktopError, usesBundledVectorPack, validate
 
 const workerScope = self as unknown as DedicatedWorkerGlobalScope;
 const capabilities = ['generation', 'embedding', 'rerank'] as const;
-const { capabilityConnection, filterModels, normalizeCapabilityLocation } = setupCore as {
+const { capabilityConnection, filterModels, generationProbeOptions, normalizeCapabilityLocation } = setupCore as {
   capabilityConnection(input: { capability: AICapability; apiUrl: string; model: string; id?: string; createdAt?: string; dimensions?: number }): AIConnection;
   filterModels(capability: AICapability, models: string[]): string[];
+  generationProbeOptions(connection: AIConnection): { maxTokens: number; thinking?: boolean };
   normalizeCapabilityLocation(capability: AICapability, apiUrl: string): { baseUrl: string };
 };
 const bundledVectorsUrl = new URL('../../../resources/corpus-vectors.f32', import.meta.url).href;
@@ -162,7 +163,12 @@ async function testCapability(payload: TestCapabilityPayload): Promise<{ ok: boo
     status.status = 'testing'; status.message = '正在执行一次最小连接测试。'; emitStatus();
     try {
       const client = provider(validated.connection);
-      if (payload.capability === 'generation') await client.chat({ messages: [{ role: 'user', content: '只回复：连接成功' }], maxTokens: 16 });
+      if (payload.capability === 'generation') {
+        await client.chat({
+          messages: [{ role: 'user', content: '只回复：连接成功' }],
+          ...generationProbeOptions(validated.connection),
+        });
+      }
       else if (payload.capability === 'embedding') {
         const result = await client.embed('六爻模型连接测试');
         const dimensions = result[0]?.length;
