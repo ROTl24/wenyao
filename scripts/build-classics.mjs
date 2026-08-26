@@ -6,6 +6,7 @@ const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
 const outputPath = path.join(root, 'src', 'data', 'zhouyi-classics.json');
 const apiUrl = 'https://zh.wikisource.org/w/api.php';
 const sourceIndexRevision = 7907208;
+const packageInfo = JSON.parse(await fs.readFile(path.join(root, 'package.json'), 'utf8'));
 
 const hexagrams = [
   ['乾为天', '乾'], ['坤为地', '坤'], ['水雷屯', '屯'], ['山水蒙', '蒙'],
@@ -106,7 +107,7 @@ async function fetchPage(appName, sourceName, pinnedRevision) {
     ...(pinnedRevision ? { oldid: String(pinnedRevision) } : { page: `周易/${sourceName}` }),
   });
   const response = await fetch(`${apiUrl}?${params}`, {
-    headers: { 'User-Agent': 'WenYao/0.5.2 classics-builder (https://github.com/ROTl24/wenyao)' },
+    headers: { 'User-Agent': `WenYao/${packageInfo.version} classics-builder (https://github.com/ROTl24/wenyao)` },
   });
   if (!response.ok) throw new Error(`${appName} 下载失败：HTTP ${response.status}`);
   const payload = await response.json();
