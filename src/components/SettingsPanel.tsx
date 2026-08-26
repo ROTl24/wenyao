@@ -2,7 +2,6 @@ import { Database, ExternalLink, RefreshCw, ShieldCheck, X } from 'lucide-react'
 import { useEffect, useMemo, useState } from 'react';
 import { desktop } from '../lib/desktop';
 import type { AIConfigStatus, AIProviderCatalog, CorpusStatus, UpdateState } from '../types/desktop';
-import { AIAdvancedSettings } from './AIAdvancedSettings';
 import { AIStatusCard } from './AIStatusCard';
 import { CreatorLinks } from './CreatorLinks';
 
@@ -10,7 +9,6 @@ interface Props {
   updateState: UpdateState;
   aiStatus: AIConfigStatus;
   aiCatalog: AIProviderCatalog;
-  onAIStatus(status: AIConfigStatus): void;
   onConfigureAI(): void;
   onCheckUpdate(): void;
   onOpenUpdate(): void;
@@ -35,14 +33,12 @@ export function SettingsPanel({
   updateState,
   aiStatus,
   aiCatalog,
-  onAIStatus,
   onConfigureAI,
   onCheckUpdate,
   onOpenUpdate,
   onOpenCorpus,
   onClose,
 }: Props) {
-  const [advancedOpen, setAdvancedOpen] = useState(false);
   const runtime = desktop.runtime;
   const { capabilities } = runtime;
   const secureStorageText = runtime.secureStorage === 'keychain'
@@ -62,7 +58,7 @@ export function SettingsPanel({
         <header><div><h2>应用设置</h2><p>{capabilities.ai ? (runtime.kind === 'web' ? '会话级 AI 服务与本地知识库' : '软件更新、AI 服务与本地知识库') : '本地排盘、历史记录与内置古籍'}</p></div><button type="button" aria-label="关闭设置" onClick={onClose}><X /></button></header>
 
         <section className="settings-section">
-          <AIStatusCard available={capabilities.ai} status={aiStatus} onConfigure={onConfigureAI} onAdvanced={() => setAdvancedOpen(true)} />
+          <AIStatusCard available={capabilities.ai} status={aiStatus} onConfigure={onConfigureAI} />
           {capabilities.ai ? <p className="ai-billing-note">AI 调用费用由所选服务商收取，问爻不会代扣，也不会根据可能变化的价格自行估算金额。</p> : null}
           {capabilities.ai && billingLinks.length ? <div className="ai-billing-links">{billingLinks.map((preset) => <button type="button" key={preset.id} onClick={() => void desktop.aiConfig.openExternal(preset.setup.billingUrl)}>{preset.name} 余额 / 充值 <ExternalLink size={13} /></button>)}</div> : null}
           {capabilities.ai && usage > 0 ? <p className="ai-usage-summary">本机已记录 {aiStatus.usage.length} 次带用量响应，共 {usage.toLocaleString('zh-CN')} Tokens；不含未返回用量的服务。</p> : null}
@@ -86,9 +82,9 @@ export function SettingsPanel({
         </section> : null}
 
         <section className="settings-section">
-          <div className="settings-heading"><Database /><div><strong>{capabilities.ai ? '本地结构化古籍库' : '内置古籍库'}</strong><span>{capabilities.ai ? (corpus.vectorReady ? `${corpus.vectorModel} 向量索引已就绪` : '向量索引尚未完成') : '内置古籍可在本机浏览和检索'}</span></div></div>
+          <div className="settings-heading"><Database /><div><strong>{capabilities.ai ? '本地结构化古籍库' : '内置古籍库'}</strong><span>{capabilities.ai ? (corpus.vectorReady ? `${corpus.vectorModel} 向量索引已就绪` : '本地关键词检索可用') : '内置古籍可在本机浏览和检索'}</span></div></div>
           {capabilities.ai ? <div className="corpus-stats corpus-stats--knowledge"><span><b>{corpus.bookCount}</b>本古籍</span><span><b>{corpus.ruleCount}</b>条规则</span><span><b>{corpus.caseCount}</b>条占例</span><span><b>{corpus.doctrineCount}</b>条义理</span></div> : <div className="corpus-stats"><span><b>{corpus.bookCount}</b>本古籍</span><span><b>{corpus.count}</b>段原文</span></div>}
-          {capabilities.ai ? (corpus.vectorReady ? <p className="corpus-ready">严格检索已启用：关键词候选 + 向量召回 + 专用模型重排。</p> : <p className="corpus-warning">AI 解读必须等待向量召回和重排均可用，不会退回关键词检索生成报告。</p>) : <p className="corpus-ready">起卦、排盘、历史记录和内置古籍均在当前设备中使用；清除浏览器站点数据会移除本地历史。</p>}
+          {capabilities.ai ? <p className="corpus-ready">当前检索模式：{aiStatus.activeCapabilities?.rerank ? '关键词 + 向量 + 重排' : aiStatus.activeCapabilities?.embedding ? '关键词 + 向量' : '关键词检索'}。已启用古籍即使没有向量索引，也会参与本地关键词检索。</p> : <p className="corpus-ready">起卦、排盘、历史记录和内置古籍均在当前设备中使用；清除浏览器站点数据会移除本地历史。</p>}
           <button className="index-button" type="button" onClick={onOpenCorpus}>打开古籍书库</button>
         </section>
 
@@ -96,7 +92,6 @@ export function SettingsPanel({
 
         <div className="security-note"><ShieldCheck /><p><strong>隐私边界</strong>{runtime.kind === 'electron' ? `${secureStorageText}设置中可以随时查看当前问题、排盘、证据与追问分别发送给哪一家服务商。` : capabilities.ai ? '网页版密钥只保存在当前页面的隔离内存中，不写入浏览器存储；刷新、关页或应用更新会清除。AI 服务商会收到密钥和本次请求数据，浏览器扩展、设备或已被篡改的网页仍不属于问爻能够绝对防护的边界。' : '此预览域名不接收 AI 密钥；排盘与历史保存在当前浏览器，不需要账号，也不会同步到服务器。清除站点数据会同时删除本地历史。'}</p></div>
       </aside>
-      {capabilities.ai && advancedOpen ? <AIAdvancedSettings catalog={aiCatalog} status={aiStatus} onStatus={onAIStatus} onClose={() => setAdvancedOpen(false)} /> : null}
     </div>
   );
 }

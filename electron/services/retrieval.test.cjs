@@ -48,3 +48,31 @@ test('empty reranker output keeps fused candidates instead of erasing evidence',
   assert.ok(result.evidence.length > 0);
   assert.match(result.diagnostics.warnings.join(''), /重排/);
 });
+
+test('embedding failure reranks BM25 candidates and still returns evidence', async () => {
+  let embeddingCalls = 0;
+  let rerankCalls = 0;
+  const result = await hybridSearch({
+    corpus, query: '事业官鬼', domainTerms: ['事业', '官鬼'],
+    vectorSearch: async () => { embeddingCalls += 1; throw new Error('embedding maintenance'); },
+    rerank: async (_query, documents) => { rerankCalls += 1; return documents.map((_, index) => ({ index, score: 1 - index * 0.1 })); },
+  });
+  assert.equal(embeddingCalls, 1);
+  assert.equal(rerankCalls, 1);
+  assert.equal(result.diagnostics.mode, 'hybrid-reranked');
+  assert.equal(result.diagnostics.vectorUsed, false);
+  assert.equal(result.diagnostics.rerankUsed, true);
+  assert.match(result.diagnostics.warnings.join(''), /BM25/);
+});
+
+test('embedding and rerank failures fall back to BM25 without blocking generation', async () => {
+  const result = await hybridSearch({
+    corpus, query: '事业官鬼', domainTerms: ['事业', '官鬼'],
+    vectorSearch: async () => { throw new Error('embedding maintenance'); },
+    rerank: async () => { throw new Error('rerank maintenance'); },
+  });
+  assert.equal(result.diagnostics.mode, 'lexical-fallback');
+  assert.ok(result.evidence.length > 0);
+  assert.match(result.diagnostics.warnings.join(''), /向量召回暂不可用/);
+  assert.match(result.diagnostics.warnings.join(''), /重排暂不可用/);
+});

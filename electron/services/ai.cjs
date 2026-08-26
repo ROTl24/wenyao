@@ -911,9 +911,9 @@ function requireAIResponse(value, label = 'AI 解读') {
 
 function assertCloudAnalysisConfigured({ chat }) {
   if (typeof chat === 'function') return;
-  const error = new Error('尚未完成 AI 解读、向量与重排服务配置。');
+  const error = new Error('尚未完成 AI 解读主模型配置。');
   error.publicCode = 'AI_NOT_CONFIGURED';
-  error.publicNextAction = '请先连接 AI 服务并完成三项能力检测与向量索引构建。';
+  error.publicNextAction = '请先连接 AI 解读主模型并完成最小测试；向量与重排能力可选。';
   throw error;
 }
 

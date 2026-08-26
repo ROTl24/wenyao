@@ -60,6 +60,23 @@ test('custom model discovery reads a generic OpenAI-compatible catalog with an a
   assert.equal(request.options.headers.authorization, 'Bearer secret-key');
 });
 
+test('SiliconFlow model discovery requests the selected capability category', async () => {
+  let requestUrl = '';
+  await discoverModels({
+    baseUrl: 'https://api.siliconflow.cn/v1',
+    apiKey: 'secret-key',
+    capability: 'rerank',
+    fetchImpl: async (url) => {
+      requestUrl = String(url);
+      return response(200, { data: [{ id: 'Qwen/Qwen3-Reranker-8B' }] });
+    },
+  });
+  const parsed = new URL(requestUrl);
+  assert.equal(parsed.pathname, '/v1/models');
+  assert.equal(parsed.searchParams.get('type'), 'text');
+  assert.equal(parsed.searchParams.get('sub_type'), 'reranker');
+});
+
 test('embedding dimension can be discovered from the first response', async () => {
   let body;
   const client = createProviderClient({

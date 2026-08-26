@@ -23,7 +23,7 @@ function providerError(response, body, label = 'AI 服务') {
   const lower = text.toLowerCase();
   let message = `${label}请求失败（${response.status}）`;
   let publicCode = 'AI_PROVIDER_FAILED';
-  let publicNextAction = '请稍后重试；如持续失败，请打开高级设置查看技术详情。';
+  let publicNextAction = '请稍后手动重试；如持续失败，请回到对应能力页面核对接口和模型。';
   if (response.status === 401 || response.status === 403) {
     message = `${label}访问密钥无效或没有模型权限`;
     publicCode = 'AI_AUTH_FAILED';
@@ -35,7 +35,7 @@ function providerError(response, body, label = 'AI 服务') {
   } else if (response.status === 404 || /model.+not.+found|unknown model|模型不存在/.test(lower)) {
     message = `${label}接口或模型不存在`;
     publicCode = 'AI_MODEL_UNAVAILABLE';
-    publicNextAction = '请检查模型是否仍可用，或在高级设置中选择其他模型。';
+    publicNextAction = '请检查模型是否仍可用，或回到对应能力页面选择其他模型。';
   } else if (response.status === 429) {
     message = `${label}当前请求过于频繁`;
     publicCode = 'AI_RATE_LIMITED';
@@ -104,9 +104,14 @@ async function requestJson({ url, apiKey, method = 'POST', body, signal, fetchIm
   }
 }
 
-async function discoverModels({ baseUrl, apiKey = '', signal, fetchImpl = fetch }) {
+async function discoverModels({ baseUrl, apiKey = '', capability = 'generation', signal, fetchImpl = fetch }) {
+  const url = new URL(endpoint(baseUrl, '/models'));
+  if (url.hostname === 'api.siliconflow.cn') {
+    url.searchParams.set('type', 'text');
+    url.searchParams.set('sub_type', capability === 'embedding' ? 'embedding' : capability === 'rerank' ? 'reranker' : 'chat');
+  }
   const json = await requestJson({
-    url: endpoint(baseUrl, '/models'),
+    url: url.toString(),
     apiKey,
     method: 'GET',
     signal,
@@ -120,7 +125,7 @@ async function discoverModels({ baseUrl, apiKey = '', signal, fetchImpl = fetch 
   if (!modelIds.length) {
     const error = new Error('服务已连接，但没有返回可识别的模型列表');
     error.publicCode = 'AI_MODELS_NOT_DISCOVERED';
-    error.publicNextAction = '请确认这是 OpenAI 兼容 API 地址，或在高级设置中手动填写模型。';
+    error.publicNextAction = '请确认这是兼容的模型目录地址，或直接手动填写模型名称。';
     throw error;
   }
   return modelIds;
@@ -177,7 +182,7 @@ function createProviderClient({ connection, apiKey = '', fetchImpl = fetch, usag
     return Array.isArray(json.data) ? json.data.map((item) => String(item.id || '')).filter(Boolean) : [];
   }
 
-  async function chat({ messages, signal, maxTokens = 8192, temperature = 0 }) {
+  async function chat({ messages, signal, maxTokens = 8192, temperature = 0, thinking }) {
     const definition = connection.capabilities?.generation;
     if (!definition || definition.protocol !== 'openai-chat') throw new Error(`${label}未配置兼容的解读能力`);
     const json = await requestJson({
@@ -191,6 +196,7 @@ function createProviderClient({ connection, apiKey = '', fetchImpl = fetch, usag
         messages,
         temperature,
         max_tokens: maxTokens,
+        ...(thinking === undefined ? {} : { thinking: { type: thinking ? 'enabled' : 'disabled' } }),
       },
     });
     record('generation', definition.model, json);

@@ -1,6 +1,7 @@
 import type { EvidenceEntry, RetrievalDiagnostics } from '../lib/retrieval';
 import type { DivinationSession } from '../lib/session';
 import type { AnalysisReport } from '../lib/types';
+import type { FeedbackApi } from '../lib/feedback';
 
 export type AICapability = 'generation' | 'embedding' | 'rerank';
 export type AIProtocol = 'openai-chat' | 'openai-embeddings' | 'cohere-rerank' | 'alibaba-rerank';
@@ -49,6 +50,13 @@ export interface AIProviderCatalog {
   defaultPresetId: string;
   presets: AIProviderPreset[];
   customProtocols: Record<AICapability, AIProtocol[]>;
+  capabilityExamples: Record<AICapability, Array<{
+    providerId: string;
+    providerName: string;
+    model: string;
+    apiUrl: string;
+    description: string;
+  }>>;
 }
 
 export interface AIConnection {
@@ -69,13 +77,13 @@ export type AIPipeline = Record<AICapability, { connectionId: string } | null>;
 
 export interface AIDraft {
   id: string;
-  connection: AIConnection;
+  connections: AIConnection[];
   pipeline: AIPipeline;
-  testResult?: {
+  tests: Partial<Record<AICapability, {
     status: 'testing' | 'passed' | 'failed';
-    capabilities: Partial<Record<AICapability, { ok: boolean; checkedAt: string }>>;
+    checkedAt?: string;
     error?: DesktopError;
-  } | null;
+  }>>;
   indexTask?: {
     stage: 'building' | 'paused' | 'error';
     completed: number;
@@ -83,6 +91,7 @@ export interface AIDraft {
     progress: number;
     error?: DesktopError | null;
   } | null;
+  bulkEmbeddingAccepted?: boolean;
   webSecurity?: {
     confirmedOrigins: string[];
     bulkEmbeddingAccepted: boolean;
@@ -94,7 +103,7 @@ export type AIConfigStatusName = 'unconfigured' | 'needs-consent' | 'needs-setup
 export interface AIConfigStatus {
   status: AIConfigStatusName;
   message: string;
-  activeCapabilities: Record<AICapability, { connectionId: string; providerId: string; label: string; model: string }> | null;
+  activeCapabilities: Partial<Record<AICapability, { connectionId: string; providerId: string; label: string; model: string }>> | null;
   activeFingerprint: string;
   corpusCount: number;
   consentAcceptedAt: string;
@@ -197,17 +206,17 @@ export interface DesktopApi {
     save(session: DivinationSession): Promise<DivinationSession>;
     delete(id: string): Promise<boolean>;
   };
+  feedback: FeedbackApi;
   aiConfig: {
     getCatalog(): Promise<AIProviderCatalog>;
     getStatus(): Promise<AIConfigStatus>;
-    discoverModels(payload: { baseUrl: string; apiKey: string }): Promise<{ ok: boolean; modelIds?: string[]; error?: DesktopError }>;
-    saveDraft(payload: { presetId?: string; fields?: Record<string, string>; connection?: Partial<AIConnection>; pipeline?: AIPipeline; apiKey?: string; consentAccepted?: boolean; webSecurity?: { confirmedOrigins: string[]; bulkEmbeddingAccepted?: boolean } }): Promise<{ ok: boolean; status?: AIConfigStatus; error?: DesktopError }>;
-    testDraft(): Promise<{ ok: boolean; status?: AIConfigStatus; error?: DesktopError }>;
-    buildAndActivate(): Promise<{ ok: boolean; status?: AIConfigStatus; error?: DesktopError }>;
+    listModels(payload: { capability: AICapability; apiUrl: string; apiKey?: string; credentialSource?: AICapability; webSecurity?: { confirmedOrigins: string[] } }): Promise<{ ok: boolean; modelIds?: string[]; warning?: string; error?: DesktopError }>;
+    testCapability(payload: { capability: AICapability; apiUrl: string; model: string; apiKey?: string; credentialSource?: AICapability; consentAccepted?: boolean; webSecurity?: { confirmedOrigins: string[] } }): Promise<{ ok: boolean; status?: AIConfigStatus; error?: DesktopError }>;
+    completeSetup(payload: { capabilities: AICapability[]; bulkEmbeddingAccepted?: boolean }): Promise<{ ok: boolean; status?: AIConfigStatus; error?: DesktopError }>;
+    cancelSetup(): Promise<AIConfigStatus>;
     pauseBuild(): Promise<AIConfigStatus>;
     resumeBuild(): Promise<AIConfigStatus>;
     cancelBuild(): Promise<AIConfigStatus>;
-    removeConnection(id: string): Promise<{ ok: boolean; status?: AIConfigStatus; error?: DesktopError }>;
     openExternal(url: string): Promise<boolean>;
     onStatus(listener: (status: AIConfigStatus) => void): () => void;
   };
@@ -235,7 +244,7 @@ export interface DesktopApi {
   };
   ai: {
     analyze(payload: { question: string; category: string; castingMethod: DivinationSession['castingMethod']; castingBasis: DivinationSession['castingBasis']; plate: DivinationSession['plate']; evidence: EvidenceEntry[]; retrievalDiagnostics?: RetrievalDiagnostics }): Promise<{ ok: boolean; report?: AnalysisReport; error?: DesktopError }>;
-    followUp(payload: { question: string; session: DivinationSession; evidence: EvidenceEntry[] }): Promise<{ ok: boolean; answer?: { content: string }; error?: DesktopError }>;
+    followUp(payload: { question: string; session: DivinationSession; evidence: EvidenceEntry[] }): Promise<{ ok: boolean; answer?: { content: string; provider?: AnalysisReport['provider'] }; error?: DesktopError }>;
   };
 }
 

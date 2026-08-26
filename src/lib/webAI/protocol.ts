@@ -2,14 +2,13 @@ import type { AIConfigStatus, DesktopApi, DesktopError } from '../../types/deskt
 
 export type WebAICommand =
   | 'getStatus'
-  | 'discoverModels'
-  | 'saveDraft'
-  | 'testDraft'
-  | 'buildAndActivate'
+  | 'listModels'
+  | 'testCapability'
+  | 'completeSetup'
+  | 'cancelSetup'
   | 'pauseBuild'
   | 'resumeBuild'
   | 'cancelBuild'
-  | 'removeConnection'
   | 'search'
   | 'analyze'
   | 'followUp'
@@ -35,4 +34,4 @@ export interface WebAIStatusEvent {
 
 export type WebAIWorkerMessage = WebAIResponse | WebAIStatusEvent;
 
-export type SaveDraftPayload = Parameters<DesktopApi['aiConfig']['saveDraft']>[0];
+export type TestCapabilityPayload = Parameters<DesktopApi['aiConfig']['testCapability']>[0];

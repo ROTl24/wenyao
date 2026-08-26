@@ -1,6 +1,39 @@
 const { contextBridge, ipcRenderer, webUtils } = require('electron');
-const { sanitizeRendererSession } = require('./services/ipc-payload.cjs');
-const { runtimeProfileFromArguments } = require('./services/runtime-profile.cjs');
+
+const PROFILE_ARGUMENT_PREFIX = '--wenyao-runtime-profile=';
+const ELECTRON_PLATFORMS = new Set(['win32', 'darwin', 'linux']);
+
+function createRuntimeProfile({ platform, arch, isPackaged }) {
+  const normalizedPlatform = ELECTRON_PLATFORMS.has(platform) ? platform : 'linux';
+  const normalizedArch = typeof arch === 'string' && /^[a-z0-9_-]{1,32}$/i.test(arch) ? arch : 'unknown';
+  const packaged = Boolean(isPackaged);
+  return {
+    kind: 'electron',
+    platform: normalizedPlatform,
+    arch: normalizedArch,
+    isPackaged: packaged,
+    updateMode: packaged ? (normalizedPlatform === 'win32' ? 'native' : normalizedPlatform === 'darwin' ? 'manual' : 'none') : 'none',
+    secureStorage: normalizedPlatform === 'win32' ? 'dpapi' : normalizedPlatform === 'darwin' ? 'keychain' : 'system',
+    capabilities: {
+      ai: true,
+      corpusImport: true,
+    },
+  };
+}
+
+function runtimeProfileFromArguments(argv, fallback) {
+  const argument = Array.isArray(argv)
+    ? argv.findLast((value) => typeof value === 'string' && value.startsWith(PROFILE_ARGUMENT_PREFIX))
+    : null;
+  if (argument) {
+    try {
+      const encoded = argument.slice(PROFILE_ARGUMENT_PREFIX.length);
+      const parsed = JSON.parse(Buffer.from(encoded, 'base64url').toString('utf8'));
+      return createRuntimeProfile(parsed);
+    } catch {}
+  }
+  return createRuntimeProfile(fallback);
+}
 
 const runtime = runtimeProfileFromArguments(process.argv, {
   platform: process.platform,
@@ -66,6 +99,57 @@ function pickOwn(input, fields) {
   return output;
 }
 
+function sanitizeCoin(value) {
+  return isRecord(value) ? pickOwn(value, ['faces', 'visualSeed']) : undefined;
+}
+
+function sanitizeLine(value) {
+  const line = pickOwn(value, ['id', 'lineIndex', 'value', 'recordedAt']);
+  if (isRecord(value)) {
+    const coin = sanitizeCoin(value.coin);
+    if (coin) line.coin = coin;
+  }
+  return line;
+}
+
+function sanitizeCurrentLine(value) {
+  return pickOwn(value, [
+    'id', 'lineIndex', 'visualSeed', 'faces', 'value', 'label', 'moving', 'baseYang', 'changedYang',
+  ]);
+}
+
+function sanitizeCastingBasis(value) {
+  if (!isRecord(value)) return {};
+  if (value.kind !== 'time') return pickOwn(value, ['kind', 'algorithm']);
+  const basis = pickOwn(value, [
+    'kind', 'algorithm', 'castAt', 'upperTrigramNumber', 'lowerTrigramNumber', 'movingLine',
+  ]);
+  if (isRecord(value.calendar)) {
+    const calendar = pickOwn(value.calendar, [
+      'timezone', 'rule', 'traditionalDate', 'lunarYearGanZhi', 'lunarYearBranch',
+      'lunarMonth', 'leapMonth', 'lunarDay', 'lunarLabel', 'timeBranch',
+    ]);
+    if (isRecord(value.calendar.numbers)) {
+      calendar.numbers = pickOwn(value.calendar.numbers, ['year', 'month', 'day', 'hour']);
+    }
+    basis.calendar = calendar;
+  }
+  return basis;
+}
+
+function sanitizeRendererSession(value) {
+  const session = pickOwn(value, [
+    'schemaVersion', 'id', 'question', 'category', 'castingMethod', 'castAt', 'updatedAt',
+    'status', 'plate', 'analysis', 'messages',
+  ]);
+  if (isRecord(value)) {
+    session.castingBasis = sanitizeCastingBasis(value.castingBasis);
+    if (Array.isArray(value.lines)) session.lines = value.lines.map(sanitizeLine);
+    if (isRecord(value.currentLine)) session.currentLine = sanitizeCurrentLine(value.currentLine);
+  }
+  return session;
+}
+
 function importMetadata(value) {
   return pickOwn(value, ['draftId', 'title', 'author', 'edition']);
 }
@@ -111,24 +195,30 @@ contextBridge.exposeInMainWorld('wenyao', {
     save: (session) => ipcRenderer.invoke('sessions:save', sanitizeRendererSession(session)),
     delete: (id) => ipcRenderer.invoke('sessions:delete', id),
   },
+  feedback: {
+    getState: () => ipcRenderer.invoke('feedback:get-state'),
+    submit: (payload) => ipcRenderer.invoke('feedback:submit', structuredClone(payload)),
+    setConsent: (enabled) => ipcRenderer.invoke('feedback:set-consent', Boolean(enabled)),
+    retry: (feedbackId) => ipcRenderer.invoke('feedback:retry', safeText(feedbackId, '', 100)),
+    cancel: (feedbackId) => ipcRenderer.invoke('feedback:cancel', safeText(feedbackId, '', 100)),
+    delete: (feedbackId) => ipcRenderer.invoke('feedback:delete', safeText(feedbackId, '', 100)),
+  },
   aiConfig: {
     getCatalog: () => ipcRenderer.invoke('ai-config:get-catalog'),
     getStatus: () => ipcRenderer.invoke('ai-config:get-status'),
-    discoverModels: (payload) => ipcRenderer.invoke('ai-config:discover-models', pickOwn(payload, ['baseUrl', 'apiKey'])),
-    saveDraft: (payload) => ipcRenderer.invoke('ai-config:save-draft', pickOwn(payload, [
-      'presetId',
-      'fields',
-      'connection',
-      'pipeline',
-      'apiKey',
-      'consentAccepted',
+    listModels: (payload) => ipcRenderer.invoke('ai-config:list-models', pickOwn(payload, [
+      'capability', 'apiUrl', 'apiKey', 'credentialSource', 'webSecurity',
     ])),
-    testDraft: () => ipcRenderer.invoke('ai-config:test-draft'),
-    buildAndActivate: () => ipcRenderer.invoke('ai-config:build-and-activate'),
+    testCapability: (payload) => ipcRenderer.invoke('ai-config:test-capability', pickOwn(payload, [
+      'capability', 'apiUrl', 'model', 'apiKey', 'credentialSource', 'consentAccepted', 'webSecurity',
+    ])),
+    completeSetup: (payload) => ipcRenderer.invoke('ai-config:complete-setup', pickOwn(payload, [
+      'capabilities', 'bulkEmbeddingAccepted',
+    ])),
+    cancelSetup: () => ipcRenderer.invoke('ai-config:cancel-setup'),
     pauseBuild: () => ipcRenderer.invoke('ai-config:pause-build'),
     resumeBuild: () => ipcRenderer.invoke('ai-config:resume-build'),
     cancelBuild: () => ipcRenderer.invoke('ai-config:cancel-build'),
-    removeConnection: (id) => ipcRenderer.invoke('ai-config:remove-connection', safeText(id, '', 100)),
     openExternal: (url) => ipcRenderer.invoke('ai-config:open-external', safeText(url, '', 500)),
     onStatus: (listener) => {
       if (typeof listener !== 'function') return () => {};

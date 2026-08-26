@@ -1,11 +1,10 @@
-import { AlertTriangle, Bot, CheckCircle2, LoaderCircle, Settings2 } from 'lucide-react';
+import { AlertTriangle, Bot, CheckCircle2, LoaderCircle } from 'lucide-react';
 import type { AIConfigStatus } from '../types/desktop';
 
 interface Props {
   status: AIConfigStatus;
   available?: boolean;
   onConfigure(): void;
-  onAdvanced(): void;
 }
 
 const statusLabel: Record<AIConfigStatus['status'], string> = {
@@ -20,7 +19,7 @@ const statusLabel: Record<AIConfigStatus['status'], string> = {
   ready: '已就绪',
 };
 
-export function AIStatusCard({ status, available = true, onConfigure, onAdvanced }: Props) {
+export function AIStatusCard({ status, available = true, onConfigure }: Props) {
   if (!available) {
     return (
       <div className="ai-status-card ai-status-card--ready">
@@ -49,15 +48,15 @@ export function AIStatusCard({ status, available = true, onConfigure, onAdvanced
         ) : null}
         {status.activeCapabilities ? (
           <div className="ai-capability-summary">
-            <span>解读 · {status.activeCapabilities.generation.model}</span>
-            <span>向量 · {status.activeCapabilities.embedding.model}</span>
-            <span>重排 · {status.activeCapabilities.rerank.model}</span>
+            <span>{status.activeCapabilities.rerank ? '关键词 + 向量 + 重排' : status.activeCapabilities.embedding ? '关键词 + 向量' : '关键词检索'}</span>
+            {status.activeCapabilities.generation ? <span>解读 · {status.activeCapabilities.generation.model}</span> : null}
+            {status.activeCapabilities.embedding ? <span>向量 · {status.activeCapabilities.embedding.model}</span> : null}
+            {status.activeCapabilities.rerank ? <span>重排 · {status.activeCapabilities.rerank.model}</span> : null}
           </div>
         ) : null}
       </div>
       <div className="ai-status-card__actions">
         <button type="button" onClick={onConfigure}>{status.status === 'ready' ? '更换方案' : status.status === 'building' ? '查看进度' : '连接服务'}</button>
-        <button type="button" onClick={onAdvanced}><Settings2 size={15} />高级</button>
       </div>
     </div>
   );

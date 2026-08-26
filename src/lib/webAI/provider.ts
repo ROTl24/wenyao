@@ -1,4 +1,4 @@
-import type { AIConnection } from '../../types/desktop';
+import type { AICapability, AIConnection } from '../../types/desktop';
 import { normalizeHttpsUrl, toDesktopError, validateWebConnection, WebAIError } from './security';
 
 interface UsageRecord {
@@ -276,9 +276,14 @@ export async function secureJsonRequest(
   }
 }
 
-export async function discoverWebModels(baseUrl: string, apiKey: string): Promise<string[]> {
+export async function discoverWebModels(baseUrl: string, apiKey: string, capability: AICapability = 'generation'): Promise<string[]> {
   const base = normalizeHttpsUrl(baseUrl).toString().replace(/\/$/, '');
-  const json = await secureJsonRequest(`${base}/models`, apiKey, undefined, { method: 'GET' });
+  const url = new URL(`${base}/models`);
+  if (url.hostname === 'api.siliconflow.cn') {
+    url.searchParams.set('type', 'text');
+    url.searchParams.set('sub_type', capability === 'embedding' ? 'embedding' : capability === 'rerank' ? 'reranker' : 'chat');
+  }
+  const json = await secureJsonRequest(url.toString(), apiKey, undefined, { method: 'GET' });
   const source = Array.isArray(json.data) ? json.data : Array.isArray(json.models) ? json.models : [];
   const modelIds = [...new Set(source.map((item: unknown) => {
     if (typeof item === 'string') return item;
@@ -291,7 +296,7 @@ export async function discoverWebModels(baseUrl: string, apiKey: string): Promis
       code: 'WEB_AI_MODELS_NOT_DISCOVERED',
       message: '服务已连接，但没有返回可识别的模型列表。',
       dataSafe: true,
-      nextAction: '请确认这是 OpenAI 兼容 API 地址，或在高级设置中手动填写模型。',
+      nextAction: '请确认这是兼容的模型目录地址，或直接手动填写模型名称。',
     });
   }
   return modelIds;
@@ -310,13 +315,14 @@ export function createWebProvider(
 
   return {
     origins: validated.origins,
-    async chat({ messages, signal, maxTokens = 8192, temperature = 0 }: { messages: Array<{ role: string; content: string }>; signal?: AbortSignal; maxTokens?: number; temperature?: number }) {
+    async chat({ messages, signal, maxTokens = 8192, temperature = 0, thinking }: { messages: Array<{ role: string; content: string }>; signal?: AbortSignal; maxTokens?: number; temperature?: number; thinking?: boolean }) {
       const definition = validated.connection.capabilities.generation!;
       const json = await streamChatRequest(validated.endpoints.generation!, apiKey, {
         model: definition.model,
         messages,
         temperature,
         max_tokens: maxTokens,
+        ...(thinking === undefined ? {} : { thinking: { type: thinking ? 'enabled' : 'disabled' } }),
         stream: true,
         stream_options: { include_usage: true },
       }, { signal });

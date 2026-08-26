@@ -240,8 +240,8 @@ test('cloud analysis refuses missing provider configuration before any network r
         }),
         (error) => {
           assert.equal(error.publicCode, 'AI_NOT_CONFIGURED');
-          assert.match(error.message, /尚未完成 AI 解读、向量与重排服务配置/);
-          assert.match(error.publicNextAction, /连接 AI 服务/);
+        assert.match(error.message, /尚未完成 AI 解读主模型配置/);
+        assert.match(error.publicNextAction, /连接 AI 解读主模型/);
           return true;
         },
       );

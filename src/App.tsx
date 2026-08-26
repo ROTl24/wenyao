@@ -1,5 +1,7 @@
-import { BookOpen, CalendarDays, History, Settings2 } from 'lucide-react';
+import { BookOpen, CalendarDays, History, MessageSquareHeart, Settings2 } from 'lucide-react';
 import { useEffect, useMemo, useRef, useState } from 'react';
+import packageInfo from '../package.json';
+import corpusManifest from '../resources/corpus-manifest.json';
 import { CalendarScreen } from './components/CalendarScreen';
 import { CorpusLibraryPanel } from './components/CorpusLibraryPanel';
 import { HistoryPanel } from './components/HistoryPanel';
@@ -9,15 +11,22 @@ import { PhysicalReviewScreen } from './components/PhysicalReviewScreen';
 import { ResultScreen } from './components/ResultScreen';
 import { RitualScreen } from './components/RitualScreen';
 import { SettingsPanel } from './components/SettingsPanel';
+import { FeedbackPanel } from './components/FeedbackPanel';
 import { AISetupWizard } from './components/AISetupWizard';
 import { UpdatePrompt, type PromptUpdateState } from './components/UpdatePrompt';
 import { desktop } from './lib/desktop';
 import { currentAlmanacSelection, type AlmanacSelection } from './lib/almanac';
 import { isAIUsable } from './lib/aiStatus';
-import { randomToss, upgradePlate } from './lib/divination';
+import { randomToss } from './lib/divination';
 import { generateRandomCasting } from './lib/casting';
 import { isValidQuestion } from './lib/question';
-import type { EvidenceEntry, RetrievalDiagnostics } from './lib/retrieval';
+import {
+  isClarificationQuestion,
+  reselectEvidenceWithDiagnostics,
+  type EvidenceEntry,
+  type RetrievalDiagnostics,
+} from './lib/retrieval';
+import type { AnalysisEvidenceSnapshot } from './lib/types';
 import {
   appendPhysicalCastLine,
   createPhysicalCastDraft,
@@ -51,7 +60,7 @@ type Screen = 'home' | 'casting' | 'physical-casting' | 'physical-review' | 'res
 type AnalysisSaveStatus = 'idle' | 'saving' | 'saved' | 'error';
 type SessionSaveStatus = 'idle' | 'saving' | 'saved' | 'error';
 
-const emptyAICatalog: AIProviderCatalog = { version: 1, defaultPresetId: '', presets: [], customProtocols: { generation: ['openai-chat'], embedding: ['openai-embeddings'], rerank: ['cohere-rerank', 'alibaba-rerank'] } };
+const emptyAICatalog: AIProviderCatalog = { version: 1, defaultPresetId: '', presets: [], customProtocols: { generation: ['openai-chat'], embedding: ['openai-embeddings'], rerank: ['cohere-rerank', 'alibaba-rerank'] }, capabilityExamples: { generation: [], embedding: [], rerank: [] } };
 const emptyAIStatus: AIConfigStatus = {
   status: 'unconfigured',
   message: '尚未连接 AI 服务',
@@ -75,6 +84,31 @@ const categoryTerms: Record<SessionCategory, string[]> = {
   travel: ['出行', '行人', '世爻', '应爻', '动爻'],
   other: ['世爻', '应爻', '日辰', '月建'],
 };
+
+function retrievalTerms(target: DivinationSession): string[] {
+  if (!target.plate) return categoryTerms[target.category];
+  return [
+    ...categoryTerms[target.category],
+    target.plate.baseHexagram.shortName,
+    target.plate.changedHexagram.shortName,
+    ...target.plate.lines.filter((line) => line.moving || line.role).flatMap((line) => [line.relation, line.role || '']),
+  ].filter(Boolean);
+}
+
+function evidenceSnapshot(
+  category: SessionCategory,
+  evidence: EvidenceEntry[],
+  retrieval: RetrievalDiagnostics,
+): AnalysisEvidenceSnapshot {
+  return {
+    capturedAt: new Date().toISOString(),
+    appVersion: packageInfo.version,
+    corpusVersion: retrieval.corpusVersion || corpusManifest.corpusVersion,
+    category,
+    evidence: structuredClone(evidence),
+    retrieval: structuredClone(retrieval),
+  };
+}
 
 function prepareNext(session: DivinationSession): DivinationSession {
   if (session.status === 'complete' || session.currentLine) return session;
@@ -131,6 +165,7 @@ export function App() {
   const [historyOpen, setHistoryOpen] = useState(false);
   const [libraryOpen, setLibraryOpen] = useState(false);
   const [settingsOpen, setSettingsOpen] = useState(false);
+  const [feedbackOpen, setFeedbackOpen] = useState(false);
   const [calendarOpen, setCalendarOpen] = useState(false);
   const [calendarSelection, setCalendarSelection] = useState<AlmanacSelection>(() => currentAlmanacSelection());
   const [aiCatalog, setAICatalog] = useState<AIProviderCatalog>(emptyAICatalog);
@@ -168,10 +203,7 @@ export function App() {
 
   useEffect(() => {
     void desktop.sessions.list().then((sessions) => {
-      const normalized = sessions.map((stored) => {
-        const saved = normalizeSession(stored);
-        return saved.plate ? { ...saved, plate: upgradePlate(saved.plate) } : saved;
-      });
+      const normalized = sessions.map(normalizeSession);
       setHistory((current) => {
         const merged = new Map(normalized.map((saved) => [saved.id, saved]));
         for (const saved of current) {
@@ -190,6 +222,8 @@ export function App() {
   useEffect(() => desktop.application.onOpenSettings(() => {
     setHistoryOpen(false);
     setLibraryOpen(false);
+    setFeedbackOpen(false);
+    setCalendarOpen(false);
     setSettingsOpen(true);
   }), []);
 
@@ -367,13 +401,7 @@ export function App() {
 
   const evidenceFor = async (target: DivinationSession) => {
     if (!target.plate) return { evidence: [], diagnostics: null };
-    const terms = [
-      ...categoryTerms[target.category],
-      target.plate.baseHexagram.shortName,
-      target.plate.changedHexagram.shortName,
-      ...target.plate.lines.filter((line) => line.moving || line.role).flatMap((line) => [line.relation, line.role || '']),
-    ].filter(Boolean);
-    const result = await desktop.retrieval.search({ query: target.question, domainTerms: terms, limit: 8 });
+    const result = await desktop.retrieval.search({ query: target.question, domainTerms: retrievalTerms(target) });
     return { evidence: result.evidence, diagnostics: result.diagnostics };
   };
 
@@ -418,7 +446,12 @@ export function App() {
         retrievalDiagnostics: found.diagnostics || undefined,
       });
       if (result.ok && result.report) {
-        await persistAnalysis(withAnalysis(target, result.report), runToken);
+        const report = {
+          ...result.report,
+          analysisId: crypto.randomUUID(),
+          evidenceSnapshot: evidenceSnapshot(target.category, found.evidence, found.diagnostics!),
+        };
+        await persistAnalysis(withAnalysis(target, report), runToken);
       } else if (ownsAnalysisUi()) {
         setAnalysisError(`${result.error?.message || 'AI 分析失败'} ${result.error?.nextAction || ''}`.trim());
       }
@@ -597,8 +630,7 @@ export function App() {
     if (physicalDraft?.lines.length && !window.confirm('线下起卦尚未保存，确定放弃并打开这条历史记录吗？')) {
       return;
     }
-    const normalized = normalizeSession(saved);
-    let next = normalized.plate ? { ...normalized, plate: upgradePlate(normalized.plate) } : normalized;
+    let next = normalizeSession(saved);
     if (next.status === 'casting' && next.castingMethod !== 'digital') {
       console.error('Refused to resume an incomplete physical casting session');
       return;
@@ -619,18 +651,9 @@ export function App() {
     setAnalysisSaveError('');
     if (next.status === 'complete') {
       setScreen('result');
-      try {
-        const found = await evidenceFor(next);
-        if (!isActiveSession(next.id)) return;
-        setEvidence(found.evidence);
-        setRetrievalDiagnostics(found.diagnostics);
-      } catch (error) {
-        if (isActiveSession(next.id)) {
-          console.error('Failed to load evidence for session', error);
-          setEvidence([]);
-          setRetrievalDiagnostics(null);
-        }
-      }
+      const snapshot = next.analysis?.evidenceSnapshot;
+      setEvidence(snapshot?.evidence || []);
+      setRetrievalDiagnostics(snapshot?.retrieval || null);
     } else {
       setScreen('casting');
       void persist(next);
@@ -658,7 +681,7 @@ export function App() {
     if (!isAIUsable(aiStatus)) {
       setAISetupIntent('analysis');
       setAISetupOpen(true);
-      setChatError('请先完成 AI 解读、向量与重排服务配置。');
+      setChatError('请先完成 AI 解读主模型配置。');
       return;
     }
     const targetId = session.id;
@@ -670,13 +693,47 @@ export function App() {
       const savedWithQuestion = await commitSession(next);
       if (!savedWithQuestion || deletedSessionIdsRef.current.has(targetId)) return;
       next = savedWithQuestion;
-      const result = await desktop.ai.followUp({ question: followQuestion, session: next, evidence });
+      const terms = retrievalTerms(next);
+      let followEvidence: EvidenceEntry[];
+      let followDiagnostics: RetrievalDiagnostics;
+      const priorSnapshot = [...next.messages].reverse().find((message) => message.role === 'assistant' && message.evidenceSnapshot)?.evidenceSnapshot
+        || next.analysis?.evidenceSnapshot;
+      if (isClarificationQuestion(followQuestion) && priorSnapshot?.evidence.length) {
+        const locallyReselected = reselectEvidenceWithDiagnostics(priorSnapshot.evidence, followQuestion, terms);
+        followEvidence = locallyReselected.evidence.length ? locallyReselected.evidence : priorSnapshot.evidence;
+        followDiagnostics = locallyReselected.evidence.length
+          ? { ...locallyReselected.diagnostics, corpusVersion: priorSnapshot.corpusVersion }
+          : {
+              ...locallyReselected.diagnostics,
+              selectedCandidates: priorSnapshot.evidence.length,
+              serializedCharacters: priorSnapshot.evidence.reduce((sum, item) => sum + item.text.length, 0),
+              stages: [...(locallyReselected.diagnostics.stages || []), '未命中追问词，沿用既有证据'],
+              rankings: {
+                ...(locallyReselected.diagnostics.rankings || { bm25: [], vector: [], fusion: [], rerank: [], final: [] }),
+                final: priorSnapshot.evidence.map((item, index) => ({ id: item.id, rank: index + 1, score: 0 })),
+              },
+              corpusVersion: priorSnapshot.corpusVersion,
+            };
+      } else {
+        const found = await desktop.retrieval.search({ query: followQuestion, domainTerms: terms });
+        followEvidence = found.evidence;
+        followDiagnostics = found.diagnostics;
+      }
+      const result = await desktop.ai.followUp({ question: followQuestion, session: next, evidence: followEvidence });
       const answer = result.ok && result.answer ? result.answer : {
         content: desktop.runtime.kind === 'web' ? '浏览器预览不会发送 AI 请求；桌面应用会沿用本次排盘和古籍证据继续回答。' : `${result.error?.message || '追问失败'} ${result.error?.nextAction || ''}`,
       };
       next = mergeCompleteSessionState(
         latestSessionsRef.current.get(targetId),
-        withMessage(next, { id: crypto.randomUUID(), role: 'assistant', kind: result.ok && result.answer ? 'markdown-answer' : 'system-notice', content: answer.content, createdAt: new Date().toISOString() }),
+        withMessage(next, {
+          id: crypto.randomUUID(),
+          role: 'assistant',
+          kind: result.ok && result.answer ? 'markdown-answer' : 'system-notice',
+          content: answer.content,
+          createdAt: new Date().toISOString(),
+          ...(result.ok && result.answer ? { evidenceSnapshot: evidenceSnapshot(next.category, followEvidence, followDiagnostics) } : {}),
+          ...(result.ok && result.answer?.provider ? { provider: result.answer.provider } : {}),
+        }),
       );
       latestSessionsRef.current.set(targetId, next);
       if (isActiveSession(targetId)) {
@@ -752,6 +809,7 @@ export function App() {
   const openCalendar = () => {
     setHistoryOpen(false);
     setLibraryOpen(false);
+    setFeedbackOpen(false);
     setSettingsOpen(false);
     setCalendarOpen(true);
   };
@@ -762,9 +820,10 @@ export function App() {
         <div className="chrome-brand"><span>爻</span><strong>{appTitle}</strong></div>
         <nav>
           <button type="button" aria-label="日历" aria-current={calendarOpen ? 'page' : undefined} disabled={physicalFinalizing} onClick={openCalendar}><CalendarDays size={17} /><span>日历</span></button>
-          <button type="button" aria-label="古籍书库" aria-current={libraryOpen ? 'page' : undefined} disabled={physicalFinalizing} onClick={() => { setHistoryOpen(false); setSettingsOpen(false); setLibraryOpen(true); }}><BookOpen size={17} /><span>古籍</span></button>
-          <button type="button" aria-label="历史记录" aria-current={historyOpen ? 'page' : undefined} disabled={physicalFinalizing} onClick={() => { setLibraryOpen(false); setSettingsOpen(false); setHistoryOpen(true); }}><History size={17} /><span>历史</span></button>
-          <button type="button" aria-label="应用设置" aria-current={settingsOpen ? 'page' : undefined} disabled={physicalFinalizing} onClick={() => { setLibraryOpen(false); setHistoryOpen(false); setSettingsOpen(true); }}><Settings2 size={17} /><span>设置</span></button>
+          <button type="button" aria-label="古籍书库" aria-current={libraryOpen ? 'page' : undefined} disabled={physicalFinalizing} onClick={() => { setCalendarOpen(false); setHistoryOpen(false); setFeedbackOpen(false); setSettingsOpen(false); setLibraryOpen(true); }}><BookOpen size={17} /><span>古籍</span></button>
+          <button type="button" aria-label="历史记录" aria-current={historyOpen ? 'page' : undefined} disabled={physicalFinalizing} onClick={() => { setCalendarOpen(false); setLibraryOpen(false); setFeedbackOpen(false); setSettingsOpen(false); setHistoryOpen(true); }}><History size={17} /><span>历史</span></button>
+          <button type="button" aria-label="反馈管理" aria-current={feedbackOpen ? 'page' : undefined} disabled={physicalFinalizing} onClick={() => { setCalendarOpen(false); setLibraryOpen(false); setHistoryOpen(false); setSettingsOpen(false); setFeedbackOpen(true); }}><MessageSquareHeart size={17} /><span>反馈</span></button>
+          <button type="button" aria-label="应用设置" aria-current={settingsOpen ? 'page' : undefined} disabled={physicalFinalizing} onClick={() => { setCalendarOpen(false); setLibraryOpen(false); setHistoryOpen(false); setFeedbackOpen(false); setSettingsOpen(true); }}><Settings2 size={17} /><span>设置</span></button>
         </nav>
       </header>
       {calendarOpen ? (
@@ -824,13 +883,13 @@ export function App() {
         </>
       )}
       {historyOpen && <HistoryPanel sessions={history} onClose={() => setHistoryOpen(false)} onOpen={(saved) => void openSession(saved)} onDelete={(id) => void deleteSession(id)} />}
+      {feedbackOpen && <FeedbackPanel onClose={() => setFeedbackOpen(false)} />}
       {libraryOpen && <CorpusLibraryPanel aiStatus={aiStatus} onClose={() => setLibraryOpen(false)} />}
       {settingsOpen && (
         <SettingsPanel
           updateState={updateState}
           aiStatus={aiStatus}
           aiCatalog={aiCatalog}
-          onAIStatus={updateAIStatus}
           onConfigureAI={() => { setAISetupIntent('settings'); setAISetupOpen(true); }}
           onCheckUpdate={() => void checkForUpdate()}
           onOpenUpdate={openUpdatePrompt}

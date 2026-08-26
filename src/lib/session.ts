@@ -1,4 +1,4 @@
-import { buildPlate, createToss, type DivinationPlate, type Toss } from './divination';
+import { buildPlate, createToss, upgradePlate, type DivinationPlate, type LineValue, type Toss } from './divination';
 import {
   CASTING_METHOD_LABELS,
   defaultCastingBasis,
@@ -10,7 +10,7 @@ import {
   type LineRecord,
   type PreparedCoinLine,
 } from './casting';
-import type { AnalysisReport } from './types';
+import type { AnalysisEvidenceSnapshot, AnalysisReport } from './types';
 
 export {
   CASTING_METHOD_LABELS,
@@ -30,6 +30,8 @@ export interface ChatMessage {
   kind?: 'markdown-answer' | 'system-notice';
   content: string;
   createdAt: string;
+  evidenceSnapshot?: AnalysisEvidenceSnapshot;
+  provider?: AnalysisReport['provider'];
 }
 
 export interface DivinationSession {
@@ -47,6 +49,27 @@ export interface DivinationSession {
   plate?: DivinationPlate;
   analysis?: AnalysisReport;
   messages: ChatMessage[];
+}
+
+const LINE_VALUES = new Set<LineValue>([6, 7, 8, 9]);
+
+function canonicalPlate(session: DivinationSession): DivinationPlate | undefined {
+  if (session.plate) return upgradePlate(session.plate);
+  const castAt = new Date(session.castAt);
+  const replayable = session.status === 'complete'
+    && session.lines.length === 6
+    && Number.isFinite(castAt.getTime())
+    && session.lines.every((line, index) => (
+      line.lineIndex === index + 1 && LINE_VALUES.has(line.value)
+    ));
+  return replayable
+    ? buildPlate(session.lines.map((line) => line.value), castAt)
+    : undefined;
+}
+
+function withCanonicalPlate(session: DivinationSession): DivinationSession {
+  const plate = canonicalPlate(session);
+  return plate ? { ...session, plate } : session;
 }
 
 function legacyLine(toss: Record<string, unknown>, index: number): LineRecord {
@@ -71,11 +94,11 @@ export function normalizeSession(session: DivinationSession | Record<string, unk
   const hasCastingMethod = Object.prototype.hasOwnProperty.call(source, 'castingMethod');
   const castingMethod = hasCastingMethod ? normalizeCastingMethod(source.castingMethod) : 'digital';
   if (source.schemaVersion === 2 && Array.isArray(source.lines)) {
-    return {
+    return withCanonicalPlate({
       ...(source as unknown as DivinationSession),
       castingMethod,
       castingBasis: source.castingBasis as CastingBasis ?? defaultCastingBasis(castingMethod),
-    };
+    });
   }
 
   const legacyTosses = Array.isArray(source.tosses) ? source.tosses : [];
@@ -92,14 +115,14 @@ export function normalizeSession(session: DivinationSession | Record<string, unk
     currentToss: _currentToss,
     ...canonical
   } = source;
-  return {
+  return withCanonicalPlate({
     ...(canonical as unknown as Omit<DivinationSession, 'schemaVersion' | 'castingMethod' | 'castingBasis' | 'lines'>),
     schemaVersion: 2,
     castingMethod,
     castingBasis: defaultCastingBasis(castingMethod),
     lines,
     ...(currentLine ? { currentLine } : {}),
-  };
+  });
 }
 
 export function createSession(

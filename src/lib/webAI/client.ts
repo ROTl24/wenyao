@@ -115,29 +115,22 @@ export class WebAIClient {
   }
 
   getStatus = async (): Promise<AIConfigStatus> => structuredClone(this.status);
-  discoverModels: DesktopApi['aiConfig']['discoverModels'] = async (payload) => {
-    try { return await this.call('discoverModels', payload); }
+  listModels: DesktopApi['aiConfig']['listModels'] = async (payload) => {
+    try { return await this.call('listModels', payload); }
     catch (error) { return { ok: false, error: desktopError(error) }; }
   };
-  saveDraft: DesktopApi['aiConfig']['saveDraft'] = async (payload) => {
-    try { return await this.call('saveDraft', payload); }
+  testCapability: DesktopApi['aiConfig']['testCapability'] = async (payload) => {
+    try { return await this.paid('最小连接测试', 'testCapability', payload); }
     catch (error) { return { ok: false, error: desktopError(error) }; }
   };
-  testDraft: DesktopApi['aiConfig']['testDraft'] = async () => {
-    try { return await this.paid('连接检测', 'testDraft'); }
+  completeSetup: DesktopApi['aiConfig']['completeSetup'] = async (payload) => {
+    try { return await this.paid('索引准备', 'completeSetup', payload); }
     catch (error) { return { ok: false, error: desktopError(error) }; }
   };
-  buildAndActivate: DesktopApi['aiConfig']['buildAndActivate'] = async () => {
-    try { return await this.paid('索引准备', 'buildAndActivate'); }
-    catch (error) { return { ok: false, error: desktopError(error) }; }
-  };
+  cancelSetup: DesktopApi['aiConfig']['cancelSetup'] = async () => this.call('cancelSetup');
   pauseBuild: DesktopApi['aiConfig']['pauseBuild'] = async () => this.call('pauseBuild');
   resumeBuild: DesktopApi['aiConfig']['resumeBuild'] = async () => this.call('resumeBuild');
   cancelBuild: DesktopApi['aiConfig']['cancelBuild'] = async () => this.call('cancelBuild');
-  removeConnection: DesktopApi['aiConfig']['removeConnection'] = async (id) => {
-    try { return await this.call('removeConnection', id); }
-    catch (error) { return { ok: false, error: desktopError(error) }; }
-  };
   search: DesktopApi['retrieval']['search'] = async (payload) => this.paid('古籍检索', 'search', payload);
   analyze: DesktopApi['ai']['analyze'] = async (payload) => {
     try { return await this.paid('AI 解读', 'analyze', payload); }

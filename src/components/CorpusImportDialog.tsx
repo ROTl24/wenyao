@@ -92,7 +92,7 @@ export function CorpusImportDialog({ batch, aiStatus, onClose, onCommitted }: Pr
                   <p>确认后会把本批约 {totalCharacters.toLocaleString('zh-CN')} 字分批发送给 {embedding?.label} 的 {embedding?.model}；解读检索时，少量候选原文还会交给当前重排服务排序。</p>
                   <label className="corpus-consent-check"><input type="checkbox" checked={sendForIndex} onChange={(event) => setSendForIndex(event.target.checked)} />我确认发送上述古籍正文并建立索引</label>
                 </>
-              ) : <p>AI 向量服务尚未就绪。本次仍可保存到本地，稍后在书库中启用索引。</p>}
+              ) : <p>本次会保存到本地；启用后可直接参与关键词检索，不会触发远程建库。配置向量模型后可再单独建立向量索引。</p>}
             </div>
           </section>
 

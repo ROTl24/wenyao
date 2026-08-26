@@ -1,7 +1,6 @@
 import type {
   AICapability,
   AIConnection,
-  AIProviderPreset,
   DesktopError,
 } from '../../types/desktop';
 
@@ -91,36 +90,6 @@ function sanitizedFields(fields: Record<string, unknown> | undefined): Record<st
   return Object.fromEntries(Object.entries(fields || {}).filter(([key, value]) => (
     !SECRET_FIELD.test(key) && typeof value === 'string' && value.length <= 200
   )));
-}
-
-export function connectionFromPreset(
-  preset: AIProviderPreset,
-  fields: Record<string, string>,
-  id = `web-${preset.providerId}`,
-): AIConnection {
-  const capabilities = structuredClone(preset.capabilities);
-  const workspaceId = String(fields.workspaceId || '').trim();
-  if (capabilities.rerank?.urlTemplate) {
-    if (!workspaceId) {
-      throw new WebAIError(publicError('WEB_AI_REQUIRED_FIELD', '缺少业务空间 ID。', '请填写服务商要求的业务空间 ID。'));
-    }
-    capabilities.rerank.url = capabilities.rerank.urlTemplate.replace('{workspaceId}', encodeURIComponent(workspaceId));
-    delete capabilities.rerank.urlTemplate;
-  }
-  const now = new Date().toISOString();
-  return {
-    id,
-    providerId: preset.providerId,
-    presetId: preset.id,
-    label: preset.name,
-    region: preset.region,
-    baseUrl: preset.baseUrl,
-    fields: sanitizedFields(fields),
-    capabilities,
-    hasApiKey: true,
-    createdAt: now,
-    updatedAt: now,
-  };
 }
 
 export function validateWebConnection(input: AIConnection): ValidatedWebConnection {

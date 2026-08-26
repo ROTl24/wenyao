@@ -76,7 +76,7 @@
       "providerId": "deepseek",
       "name": "DeepSeek 官方",
       "region": "中国大陆",
-      "description": "仅提供解读能力，需在高级模式中搭配向量与重排服务。",
+      "description": "提供最终解读能力，可独立搭配本地关键词检索使用。",
       "recommended": false,
       "baseUrl": "https://api.deepseek.com",
       "setup": {
@@ -96,5 +96,55 @@
     "generation": ["openai-chat"],
     "embedding": ["openai-embeddings"],
     "rerank": ["cohere-rerank", "alibaba-rerank"]
+  },
+  "capabilityExamples": {
+    "generation": [
+      {
+        "providerId": "deepseek",
+        "providerName": "DeepSeek 官方",
+        "model": "deepseek-v4-pro",
+        "apiUrl": "https://api.deepseek.com",
+        "description": "用于最终解读与追问"
+      },
+      {
+        "providerId": "siliconflow",
+        "providerName": "SiliconFlow",
+        "model": "deepseek-ai/DeepSeek-V4-Pro",
+        "apiUrl": "https://api.siliconflow.cn/v1",
+        "description": "OpenAI Chat 兼容接口"
+      }
+    ],
+    "embedding": [
+      {
+        "providerId": "alibaba",
+        "providerName": "阿里云百炼",
+        "model": "text-embedding-v4",
+        "apiUrl": "https://dashscope.aliyuncs.com/compatible-mode/v1",
+        "description": "可复用问爻内置 1024 维索引"
+      },
+      {
+        "providerId": "siliconflow",
+        "providerName": "SiliconFlow",
+        "model": "Qwen/Qwen3-Embedding-4B",
+        "apiUrl": "https://api.siliconflow.cn/v1",
+        "description": "中文语义向量检索"
+      }
+    ],
+    "rerank": [
+      {
+        "providerId": "alibaba",
+        "providerName": "阿里云百炼",
+        "model": "qwen3-rerank",
+        "apiUrl": "https://你的业务空间ID.cn-beijing.maas.aliyuncs.com/compatible-api/v1/reranks",
+        "description": "需要北京地域业务空间接口"
+      },
+      {
+        "providerId": "siliconflow",
+        "providerName": "SiliconFlow",
+        "model": "Qwen/Qwen3-Reranker-8B",
+        "apiUrl": "https://api.siliconflow.cn/v1",
+        "description": "Cohere 风格重排接口"
+      }
+    ]
   }
 }

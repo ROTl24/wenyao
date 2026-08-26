@@ -10,7 +10,7 @@ const {
   validateSessionForSave,
 } = require('./session-validation.cjs');
 
-const DEFAULT_STATE = Object.freeze({ sessions: [], settings: {} });
+const DEFAULT_STATE = Object.freeze({ sessions: [], settings: {}, feedback: { consent: { technicalUpload: null }, records: [] } });
 
 class JsonStore {
   constructor(filePath) {
@@ -37,6 +37,9 @@ class JsonStore {
       return {
         sessions: Array.isArray(parsed.sessions) ? parsed.sessions : [],
         settings: parsed.settings && typeof parsed.settings === 'object' ? parsed.settings : {},
+        feedback: parsed.feedback && typeof parsed.feedback === 'object'
+          ? parsed.feedback
+          : structuredClone(DEFAULT_STATE.feedback),
       };
     } catch (error) {
       const corruptPath = `${this.filePath}.corrupt-${Date.now()}`;
@@ -106,6 +109,24 @@ class JsonStore {
       state.usage = [...state.usage, structuredClone(entry)].slice(-1000);
       return state;
     });
+  }
+
+  getFeedbackState() {
+    const feedback = this.state.feedback && typeof this.state.feedback === 'object'
+      ? this.state.feedback
+      : structuredClone(DEFAULT_STATE.feedback);
+    return structuredClone({
+      consent: feedback.consent && typeof feedback.consent === 'object'
+        ? feedback.consent
+        : { technicalUpload: null },
+      records: Array.isArray(feedback.records) ? feedback.records : [],
+    });
+  }
+
+  saveFeedbackState(feedback) {
+    this.state.feedback = structuredClone(feedback);
+    this.#write();
+    return this.getFeedbackState();
   }
 }
 

@@ -82,6 +82,7 @@ for (const requiredHeader of [
   "form-action 'none'",
   "object-src 'none'",
   "worker-src 'self'",
+  'https://static.cloudflareinsights.com/beacon.min.js',
   'Referrer-Policy: no-referrer',
   'X-Content-Type-Options: nosniff',
   'X-Frame-Options: DENY',
