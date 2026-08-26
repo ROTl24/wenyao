@@ -176,14 +176,13 @@ const browserFallback: DesktopApi = {
   aiConfig: {
     async getCatalog() { return structuredClone(browserProviderCatalog); },
     async getStatus() { return webAI ? { ...(await webAI.getStatus()), corpusCount: corpus.length } : structuredClone(browserAIStatus); },
-    async discoverModels(payload) { return webAI ? webAI.discoverModels(payload) : { ok: false, error: { code: 'WEB_AI_ORIGIN_DISABLED', message: '此域名未启用 AI 服务。', dataSafe: true, nextAction: '请使用问爻正式发布地址。' } }; },
-    async saveDraft(payload) { return webAI ? webAI.saveDraft(payload) : { ok: false, error: { code: 'WEB_AI_ORIGIN_DISABLED', message: '此域名未启用 AI 密钥输入。', dataSafe: true, nextAction: '请使用问爻正式发布地址。' } }; },
-    async testDraft() { return webAI ? webAI.testDraft() : { ok: false, error: { code: 'WEB_AI_ORIGIN_DISABLED', message: '此域名未启用 AI 服务。', dataSafe: true, nextAction: '请使用问爻正式发布地址。' } }; },
-    async buildAndActivate() { return webAI ? webAI.buildAndActivate() : { ok: false, error: { code: 'WEB_AI_ORIGIN_DISABLED', message: '此域名未启用 AI 服务。', dataSafe: true, nextAction: '请使用问爻正式发布地址。' } }; },
+    async listModels(payload) { return webAI ? webAI.listModels(payload) : { ok: false, error: { code: 'WEB_AI_ORIGIN_DISABLED', message: '此域名未启用 AI 服务。', dataSafe: true, nextAction: '请使用问爻正式发布地址。' } }; },
+    async testCapability(payload) { return webAI ? webAI.testCapability(payload) : { ok: false, error: { code: 'WEB_AI_ORIGIN_DISABLED', message: '此域名未启用 AI 密钥输入。', dataSafe: true, nextAction: '请使用问爻正式发布地址。' } }; },
+    async completeSetup(payload) { return webAI ? webAI.completeSetup(payload) : { ok: false, error: { code: 'WEB_AI_ORIGIN_DISABLED', message: '此域名未启用 AI 服务。', dataSafe: true, nextAction: '请使用问爻正式发布地址。' } }; },
+    async cancelSetup() { return webAI ? webAI.cancelSetup() : structuredClone(browserAIStatus); },
     async pauseBuild() { return webAI ? webAI.pauseBuild() : structuredClone(browserAIStatus); },
     async resumeBuild() { return webAI ? webAI.resumeBuild() : structuredClone(browserAIStatus); },
     async cancelBuild() { return webAI ? webAI.cancelBuild() : structuredClone(browserAIStatus); },
-    async removeConnection(id) { return webAI ? webAI.removeConnection(id) : { ok: false, error: { code: 'WEB_AI_ORIGIN_DISABLED', message: '此域名没有 AI 连接。', dataSafe: true, nextAction: '无需管理连接。' } }; },
     async openExternal(url) {
       if (!officialAIUrls.has(url)) return false;
       return window.open(url, '_blank', 'noopener,noreferrer') !== null;
@@ -193,7 +192,7 @@ const browserFallback: DesktopApi = {
   corpus: {
     async status() {
       const aiStatus = webAI ? await webAI.getStatus() : browserAIStatus;
-      return { ...structuredClone(browserCorpusStatus), vectorReady: aiStatus.status === 'ready', vectorModel: aiStatus.activeCapabilities?.embedding.model || '' };
+      return { ...structuredClone(browserCorpusStatus), vectorReady: Boolean(aiStatus.activeFingerprint), vectorModel: aiStatus.activeCapabilities?.embedding?.model || '' };
     },
     async books(payload = {}) {
       const query = String(payload.query || '').toLowerCase();

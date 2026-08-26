@@ -66,7 +66,9 @@ export function ResultScreen({ session, evidence, retrievalDiagnostics, aiStatus
   const retrievalStatusLabel = retrievalDiagnostics
     ? retrievalDiagnostics.rerankUsed
       ? retrievalDiagnostics.vectorUsed ? 'BM25 + 向量 + RRF + 重排' : 'BM25 + 重排（向量降级）'
-      : retrievalDiagnostics.vectorUsed ? 'BM25 + 向量 + RRF（重排降级）' : 'BM25（降级）'
+      : retrievalDiagnostics.vectorUsed
+        ? aiStatus.activeCapabilities?.rerank ? 'BM25 + 向量 + RRF（重排暂不可用）' : 'BM25 + 向量 + RRF'
+        : aiStatus.activeCapabilities?.embedding ? 'BM25（向量暂不可用）' : 'BM25 关键词检索'
     : '';
   const submit = () => {
     if (!aiAvailable || !followUp.trim() || chatting || !sessionReady || !aiReady) return;
@@ -172,7 +174,7 @@ export function ResultScreen({ session, evidence, retrievalDiagnostics, aiStatus
             ) : null}
             {!aiAvailable && !markdownAnalysis && !legacyAnalysis ? <div className="analysis-error"><strong>网页版提供本地排盘</strong><p>起卦、排盘、历史记录和内置古籍均可在当前设备使用；此版本不提供 AI 解读。</p></div> : null}
             {aiAvailable && !analyzing && !markdownAnalysis && !legacyAnalysis && !analysisError ? (
-              <div className="analysis-error"><strong>{!sessionReady ? '排盘保存完成后才能开始解读' : aiReady ? '这条历史记录没有已保存的 AI 解读' : aiPreparing ? 'AI 服务正在准备中' : '需要先连接 AI 服务'}</strong><p>{!sessionReady ? '请等待自动保存完成，或先重试保存本次排盘。' : aiReady ? '打开历史记录不会自动发起新的 AI 请求，如需解读请手动开始。' : aiPreparing ? `向量索引当前完成 ${aiProgress.toFixed(1)}%，完成后才能生成解读。` : '连接向导只需选择服务商、粘贴访问密钥；模型与接口由问爻自动配置。'}</p><button type="button" onClick={onAnalyze} disabled={!sessionReady || aiPreparing}><Sparkles size={16} />{aiReady ? '开始解读' : aiPreparing ? '准备中' : '连接 AI 服务'}</button></div>
+              <div className="analysis-error"><strong>{!sessionReady ? '排盘保存完成后才能开始解读' : aiReady ? '这条历史记录没有已保存的 AI 解读' : aiPreparing ? 'AI 服务正在准备中' : '需要先连接 AI 服务'}</strong><p>{!sessionReady ? '请等待自动保存完成，或先重试保存本次排盘。' : aiReady ? '打开历史记录不会自动发起新的 AI 请求，如需解读请手动开始。' : aiPreparing ? `向量索引当前完成 ${aiProgress.toFixed(1)}%，新方案完成后即可生成解读。` : '连接向导先配置必填的主模型；向量和重排模型均可跳过。'}</p><button type="button" onClick={onAnalyze} disabled={!sessionReady || aiPreparing}><Sparkles size={16} />{aiReady ? '开始解读' : aiPreparing ? '准备中' : '连接 AI 服务'}</button></div>
             ) : null}
             {markdownAnalysis && (!aiAvailable || !analyzing) ? (
               <article className="analysis-report">
@@ -354,7 +356,7 @@ export function ResultScreen({ session, evidence, retrievalDiagnostics, aiStatus
               <input id="follow-up" aria-describedby="follow-up-hint" value={followUp} disabled={!sessionReady || !aiReady} onChange={(event) => setFollowUp(event.target.value)} onKeyDown={(event) => { if (event.key === 'Enter' && !event.nativeEvent.isComposing) submit(); }} placeholder={aiReady ? '基于本次卦象，继续问一个相关问题…' : '连接并准备好 AI 服务后可以继续追问'} />
               <button type="button" onClick={submit} disabled={!followUp.trim() || chatting || !sessionReady || !aiReady}>{chatting ? <span className="small-loader" /> : <Send size={17} />}<span>继续追问</span></button>
             </div>
-            <p id="follow-up-hint">{aiReady ? '按 Enter 发送，回答会继续沿用本次排盘。' : 'AI 解读、向量召回与重排全部就绪后才会发送。'}</p>
+            <p id="follow-up-hint">{aiReady ? '按 Enter 发送，回答会继续沿用本次排盘。' : 'AI 解读主模型就绪后即可发送。'}</p>
           </div> : null}
         </section> : null}
       </div>

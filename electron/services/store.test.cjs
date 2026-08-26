@@ -274,7 +274,7 @@ test('JsonStore never exposes an encrypted secret through public AI state', () =
 test('JsonStore defaults to an unconfigured provider-neutral AI state', () => {
   const store = createStore();
   const state = store.getPublicAIState();
-  assert.equal(state.schemaVersion, 2);
+  assert.equal(state.schemaVersion, 3);
   assert.deepEqual(state.connections, []);
   assert.equal(state.activePipeline, null);
   assert.equal(state.draft, null);

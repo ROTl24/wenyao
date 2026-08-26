@@ -57,12 +57,13 @@ test('完全相同内容拒绝重复导入，同名不同内容允许共存', ()
   assert.equal(committed.results[0].ok, true);
 });
 
-test('未确认外部索引的本地书不能直接启用 AI 检索', () => {
+test('本地书可独立启用关键词检索，确认后再请求向量索引', () => {
   const { root, library } = fixture();
   const preview = library.previewFiles([writeBook(root, '本地书.txt')]);
   const committed = library.commitImport({ batchId: preview.batchId, books: [{ draftId: preview.previews[0].draftId, title: '本地书' }] });
   const id = committed.results[0].book.id;
-  assert.throws(() => library.setEnabled(id, true), (error) => error.code === 'CORPUS_INDEX_CONSENT_REQUIRED');
+  assert.equal(library.setEnabled(id, true).indexState, 'local-only');
+  assert.equal(library.getBook(id).indexRequested, false);
   assert.equal(library.setEnabled(id, true, { requestIndex: true }).indexState, 'pending');
 });
 

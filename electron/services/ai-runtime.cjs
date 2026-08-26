@@ -7,16 +7,18 @@ const {
   embeddingFingerprint,
   expandPreset,
   getProviderCatalog,
-  normalizeConnection,
-  normalizePipeline,
   pipelineFingerprint,
 } = require('./ai-config.cjs');
+const {
+  capabilityConnection,
+  filterModels,
+  normalizeCapabilityLocation,
+} = require('../../shared/ai-setup-core.cjs');
 const {
   createProviderClient,
   discoverModels,
   structuredProviderError,
   validateBaseUrl,
-  withTransientRetry,
 } = require('./ai-provider.cjs');
 const { hybridSearch } = require('./retrieval.cjs');
 const { CorpusIndexCoordinator } = require('./corpus-index.cjs');
@@ -34,7 +36,15 @@ function isLocalUrl(value) {
 }
 
 function uniqueConnections(resolved) {
-  return [...new Map(Object.values(resolved).map((item) => [item.connection.id, item.connection])).values()];
+  return [...new Map(Object.values(resolved).filter(Boolean).map((item) => [item.connection.id, item.connection])).values()];
+}
+
+function emptyPipeline() {
+  return { generation: null, embedding: null, rerank: null };
+}
+
+function configuredCapabilities(pipeline) {
+  return CAPABILITIES.filter((capability) => pipeline?.[capability]?.connectionId);
 }
 
 function staticCorpusLibrary(corpus, corpusHash) {
@@ -134,27 +144,33 @@ class AIRuntime {
     return this.secretStore.decrypt(connection?.encryptedApiKey);
   }
 
-  #connectionsFor(state, draftConnection = null) {
+  #connectionsFor(state, draftConnections = []) {
     const connections = new Map(state.connections.map((connection) => [connection.id, connection]));
-    if (draftConnection) connections.set(draftConnection.id, draftConnection);
+    for (const connection of Array.isArray(draftConnections) ? draftConnections : []) {
+      connections.set(connection.id, connection);
+    }
     return connections;
   }
 
-  #resolvePipeline(state, pipeline, draftConnection = null) {
-    if (!pipeline) {
-      throw runtimeError('尚未选择完整 AI 能力组合', 'AI_NOT_CONFIGURED', '请连接 AI 服务并完成设置。');
+  #resolvePipeline(state, pipeline, draftConnections = []) {
+    if (!pipeline?.generation?.connectionId) {
+      throw runtimeError('尚未配置 AI 解读主模型', 'AI_NOT_CONFIGURED', '请先连接主模型并完成最小测试。');
     }
-    const connections = this.#connectionsFor(state, draftConnection);
-    const resolved = {};
+    if (pipeline.rerank && !pipeline.embedding) {
+      throw runtimeError('重排模型不能脱离向量模型单独使用', 'AI_PIPELINE_INVALID', '请先配置向量模型，或跳过重排模型。');
+    }
+    const connections = this.#connectionsFor(state, draftConnections);
+    const resolved = { generation: null, embedding: null, rerank: null };
     for (const capability of CAPABILITIES) {
       const connectionId = pipeline[capability]?.connectionId;
+      if (!connectionId) continue;
       const connection = connections.get(connectionId);
       const definition = connection?.capabilities?.[capability];
       if (!connection || !definition) {
         throw runtimeError(
-          `尚未配置${capability === 'generation' ? '解读' : capability === 'embedding' ? '向量' : '重排'}能力`,
+          `${capability === 'generation' ? '解读' : capability === 'embedding' ? '向量' : '重排'}配置已失效`,
           'AI_CAPABILITY_MISSING',
-          '请在 AI 高级设置中补齐三项必选能力。',
+          '请重新打开 AI 能力与连接向导完成该项设置。',
         );
       }
       validateBaseUrl(connection.baseUrl);
@@ -168,6 +184,42 @@ class AIRuntime {
       resolved[capability] = { connection, definition, apiKey };
     }
     return resolved;
+  }
+
+  #ensureDraft(state) {
+    if (state.draft) return state.draft;
+    const pipeline = state.activePipeline ? structuredClone(state.activePipeline) : emptyPipeline();
+    const tests = Object.fromEntries(configuredCapabilities(pipeline).map((capability) => [capability, {
+      status: 'passed',
+      checkedAt: new Date().toISOString(),
+    }]));
+    state.draft = {
+      id: crypto.randomUUID(),
+      createdAt: new Date().toISOString(),
+      updatedAt: new Date().toISOString(),
+      connections: [],
+      pipeline,
+      tests,
+      indexTask: null,
+    };
+    return state.draft;
+  }
+
+  #draftConnectionFor(state, capability) {
+    const id = state.draft?.pipeline?.[capability]?.connectionId;
+    if (!id) return null;
+    return this.#connectionsFor(state, state.draft.connections).get(id) || null;
+  }
+
+  #credentialFor(state, capability) {
+    const connection = this.#draftConnectionFor(state, capability)
+      || this.#connectionsFor(state).get(state.activePipeline?.[capability]?.connectionId);
+    if (!connection) throw runtimeError('无法沿用上一项连接', 'AI_CREDENTIAL_SOURCE_MISSING', '请重新填写 API Key。');
+    const apiKey = this.#decryptSecret(connection);
+    if (!apiKey && !isLocalUrl(connection.baseUrl)) {
+      throw runtimeError(`${connection.label}尚未保存访问密钥`, 'AI_KEY_REQUIRED', '请重新填写 API Key。');
+    }
+    return apiKey;
   }
 
   #client(connection, apiKey) {
@@ -197,6 +249,13 @@ class AIRuntime {
     try { resolved = this.#resolvePipeline(state, state.activePipeline); }
     catch { return; }
     const embedding = resolved.embedding;
+    if (!embedding) return;
+    const identity = this.#prepareExistingIndex(embedding);
+    const shards = this.corpusLibrary.getShardDescriptors({ enabledOnly: true, indexRequestedOnly: true });
+    if (this.corpusIndex.readyShards(identity, shards).length > 0) this.activeFingerprint = identity.fingerprint;
+  }
+
+  #prepareExistingIndex(embedding) {
     const identity = this.#embeddingIdentity(embedding);
     const shards = this.corpusLibrary.getShardDescriptors({ enabledOnly: true, indexRequestedOnly: true });
     const builtIn = shards.find((shard) => shard.id === 'builtin');
@@ -208,7 +267,7 @@ class AIRuntime {
         legacyBases: [path.join(this.indexRoot, legacyFingerprint, 'corpus-vectors'), ...this.legacyIndexBases],
       });
     }
-    if (this.corpusIndex.readyShards(identity, shards).length > 0) this.activeFingerprint = identity.fingerprint;
+    return identity;
   }
 
   getStatus() {
@@ -219,7 +278,7 @@ class AIRuntime {
     let activeCapabilities = null;
     try {
       const resolved = this.#resolvePipeline(raw, raw.activePipeline);
-      activeCapabilities = Object.fromEntries(CAPABILITIES.map((capability) => [capability, {
+      activeCapabilities = Object.fromEntries(CAPABILITIES.filter((capability) => resolved[capability]).map((capability) => [capability, {
         connectionId: resolved[capability].connection.id,
         providerId: resolved[capability].connection.providerId,
         label: resolved[capability].connection.label,
@@ -228,17 +287,21 @@ class AIRuntime {
       if (!raw.consentAcceptedAt) {
         status = 'needs-consent';
         message = '需要确认 AI 数据发送范围';
-      } else if (!this.activeFingerprint
+      } else if (resolved.embedding && (!this.activeFingerprint
         || this.#embeddingIdentity(resolved.embedding).fingerprint !== this.activeFingerprint
         || this.corpusIndex.readyShards(
           this.#embeddingIdentity(resolved.embedding),
           this.corpusLibrary.getShardDescriptors({ enabledOnly: true, indexRequestedOnly: true }),
-        ).length === 0) {
+        ).length === 0)) {
         status = 'index-required';
         message = '需要构建向量索引';
       } else {
         status = 'ready';
-        message = '解读、向量与重排均已就绪';
+        message = resolved.rerank
+          ? '关键词、向量与重排检索均已就绪'
+          : resolved.embedding
+            ? '关键词与向量检索均已就绪'
+            : '主模型与本地关键词检索已就绪';
       }
     } catch (error) {
       if (raw.activePipeline) {
@@ -256,12 +319,12 @@ class AIRuntime {
     } else if (task?.stage === 'error') {
       status = 'error';
       message = task.error?.message || '向量索引构建失败';
-    } else if (raw.draft?.testResult?.status === 'testing') {
+    } else if (Object.values(raw.draft?.tests || {}).some((test) => test?.status === 'testing')) {
       status = 'testing';
-      message = '正在检测三项 AI 能力';
-    } else if (raw.draft?.testResult?.status === 'failed') {
+      message = '正在执行最小连接测试';
+    } else if (Object.values(raw.draft?.tests || {}).some((test) => test?.status === 'failed')) {
       status = 'error';
-      message = raw.draft.testResult.error?.message || 'AI 能力检测失败';
+      message = Object.values(raw.draft.tests).find((test) => test?.status === 'failed')?.error?.message || 'AI 能力测试失败';
     }
     return {
       status,
@@ -277,128 +340,102 @@ class AIRuntime {
     };
   }
 
-  async discoverModels(payload) {
-    const baseUrl = validateBaseUrl(payload?.baseUrl);
-    const apiKey = String(payload?.apiKey || '').trim();
+  async listModels(payload) {
+    const capability = String(payload?.capability || '');
+    if (!CAPABILITIES.includes(capability)) throw new Error('未知的 AI 能力');
+    const location = normalizeCapabilityLocation(capability, payload?.apiUrl);
+    const baseUrl = validateBaseUrl(location.baseUrl);
+    const state = this.store.getRawAIState();
+    const apiKey = String(payload?.apiKey || '').trim()
+      || (payload?.credentialSource ? this.#credentialFor(state, payload.credentialSource) : '');
     if (!apiKey && !isLocalUrl(baseUrl)) {
       throw runtimeError('请粘贴 API Key', 'AI_KEY_REQUIRED', 'API Key 可在服务商控制台的 API Keys 或密钥管理页面创建。');
     }
-    return discoverModels({
+    const discovered = await discoverModels({
       baseUrl,
       apiKey,
+      capability,
       signal: AbortSignal.timeout(30000),
       fetchImpl: this.fetchImpl,
     });
+    const modelIds = filterModels(capability, discovered);
+    return {
+      modelIds,
+      ...(modelIds.length ? {} : { warning: '模型目录未标注该类能力，请手动填写服务商文档中的模型名称。' }),
+    };
   }
 
-  saveDraft(payload) {
-    const state = this.store.getRawAIState();
-    let connection;
-    let pipeline;
-    if (payload?.presetId) {
-      ({ connection, pipeline } = expandPreset(payload.presetId, payload.fields || {}));
-    } else {
-      connection = normalizeConnection({
-        ...(payload?.connection || {}),
-        id: payload?.connection?.id || `custom-${crypto.randomUUID()}`,
-      });
-      pipeline = normalizePipeline(payload?.pipeline);
-      if (!connection || !pipeline) throw new Error('自定义 AI 草稿不完整');
+  async testCapability(payload) {
+    let state = this.store.getRawAIState();
+    const capability = String(payload?.capability || '');
+    if (!CAPABILITIES.includes(capability)) throw new Error('未知的 AI 能力');
+    const draft = this.#ensureDraft(state);
+    if (capability === 'rerank' && !draft.pipeline.embedding) {
+      throw runtimeError('请先配置向量模型', 'AI_EMBEDDING_REQUIRED', '重排模型只能在向量检索之后使用。');
     }
-    const existing = state.connections.find((item) => item.id === connection.id);
-    const apiKey = String(payload?.apiKey || '').trim();
-    connection.encryptedApiKey = apiKey ? this.#encryptSecret(apiKey) : existing?.encryptedApiKey || '';
+    const previous = this.#draftConnectionFor(state, capability);
+    const previousIsShared = previous && CAPABILITIES.some((other) => (
+      other !== capability && draft.pipeline[other]?.connectionId === previous.id
+    ));
+    const connection = capabilityConnection({
+      capability,
+      apiUrl: payload?.apiUrl,
+      model: payload?.model,
+      id: previousIsShared ? undefined : previous?.id,
+      createdAt: previousIsShared ? undefined : previous?.createdAt,
+      dimensions: previous?.capabilities?.embedding?.dimensions,
+    });
+    validateBaseUrl(connection.baseUrl);
+    const submitted = String(payload?.apiKey || '').trim();
+    let apiKey = submitted
+      || (payload?.credentialSource ? this.#credentialFor(state, payload.credentialSource) : '')
+      || (previous ? this.#decryptSecret(previous) : '');
+    if (!apiKey && state.activePipeline?.[capability]) {
+      apiKey = this.#credentialFor({ ...state, draft: null }, capability);
+    }
+    connection.encryptedApiKey = apiKey ? this.#encryptSecret(apiKey) : '';
     if (!connection.encryptedApiKey && !isLocalUrl(connection.baseUrl)) {
-      throw runtimeError('请粘贴访问密钥', 'AI_KEY_REQUIRED', '访问密钥相当于 AI 服务的专用密码，可在服务商官方控制台创建。');
+      throw runtimeError('请填写 API Key', 'AI_KEY_REQUIRED', 'API Key 可在服务商控制台的密钥管理页面创建。');
     }
-    const draft = {
-      id: crypto.randomUUID(),
-      createdAt: new Date().toISOString(),
-      updatedAt: new Date().toISOString(),
-      connection,
-      pipeline,
-      testResult: null,
-      indexTask: null,
-    };
-    state.draft = draft;
+    draft.connections = [...draft.connections.filter((item) => item.id !== connection.id), connection];
+    draft.pipeline[capability] = { connectionId: connection.id };
+    draft.tests[capability] = { status: 'testing' };
+    draft.updatedAt = new Date().toISOString();
     if (payload?.consentAccepted) state.consentAcceptedAt = new Date().toISOString();
     this.store.saveAIState(state);
     this.#emit();
-    return this.getStatus();
-  }
-
-  async testDraft() {
-    let state = this.store.getRawAIState();
-    if (!state.draft) throw new Error('没有待检测的 AI 配置草稿');
-    state.draft.testResult = { status: 'testing', startedAt: new Date().toISOString(), capabilities: {} };
-    this.store.saveAIState(state);
-    this.#emit();
     try {
-      const resolved = this.#resolvePipeline(state, state.draft.pipeline, state.draft.connection);
-      const clients = new Map(uniqueConnections(resolved).map((connection) => {
-        const item = Object.values(resolved).find((candidate) => candidate.connection.id === connection.id);
-        return [connection.id, this.#client(connection, item.apiKey)];
-      }));
-      for (const capability of CAPABILITIES) {
-        const item = resolved[capability];
-        const client = clients.get(item.connection.id);
-        const models = await client.listModels(capability, AbortSignal.timeout(30000));
-        if (models && !models.includes(item.definition.model)) {
-          throw runtimeError(
-            `${item.connection.label}当前账号不可用模型：${item.definition.model}`,
-            'AI_MODEL_UNAVAILABLE',
-            '请检查账号权限；问爻不会静默替换为其他模型。',
-          );
-        }
-        if (capability === 'generation') {
-          await client.chat({
-            messages: [{ role: 'user', content: '只回复：连接成功' }],
-            maxTokens: 16,
-            signal: AbortSignal.timeout(60000),
-          });
-        } else if (capability === 'embedding') {
-          const embeddings = await withTransientRetry(
-            () => client.embed(['六爻模型连接测试'], { signal: AbortSignal.timeout(30000) }),
-            { retries: 2 },
-          );
-          const dimensions = embeddings[0]?.length;
-          if (!Number.isInteger(dimensions) || dimensions <= 0 || dimensions > 8192) {
-            throw runtimeError('向量模型没有返回有效维度', 'AI_EMBEDDING_DIMENSION_MISSING', '请在高级设置中核对向量模型。');
-          }
-          if (!item.definition.dimensions) {
-            state = this.store.getRawAIState();
-            if (state.draft?.connection.id === item.connection.id && state.draft.connection.capabilities.embedding) {
-              state.draft.connection.capabilities.embedding.dimensions = dimensions;
-              this.store.saveAIState(state);
-            }
-          }
-        } else {
-          await withTransientRetry(
-            () => client.rerank('事业', ['官鬼为事业用神', '妻财为求财用神'], { topN: 1, signal: AbortSignal.timeout(30000) }),
-            { retries: 2 },
-          );
+      const client = this.#client(connection, apiKey);
+      if (capability === 'generation') {
+        await client.chat({
+          messages: [{ role: 'user', content: '只回复：连接成功' }],
+          maxTokens: 16,
+          signal: AbortSignal.timeout(60000),
+        });
+      } else if (capability === 'embedding') {
+        const embeddings = await client.embed(['六爻模型连接测试'], { signal: AbortSignal.timeout(30000) });
+        const dimensions = embeddings[0]?.length;
+        if (!Number.isInteger(dimensions) || dimensions <= 0 || dimensions > 8192) {
+          throw runtimeError('向量模型没有返回有效维度', 'AI_EMBEDDING_DIMENSION_MISSING', '请核对向量模型和接口地址。');
         }
         state = this.store.getRawAIState();
-        state.draft.testResult.capabilities[capability] = { ok: true, checkedAt: new Date().toISOString() };
+        const saved = state.draft?.connections.find((item) => item.id === connection.id);
+        if (saved?.capabilities.embedding) saved.capabilities.embedding.dimensions = dimensions;
         this.store.saveAIState(state);
-        this.#emit();
+      } else {
+        await client.rerank('事业', ['官鬼为事业用神', '妻财为求财用神'], { topN: 1, signal: AbortSignal.timeout(30000) });
       }
       state = this.store.getRawAIState();
-      state.draft.testResult = {
-        ...state.draft.testResult,
-        status: 'passed',
-        completedAt: new Date().toISOString(),
-      };
+      state.draft.tests[capability] = { status: 'passed', checkedAt: new Date().toISOString() };
       this.store.saveAIState(state);
       this.#emit();
       return { ok: true, status: this.getStatus() };
     } catch (error) {
       state = this.store.getRawAIState();
       if (state.draft) {
-        state.draft.testResult = {
-          ...state.draft.testResult,
+        state.draft.tests[capability] = {
           status: 'failed',
-          completedAt: new Date().toISOString(),
+          checkedAt: new Date().toISOString(),
           error: structuredProviderError(error, 'AI_CONNECTION_FAILED'),
         };
         this.store.saveAIState(state);
@@ -406,6 +443,88 @@ class AIRuntime {
       this.#emit();
       return { ok: false, error: structuredProviderError(error, 'AI_CONNECTION_FAILED'), status: this.getStatus() };
     }
+  }
+
+  cancelSetup() {
+    const state = this.store.getRawAIState();
+    state.draft = null;
+    this.store.saveAIState(state);
+    this.#emit();
+    return this.getStatus();
+  }
+
+  stagePreset(presetId, apiKey, consentAccepted = false) {
+    const state = this.store.getRawAIState();
+    const expanded = expandPreset(presetId);
+    const encryptedApiKey = this.#encryptSecret(String(apiKey || '').trim());
+    const connections = [];
+    const pipeline = emptyPipeline();
+    for (const capability of CAPABILITIES) {
+      const definition = expanded.connection.capabilities[capability];
+      if (!definition) continue;
+      const connection = capabilityConnection({
+        capability,
+        apiUrl: definition.url || `${expanded.connection.baseUrl}${definition.path || ''}`,
+        model: definition.model,
+        dimensions: definition.dimensions,
+      });
+      connection.providerId = expanded.connection.providerId;
+      connection.label = expanded.connection.label;
+      connection.presetId = expanded.connection.presetId;
+      connection.encryptedApiKey = encryptedApiKey;
+      connections.push(connection);
+      pipeline[capability] = { connectionId: connection.id };
+    }
+    state.draft = {
+      id: crypto.randomUUID(),
+      createdAt: new Date().toISOString(),
+      updatedAt: new Date().toISOString(),
+      connections,
+      pipeline,
+      tests: {},
+      indexTask: null,
+    };
+    if (consentAccepted) state.consentAcceptedAt = new Date().toISOString();
+    this.store.saveAIState(state);
+    this.#emit();
+    return this.getStatus();
+  }
+
+  async testDraftCapabilities() {
+    let state = this.store.getRawAIState();
+    const capabilities = configuredCapabilities(state.draft?.pipeline);
+    for (const capability of capabilities) {
+      state = this.store.getRawAIState();
+      const connection = this.#draftConnectionFor(state, capability);
+      const definition = connection?.capabilities?.[capability];
+      const result = await this.testCapability({
+        capability,
+        apiUrl: definition?.url || `${connection?.baseUrl || ''}${definition?.path || ''}`,
+        model: definition?.model,
+      });
+      if (!result.ok) return result;
+    }
+    return { ok: true, status: this.getStatus() };
+  }
+
+  rebuildActiveIndex() {
+    const state = this.store.getRawAIState();
+    const capabilities = configuredCapabilities(state.activePipeline);
+    if (!capabilities.includes('embedding')) {
+      throw runtimeError('当前方案未启用向量模型', 'AI_EMBEDDING_REQUIRED', '关键词检索不需要重建向量。');
+    }
+    state.draft = {
+      id: crypto.randomUUID(),
+      createdAt: new Date().toISOString(),
+      updatedAt: new Date().toISOString(),
+      connections: [],
+      pipeline: structuredClone(state.activePipeline),
+      tests: Object.fromEntries(capabilities.map((capability) => [capability, { status: 'passed', checkedAt: new Date().toISOString() }])),
+      indexTask: null,
+      bulkEmbeddingAccepted: true,
+    };
+    this.store.saveAIState(state);
+    return this.completeSetup({ capabilities, bulkEmbeddingAccepted: true });
   }
 
   #updateDraftTask(update) {
@@ -416,7 +535,7 @@ class AIRuntime {
     this.#emit();
   }
 
-  async buildAndActivate() {
+  async completeSetup(payload = {}) {
     if (this.vectorBuildPromise) {
       if (this.vectorBuildControl?.paused) {
         this.vectorBuildControl.paused = false;
@@ -425,12 +544,43 @@ class AIRuntime {
       return this.vectorBuildPromise;
     }
     const initial = this.store.getRawAIState();
-    if (!initial.draft || initial.draft.testResult?.status !== 'passed') {
-      throw runtimeError('请先完成三项 AI 能力检测', 'AI_TEST_REQUIRED', '检测通过后才能构建向量索引。');
+    const draft = this.#ensureDraft(initial);
+    const requested = [...new Set(Array.isArray(payload.capabilities) ? payload.capabilities : [])]
+      .filter((capability) => CAPABILITIES.includes(capability));
+    if (!requested.includes('generation')) throw runtimeError('主模型尚未配置', 'AI_GENERATION_REQUIRED', '请先完成主模型最小测试。');
+    if (requested.includes('rerank') && !requested.includes('embedding')) {
+      throw runtimeError('重排模型不能脱离向量模型使用', 'AI_PIPELINE_INVALID', '请保留向量模型，或同时跳过向量和重排。');
+    }
+    for (const capability of CAPABILITIES) {
+      if (!requested.includes(capability)) draft.pipeline[capability] = null;
+    }
+    for (const capability of requested) {
+      if (!draft.pipeline[capability] || draft.tests[capability]?.status !== 'passed') {
+        throw runtimeError(`请先完成${capability === 'generation' ? '主模型' : capability === 'embedding' ? '向量模型' : '重排模型'}最小测试`, 'AI_TEST_REQUIRED', '返回对应页面完成测试后再继续。');
+      }
     }
     if (!initial.consentAcceptedAt) {
       throw runtimeError('请先确认 AI 数据发送范围', 'AI_CONSENT_REQUIRED', '阅读并确认数据边界后再继续。');
     }
+    draft.updatedAt = new Date().toISOString();
+    if (!requested.includes('embedding')) {
+      this.#activateDraft(initial, '');
+      return { ok: true, status: this.getStatus() };
+    }
+    const resolved = this.#resolvePipeline(initial, draft.pipeline, draft.connections);
+    const embedding = resolved.embedding;
+    const identity = this.#prepareExistingIndex(embedding);
+    const requestedShards = this.corpusLibrary.getShardDescriptors({ enabledOnly: true, indexRequestedOnly: true });
+    if (requestedShards.length && this.corpusIndex.readyShards(identity, requestedShards).length === requestedShards.length) {
+      this.#activateDraft(initial, identity.fingerprint);
+      return { ok: true, status: this.getStatus() };
+    }
+    const bundled = embedding.definition.model === 'text-embedding-v4' && embedding.definition.dimensions === 1024;
+    if (!bundled && !payload.bulkEmbeddingAccepted) {
+      throw runtimeError('尚未确认批量向量建库', 'AI_BULK_CONSENT_REQUIRED', '请确认古籍分批发送数量与服务商费用后再继续。');
+    }
+    draft.bulkEmbeddingAccepted = Boolean(payload.bulkEmbeddingAccepted);
+    this.store.saveAIState(initial);
     const control = { paused: false, cancelled: false };
     this.vectorBuildControl = control;
     const operation = this.#buildAndActivate(initial, control)
@@ -446,7 +596,7 @@ class AIRuntime {
   }
 
   async #buildAndActivate(initial, control) {
-    const resolved = this.#resolvePipeline(initial, initial.draft.pipeline, initial.draft.connection);
+    const resolved = this.#resolvePipeline(initial, initial.draft.pipeline, initial.draft.connections);
     const embedding = resolved.embedding;
     const identity = this.#embeddingIdentity(embedding);
     const shards = this.corpusLibrary.getShardDescriptors({ enabledOnly: true, indexRequestedOnly: true });
@@ -458,10 +608,7 @@ class AIRuntime {
         identity,
         shards,
         control,
-        embed: (batch) => withTransientRetry(
-          () => client.embed(batch, { signal: AbortSignal.timeout(60000) }),
-          { retries: 2 },
-        ),
+        embed: (batch) => client.embed(batch, { signal: AbortSignal.timeout(60000) }),
         onProgress: (progress) => this.#updateDraftTask({
           stage: progress.paused ? 'paused' : 'building',
           fingerprint: identity.fingerprint,
@@ -488,10 +635,10 @@ class AIRuntime {
 
   #activateDraft(state, fingerprint) {
     if (!state.draft) throw new Error('AI 配置草稿已不存在');
-    const draftConnection = state.draft.connection;
+    const draftIds = new Set(state.draft.connections.map((connection) => connection.id));
     state.connections = [
-      ...state.connections.filter((connection) => connection.id !== draftConnection.id),
-      draftConnection,
+      ...state.connections.filter((connection) => !draftIds.has(connection.id)),
+      ...state.draft.connections,
     ];
     state.activePipeline = state.draft.pipeline;
     state.draft = null;
@@ -513,7 +660,12 @@ class AIRuntime {
       this.#updateDraftTask({ stage: 'building' });
       return this.getStatus();
     }
-    void this.buildAndActivate().catch((error) => {
+    const state = this.store.getRawAIState();
+    const capabilities = configuredCapabilities(state.draft?.pipeline);
+    void this.completeSetup({
+      capabilities,
+      bulkEmbeddingAccepted: Boolean(state.draft?.bulkEmbeddingAccepted),
+    }).catch((error) => {
       this.#updateDraftTask({ stage: 'error', error: structuredProviderError(error, 'VECTOR_INDEX_FAILED') });
     });
     return this.getStatus();
@@ -526,11 +678,12 @@ class AIRuntime {
 
   async indexBooks(bookIds) {
     if (this.vectorBuildPromise) throw runtimeError('正在切换 AI 向量方案', 'AI_INDEX_BUSY', '请等待当前完整索引任务结束。');
+    const { state, resolved } = this.#activeRuntime();
+    if (!resolved.embedding) throw runtimeError('当前方案未启用向量模型', 'AI_EMBEDDING_REQUIRED', '关键词检索无需远程建库；如需向量检索，请先配置向量模型。');
     for (const id of Array.isArray(bookIds) ? bookIds : []) this.libraryBuildQueue.add(String(id));
     if (this.libraryBuildPromise) {
       return this.libraryBuildPromise;
     }
-    const { state } = this.#activeRuntime();
     if (!state.consentAcceptedAt) throw runtimeError('尚未确认 AI 数据发送范围', 'AI_CONSENT_REQUIRED', '请先确认后再建立用户古籍索引。');
     if (!this.libraryBuildQueue.size) {
       for (const book of this.#allLibraryBooks()) {
@@ -557,6 +710,7 @@ class AIRuntime {
       const wanted = new Set(this.libraryBuildQueue);
       this.libraryBuildQueue.clear();
       const { resolved } = this.#activeRuntime();
+      if (!resolved.embedding) break;
       const shards = this.corpusLibrary.getShardDescriptors({ enabledOnly: true, indexRequestedOnly: true })
         .filter((shard) => shard.origin === 'user' && wanted.has(shard.id));
       if (!shards.length) continue;
@@ -581,10 +735,7 @@ class AIRuntime {
         identity,
         shards,
         control,
-        embed: (batch) => withTransientRetry(
-          () => client.embed(batch, { signal: AbortSignal.timeout(60000) }),
-          { retries: 2 },
-        ),
+        embed: (batch) => client.embed(batch, { signal: AbortSignal.timeout(60000) }),
         onProgress: (progress) => {
           currentShardId = progress.shardId;
           this.corpusLibrary.markIndexState(
@@ -651,9 +802,11 @@ class AIRuntime {
     let vectorModel = '';
     try {
       const { resolved } = this.#activeRuntime();
-      const identity = this.#embeddingIdentity(resolved.embedding);
-      readyShardIds = this.corpusIndex.readyShards(identity, shards).map((shard) => shard.id);
-      vectorModel = identity.model;
+      if (resolved.embedding) {
+        const identity = this.#embeddingIdentity(resolved.embedding);
+        readyShardIds = this.corpusIndex.readyShards(identity, shards).map((shard) => shard.id);
+        vectorModel = identity.model;
+      }
     } catch {}
     return {
       ...overview,
@@ -663,52 +816,48 @@ class AIRuntime {
       ruleCount: entries.filter((entry) => entry.knowledgeKind === 'rule').length,
       caseCount: entries.filter((entry) => entry.knowledgeKind === 'case').length,
       doctrineCount: entries.filter((entry) => entry.knowledgeKind === 'doctrine').length,
-      vectorReady: Boolean(this.activeFingerprint),
+      vectorReady: Boolean(vectorModel && this.activeFingerprint),
       vectorModel,
       readyShardIds,
       ready: entries.length > 0,
     };
   }
 
-  removeConnection(id) {
-    const state = this.store.getRawAIState();
-    if (CAPABILITIES.some((capability) => state.activePipeline?.[capability]?.connectionId === id)) {
-      throw runtimeError('不能删除当前正在使用的 AI 连接', 'AI_CONNECTION_ACTIVE', '请先启用其他完整能力组合。');
-    }
-    state.connections = state.connections.filter((connection) => connection.id !== id);
-    if (state.draft?.connection?.id === id) state.draft = null;
-    this.store.saveAIState(state);
-    this.#emit();
-    return this.getStatus();
-  }
-
   #activeRuntime() {
     const state = this.store.getRawAIState();
     const resolved = this.#resolvePipeline(state, state.activePipeline);
     if (!state.consentAcceptedAt) throw runtimeError('尚未确认 AI 数据发送范围', 'AI_CONSENT_REQUIRED', '请在设置中确认后继续。');
-    if (!this.activeFingerprint) throw runtimeError('向量索引尚未就绪', 'AI_INDEX_REQUIRED', '请先完成向量索引构建。');
-    const identity = this.#embeddingIdentity(resolved.embedding);
-    if (identity.fingerprint !== this.activeFingerprint) throw runtimeError('当前向量索引与 AI 配置不一致', 'AI_INDEX_REQUIRED', '请重新建立向量索引。');
-    const requestedShards = this.corpusLibrary.getShardDescriptors({ enabledOnly: true, indexRequestedOnly: true });
-    const shards = this.corpusIndex.readyShards(identity, requestedShards);
-    if (!shards.length) throw runtimeError('没有可用的严格检索分片', 'AI_INDEX_REQUIRED', '请至少完成一本已启用古籍的向量索引。');
-    return { state, resolved, identity, shards };
+    const shards = this.corpusLibrary.getShardDescriptors({ enabledOnly: true, indexRequestedOnly: false });
+    if (!shards.length) throw runtimeError('没有已启用的古籍', 'AI_CORPUS_REQUIRED', '请至少启用一本古籍后重试。');
+    let identity = null;
+    let vectorShards = [];
+    if (resolved.embedding) {
+      if (!this.activeFingerprint) throw runtimeError('向量索引尚未就绪', 'AI_INDEX_REQUIRED', '请先完成向量索引构建。');
+      identity = this.#embeddingIdentity(resolved.embedding);
+      if (identity.fingerprint !== this.activeFingerprint) throw runtimeError('当前向量索引与 AI 配置不一致', 'AI_INDEX_REQUIRED', '请重新建立向量索引。');
+      const requestedShards = this.corpusLibrary.getShardDescriptors({ enabledOnly: true, indexRequestedOnly: true });
+      vectorShards = this.corpusIndex.readyShards(identity, requestedShards);
+      if (!vectorShards.length) throw runtimeError('没有可用的向量检索分片', 'AI_INDEX_REQUIRED', '请至少完成一本已启用古籍的向量索引。');
+    }
+    return { state, resolved, identity, shards, vectorShards };
   }
 
   async search(payload) {
-    const { resolved, identity, shards } = this.#activeRuntime();
-    const embeddingClient = this.#client(resolved.embedding.connection, resolved.embedding.apiKey);
-    const rerankClient = this.#client(resolved.rerank.connection, resolved.rerank.apiKey);
+    const { resolved, identity, shards, vectorShards } = this.#activeRuntime();
+    const embeddingClient = resolved.embedding ? this.#client(resolved.embedding.connection, resolved.embedding.apiKey) : null;
+    const rerankClient = resolved.rerank ? this.#client(resolved.rerank.connection, resolved.rerank.apiKey) : null;
     const result = await hybridSearch({
       lexicalSearch: (query, domainTerms, limit) => this.corpusLibrary.lexicalSearch({ shards, query, domainTerms, limit }),
       hydrate: (ids) => this.corpusLibrary.hydrateEntries(ids, shards),
       query: String(payload.query || ''),
       domainTerms: Array.isArray(payload.domainTerms) ? payload.domainTerms : [],
-      vectorSearch: async (query) => {
+      vectorSearch: embeddingClient ? async (query) => {
         const [vector] = await embeddingClient.embed([query], { signal: AbortSignal.timeout(30000) });
-        return this.corpusIndex.search(identity, shards, vector, 40);
-      },
-      rerank: (query, documents) => rerankClient.rerank(query, documents, { topN: 16, signal: AbortSignal.timeout(60000) }),
+        return this.corpusIndex.search(identity, vectorShards, vector, 40);
+      } : undefined,
+      rerank: rerankClient
+        ? (query, documents) => rerankClient.rerank(query, documents, { topN: 16, signal: AbortSignal.timeout(60000) })
+        : undefined,
     });
     result.diagnostics.corpusVersion = crypto.createHash('sha256')
       .update(shards.map((shard) => `${shard.id}:${shard.contentHash}`).sort().join('|'))
@@ -730,7 +879,7 @@ class AIRuntime {
       chat: (request) => generationClient.chat(request),
       signal: AbortSignal.timeout(180000),
     });
-    report.provider = Object.fromEntries(CAPABILITIES.map((capability) => [capability, {
+    report.provider = Object.fromEntries(CAPABILITIES.filter((capability) => resolved[capability]).map((capability) => [capability, {
       providerId: resolved[capability].connection.providerId,
       connectionLabel: resolved[capability].connection.label,
       model: resolved[capability].definition.model,
@@ -746,7 +895,7 @@ class AIRuntime {
       chat: (request) => generationClient.chat(request),
       signal: AbortSignal.timeout(180000),
     });
-    answer.provider = Object.fromEntries(CAPABILITIES.map((capability) => [capability, {
+    answer.provider = Object.fromEntries(CAPABILITIES.filter((capability) => resolved[capability]).map((capability) => [capability, {
       providerId: resolved[capability].connection.providerId,
       connectionLabel: resolved[capability].connection.label,
       model: resolved[capability].definition.model,

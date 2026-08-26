@@ -110,9 +110,8 @@ export function CorpusLibraryPanel({ aiStatus, onClose }: Props) {
 
   const toggleBook = async (book: CorpusBookSummary) => {
     let requestIndex = false;
-    if (!book.enabled && book.origin === 'user' && book.indexState === 'local-only') {
-      requestIndex = window.confirm('启用后需要把该书正文发送给当前向量服务建立索引。是否继续？');
-      if (!requestIndex) return;
+    if (!book.enabled && book.origin === 'user' && book.indexState === 'local-only' && aiStatus.activeCapabilities?.embedding) {
+      requestIndex = window.confirm('是否同时把该书正文发送给当前向量服务建立索引？选择“取消”仍会仅启用本地关键词检索。');
     }
     const response = await desktop.corpus.setEnabled(book.id, !book.enabled, requestIndex);
     if (!response.ok) setError(response.error?.message || '无法更新书籍状态');
@@ -206,7 +205,7 @@ export function CorpusLibraryPanel({ aiStatus, onClose }: Props) {
                 <label className="panel-search"><Search size={15} /><input aria-label="搜索书内原文" value={entryQuery} onChange={(event) => void searchEntries(event.target.value)} placeholder="搜索本书片段" /></label>
                 <div className="corpus-entry-list">{entries.map((entry) => <article key={entry.id}><strong>{entry.title}</strong><small>{entry.location}</small><p>{entry.text}</p></article>)}</div>
               </>
-            ) : <div className="corpus-detail-empty"><BookOpen /><strong>选择一本书查看原文片段</strong><p>用户上传内容只在确认后发送给向量服务。</p></div>}
+            ) : <div className="corpus-detail-empty"><BookOpen /><strong>选择一本书查看原文片段</strong><p>已启用的用户古籍会参与本地关键词检索；只有确认建立向量索引后才发送给向量服务。</p></div>}
           </section>
         </div>
         {error ? <p className="corpus-panel-error" role="alert">{error}</p> : null}

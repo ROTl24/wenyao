@@ -87,10 +87,10 @@ describe('平台能力', () => {
     });
 
     const status = await desktop.aiConfig.getStatus();
-    const result = await desktop.aiConfig.saveDraft({});
+    const result = await desktop.aiConfig.testCapability({ capability: 'generation', apiUrl: '', model: '' });
 
     expect(status.message).toContain('当前页面会话');
-    expect(result.error).toMatchObject({ code: 'WEB_AI_RUNTIME_UNAVAILABLE' });
+    expect(result.error?.code).toMatch(/^WEB_AI_(?:RUNTIME|LOCKS)_UNAVAILABLE$/);
     expect(`${result.error?.message}${result.error?.nextAction}`).not.toContain('Electron');
   });
 

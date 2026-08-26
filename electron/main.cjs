@@ -4,7 +4,8 @@ const crypto = require('node:crypto');
 const fs = require('node:fs');
 const path = require('node:path');
 const { pathToFileURL } = require('node:url');
-const { AIRuntime, runtimeError } = require('./services/ai-runtime.cjs');
+const { AIRuntime } = require('./services/ai-runtime.cjs');
+const { CAPABILITIES } = require('./services/ai-config.cjs');
 const { structuredProviderError } = require('./services/ai-provider.cjs');
 const { configureApplicationPaths } = require('./services/app-paths.cjs');
 const { CorpusIndexCoordinator } = require('./services/corpus-index.cjs');
@@ -192,26 +193,22 @@ function registerIpc() {
 
   ipcMain.handle('ai-config:get-catalog', () => aiRuntime.getCatalog());
   ipcMain.handle('ai-config:get-status', () => aiRuntime.getStatus());
-  ipcMain.handle('ai-config:discover-models', async (_event, payload) => {
-    try { return { ok: true, modelIds: await aiRuntime.discoverModels(payload) }; }
+  ipcMain.handle('ai-config:list-models', async (_event, payload) => {
+    try { return { ok: true, ...(await aiRuntime.listModels(payload)) }; }
     catch (error) { return { ok: false, error: structuredProviderError(error, 'AI_MODEL_DISCOVERY_FAILED') }; }
   });
-  ipcMain.handle('ai-config:save-draft', (_event, payload) => {
-    try { return { ok: true, status: aiRuntime.saveDraft(payload) }; }
-    catch (error) { return { ok: false, error: structuredProviderError(error, 'AI_DRAFT_INVALID') }; }
+  ipcMain.handle('ai-config:test-capability', async (_event, payload) => {
+    try { return await aiRuntime.testCapability(payload); }
+    catch (error) { return { ok: false, error: structuredProviderError(error, 'AI_CONNECTION_FAILED'), status: aiRuntime.getStatus() }; }
   });
-  ipcMain.handle('ai-config:test-draft', () => aiRuntime.testDraft());
-  ipcMain.handle('ai-config:build-and-activate', async () => {
-    try { return await aiRuntime.buildAndActivate(); }
+  ipcMain.handle('ai-config:complete-setup', async (_event, payload) => {
+    try { return await aiRuntime.completeSetup(payload); }
     catch (error) { return { ok: false, error: structuredProviderError(error, 'VECTOR_INDEX_FAILED'), status: aiRuntime.getStatus() }; }
   });
+  ipcMain.handle('ai-config:cancel-setup', () => aiRuntime.cancelSetup());
   ipcMain.handle('ai-config:pause-build', () => aiRuntime.pauseBuild());
   ipcMain.handle('ai-config:resume-build', () => aiRuntime.resumeBuild());
   ipcMain.handle('ai-config:cancel-build', () => aiRuntime.cancelBuild());
-  ipcMain.handle('ai-config:remove-connection', (_event, id) => {
-    try { return { ok: true, status: aiRuntime.removeConnection(String(id || '')) }; }
-    catch (error) { return { ok: false, error: structuredProviderError(error, 'AI_CONNECTION_REMOVE_FAILED') }; }
-  });
   ipcMain.handle('ai-config:open-external', async (_event, url) => {
     if (!allowedExternalUrl(url, aiRuntime.getCatalog())) return false;
     await shell.openExternal(url);
@@ -241,10 +238,8 @@ function registerIpc() {
   });
   ipcMain.handle('corpus:commit-import', (_event, payload) => {
     try {
-      if (payload?.sendForIndex && !aiRuntime.getStatus().activeFingerprint) {
-        throw runtimeError('AI 向量服务尚未就绪', 'AI_INDEX_REQUIRED', '可先仅保存到本地，或完成 AI 设置后再启用。');
-      }
-      const result = corpusLibrary.commitImport(payload || {});
+      const vectorEnabled = Boolean(aiRuntime.getStatus().activeCapabilities?.embedding);
+      const result = corpusLibrary.commitImport({ ...(payload || {}), sendForIndex: Boolean(payload?.sendForIndex && vectorEnabled) });
       const bookIds = result.results.filter((item) => item.ok && item.book.indexRequested).map((item) => item.book.id);
       broadcastCorpusState();
       if (bookIds.length) void aiRuntime.indexBooks(bookIds).then(broadcastCorpusState, broadcastCorpusState);
@@ -257,7 +252,9 @@ function registerIpc() {
     try {
       const book = corpusLibrary.setEnabled(String(payload?.id || ''), Boolean(payload?.enabled), { requestIndex: Boolean(payload?.requestIndex) });
       broadcastCorpusState();
-      if (book.origin === 'user' && book.enabled && book.indexState !== 'ready') void aiRuntime.indexBooks([book.id]).then(broadcastCorpusState, broadcastCorpusState);
+      if (aiRuntime.getStatus().activeCapabilities?.embedding && book.origin === 'user' && book.enabled && book.indexRequested && book.indexState !== 'ready') {
+        void aiRuntime.indexBooks([book.id]).then(broadcastCorpusState, broadcastCorpusState);
+      }
       return { ok: true, book };
     } catch (error) { return corpusFailure(error); }
   });
@@ -265,7 +262,9 @@ function registerIpc() {
     try {
       const result = corpusLibrary.updateMetadata(String(payload?.id || ''), payload || {});
       broadcastCorpusState();
-      if (result.requiresIndex && result.book.enabled) void aiRuntime.indexBooks([result.book.id]).then(broadcastCorpusState, broadcastCorpusState);
+      if (aiRuntime.getStatus().activeCapabilities?.embedding && result.requiresIndex && result.book.enabled) {
+        void aiRuntime.indexBooks([result.book.id]).then(broadcastCorpusState, broadcastCorpusState);
+      }
       return { ok: true, ...result };
     } catch (error) { return corpusFailure(error); }
   });
@@ -289,7 +288,7 @@ function registerIpc() {
   ipcMain.handle('corpus:pause-index', () => aiRuntime.pauseLibraryBuild());
   ipcMain.handle('corpus:resume-index', () => aiRuntime.resumeLibraryBuild());
   ipcMain.handle('corpus:cancel-index', () => aiRuntime.cancelLibraryBuild());
-  ipcMain.handle('corpus:rebuild-vectors', () => aiRuntime.buildAndActivate());
+  ipcMain.handle('corpus:rebuild-vectors', () => aiRuntime.rebuildActiveIndex());
 
   ipcMain.handle('retrieval:search', async (_event, payload) => aiRuntime.search(payload));
   ipcMain.handle('ai:analyze', async (_event, payload) => {
@@ -319,11 +318,7 @@ async function runCommandMode() {
   }
   if (process.argv.includes('--configure-api-keys-env')) {
     if (!oneTimeSiliconFlowKey) throw new Error('未收到 WENYAO_SILICONFLOW_KEY');
-    aiRuntime.saveDraft({
-      presetId: 'siliconflow-cn-quality',
-      apiKey: oneTimeSiliconFlowKey,
-      consentAccepted: true,
-    });
+    aiRuntime.stagePreset('siliconflow-cn-quality', oneTimeSiliconFlowKey, true);
     process.stdout.write(`SiliconFlow 访问密钥已由${secretStore.name}加密保存为待验证配置。\n`);
     return;
   }
@@ -334,13 +329,15 @@ async function runCommandMode() {
       process.stdout.write(`${JSON.stringify(status)}\n`);
       return;
     }
-    const result = await aiRuntime.testDraft();
+    const result = await aiRuntime.testDraftCapabilities();
     process.stdout.write(`${JSON.stringify(result)}\n`);
     if (!result.ok) throw new Error(result.error?.message || '三项能力检测失败');
     return;
   }
   if (process.argv.includes('--build-vector-index')) {
-    const result = await aiRuntime.buildAndActivate();
+    const status = aiRuntime.getStatus();
+    const capabilities = CAPABILITIES.filter((capability) => status.draft?.pipeline?.[capability]);
+    const result = await aiRuntime.completeSetup({ capabilities, bulkEmbeddingAccepted: true });
     process.stdout.write(`${JSON.stringify(result)}\n`);
     if (!result.ok) throw new Error(result.error?.message || '向量索引构建失败');
     return;

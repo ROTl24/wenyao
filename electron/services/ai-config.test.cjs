@@ -5,6 +5,7 @@ const {
   expandPreset,
   getProviderCatalog,
   migrateLegacySettings,
+  normalizeAIState,
   pipelineFingerprint,
   publicAIState,
 } = require('./ai-config.cjs');
@@ -46,6 +47,45 @@ test('legacy Alibaba and DeepSeek settings migrate without exposing ciphertext',
   const publicState = publicAIState(migration.settings.ai);
   assert.equal(publicState.connections.every((connection) => connection.hasApiKey), true);
   assert.equal(JSON.stringify(publicState).includes('ciphertext'), false);
+});
+
+test('schema v2 active stack and unfinished draft migrate to per-capability test state', () => {
+  const connection = {
+    id: 'legacy-full', providerId: 'siliconflow', presetId: null, label: '旧连接', region: '',
+    baseUrl: 'https://api.siliconflow.cn/v1', fields: {}, encryptedApiKey: 'ciphertext',
+    capabilities: {
+      generation: { protocol: 'openai-chat', model: 'chat-old' },
+      embedding: { protocol: 'openai-embeddings', model: 'embed-old', dimensions: 1024 },
+      rerank: { protocol: 'cohere-rerank', model: 'rerank-old' },
+    },
+  };
+  const pipeline = Object.fromEntries(['generation', 'embedding', 'rerank'].map((capability) => [capability, { connectionId: connection.id }]));
+  const migrated = normalizeAIState({
+    schemaVersion: 2,
+    consentAcceptedAt: '2026-08-26T00:00:00.000Z',
+    connections: [connection],
+    activePipeline: pipeline,
+    draft: {
+      id: 'legacy-draft', connection, pipeline,
+      testResult: { status: 'failed', capabilities: { generation: { ok: true, checkedAt: '2026-08-26T00:00:00.000Z' }, embedding: { ok: true }, rerank: { ok: false } } },
+      indexTask: null,
+    },
+  });
+  assert.equal(migrated.schemaVersion, 3);
+  assert.deepEqual(migrated.activePipeline, pipeline);
+  assert.equal(migrated.connections[0].encryptedApiKey, 'ciphertext');
+  assert.equal(migrated.draft.connections[0].id, connection.id);
+  assert.equal(migrated.draft.tests.generation.status, 'passed');
+  assert.equal(migrated.draft.tests.embedding.status, 'passed');
+  assert.equal(migrated.draft.tests.rerank, undefined);
+
+  const referenceOnlyDraft = normalizeAIState({
+    connections: [connection],
+    activePipeline: pipeline,
+    draft: { id: 'rebuild', connections: [], pipeline, tests: { generation: { status: 'passed' } } },
+  });
+  assert.equal(referenceOnlyDraft.draft.connections.length, 0);
+  assert.deepEqual(referenceOnlyDraft.draft.pipeline, pipeline);
 });
 
 test('vector fingerprint changes for provider, endpoint, model, dimensions or corpus', () => {

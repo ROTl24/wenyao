@@ -60,7 +60,7 @@ type Screen = 'home' | 'casting' | 'physical-casting' | 'physical-review' | 'res
 type AnalysisSaveStatus = 'idle' | 'saving' | 'saved' | 'error';
 type SessionSaveStatus = 'idle' | 'saving' | 'saved' | 'error';
 
-const emptyAICatalog: AIProviderCatalog = { version: 1, defaultPresetId: '', presets: [], customProtocols: { generation: ['openai-chat'], embedding: ['openai-embeddings'], rerank: ['cohere-rerank', 'alibaba-rerank'] } };
+const emptyAICatalog: AIProviderCatalog = { version: 1, defaultPresetId: '', presets: [], customProtocols: { generation: ['openai-chat'], embedding: ['openai-embeddings'], rerank: ['cohere-rerank', 'alibaba-rerank'] }, capabilityExamples: { generation: [], embedding: [], rerank: [] } };
 const emptyAIStatus: AIConfigStatus = {
   status: 'unconfigured',
   message: '尚未连接 AI 服务',
@@ -685,7 +685,7 @@ export function App() {
     if (!isAIUsable(aiStatus)) {
       setAISetupIntent('analysis');
       setAISetupOpen(true);
-      setChatError('请先完成 AI 解读、向量与重排服务配置。');
+      setChatError('请先完成 AI 解读主模型配置。');
       return;
     }
     const targetId = session.id;
@@ -894,7 +894,6 @@ export function App() {
           updateState={updateState}
           aiStatus={aiStatus}
           aiCatalog={aiCatalog}
-          onAIStatus={updateAIStatus}
           onConfigureAI={() => { setAISetupIntent('settings'); setAISetupOpen(true); }}
           onCheckUpdate={() => void checkForUpdate()}
           onOpenUpdate={openUpdatePrompt}

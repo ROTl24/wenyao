@@ -1,7 +1,7 @@
 const crypto = require('node:crypto');
 const catalog = require('../../config/ai-providers.json');
 
-const AI_SCHEMA_VERSION = 2;
+const AI_SCHEMA_VERSION = 3;
 const CAPABILITIES = Object.freeze(['generation', 'embedding', 'rerank']);
 const LEGACY_AI_FIELDS = Object.freeze([
   'alibabaBaseUrl',
@@ -168,22 +168,48 @@ function normalizeAIState(value) {
   };
   const usage = Array.isArray(source.usage) ? source.usage.slice(-1000).map(ownedClone) : [];
   const draft = source.draft && typeof source.draft === 'object'
-    ? {
-        id: String(source.draft.id || crypto.randomUUID()),
-        createdAt: String(source.draft.createdAt || nowIso()),
-        updatedAt: String(source.draft.updatedAt || nowIso()),
-        connection: normalizeConnection(source.draft.connection),
-        pipeline: normalizePipeline(source.draft.pipeline),
-        testResult: source.draft.testResult ? ownedClone(source.draft.testResult) : null,
-        indexTask: source.draft.indexTask ? ownedClone(source.draft.indexTask) : null,
-      }
+    ? (() => {
+        const draftConnections = (Array.isArray(source.draft.connections)
+          ? source.draft.connections
+          : [source.draft.connection])
+          .map(normalizeConnection)
+          .filter(Boolean);
+        const pipeline = normalizePipeline(source.draft.pipeline);
+        if (!pipeline) return null;
+        const availableIds = new Set([...connectionIds, ...draftConnections.map((connection) => connection.id)]);
+        for (const capability of CAPABILITIES) {
+          if (pipeline[capability] && !availableIds.has(pipeline[capability].connectionId)) pipeline[capability] = null;
+        }
+        if (!CAPABILITIES.some((capability) => pipeline[capability])) return null;
+        const tests = source.draft.tests && typeof source.draft.tests === 'object'
+          ? ownedClone(source.draft.tests)
+          : Object.fromEntries(CAPABILITIES.flatMap((capability) => {
+              const passed = source.draft.testResult?.capabilities?.[capability]?.ok;
+              if (!passed) return [];
+              return [[capability, {
+                status: 'passed',
+                checkedAt: String(source.draft.testResult.capabilities[capability].checkedAt || nowIso()),
+              }]];
+            }));
+        return {
+          id: String(source.draft.id || crypto.randomUUID()),
+          createdAt: String(source.draft.createdAt || nowIso()),
+          updatedAt: String(source.draft.updatedAt || nowIso()),
+          connections: draftConnections,
+          pipeline,
+          tests,
+          indexTask: source.draft.indexTask ? ownedClone(source.draft.indexTask) : null,
+          bulkEmbeddingAccepted: Boolean(source.draft.bulkEmbeddingAccepted),
+          webSecurity: source.draft.webSecurity ? ownedClone(source.draft.webSecurity) : undefined,
+        };
+      })()
     : null;
   return {
     schemaVersion: AI_SCHEMA_VERSION,
     consentAcceptedAt: String(source.consentAcceptedAt || ''),
     connections,
     activePipeline: normalizeKnownPipeline(source.activePipeline),
-    draft: draft?.connection && draft?.pipeline ? draft : null,
+    draft,
     usage,
     migration: source.migration ? ownedClone(source.migration) : null,
   };
@@ -263,7 +289,7 @@ function publicAIState(value) {
       : null,
     connections: state.connections.map(publicConnection),
     draft: state.draft
-      ? { ...state.draft, connection: publicConnection(state.draft.connection) }
+      ? { ...state.draft, connections: state.draft.connections.map(publicConnection) }
       : null,
   };
 }

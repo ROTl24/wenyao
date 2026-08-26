@@ -185,14 +185,15 @@ test('sandboxed preload exposes the desktop bridge and independently sanitizes s
     }],
   }]);
 
-  await exposed.aiConfig.discoverModels({
-    baseUrl: 'https://api.example.com/v1',
+  await exposed.aiConfig.listModels({
+    capability: 'generation',
+    apiUrl: 'https://api.example.com/v1',
     apiKey: 'secret',
     authorization: 'must-not-cross-preload',
   });
   assert.deepEqual(calls.at(-1), {
-    channel: 'ai-config:discover-models',
-    args: [{ baseUrl: 'https://api.example.com/v1', apiKey: 'secret' }],
+    channel: 'ai-config:list-models',
+    args: [{ capability: 'generation', apiUrl: 'https://api.example.com/v1', apiKey: 'secret' }],
   });
 
   assert.equal(await exposed.externalLinks.open('repository'), true);

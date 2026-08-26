@@ -475,9 +475,6 @@ class CorpusLibrary {
     }
     const book = this.#userBook(id);
     if (!book || book.deletedAt) throw libraryError('书籍不存在。', 'CORPUS_BOOK_NOT_FOUND');
-    if (enabled && !book.indexRequested && !requestIndex) {
-      throw libraryError('启用 AI 检索前需要确认正文发送范围。', 'CORPUS_INDEX_CONSENT_REQUIRED', '请确认后建立该书向量索引。');
-    }
     book.enabled = Boolean(enabled);
     if (enabled && requestIndex) {
       book.indexRequested = true;

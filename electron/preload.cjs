@@ -206,21 +206,19 @@ contextBridge.exposeInMainWorld('wenyao', {
   aiConfig: {
     getCatalog: () => ipcRenderer.invoke('ai-config:get-catalog'),
     getStatus: () => ipcRenderer.invoke('ai-config:get-status'),
-    discoverModels: (payload) => ipcRenderer.invoke('ai-config:discover-models', pickOwn(payload, ['baseUrl', 'apiKey'])),
-    saveDraft: (payload) => ipcRenderer.invoke('ai-config:save-draft', pickOwn(payload, [
-      'presetId',
-      'fields',
-      'connection',
-      'pipeline',
-      'apiKey',
-      'consentAccepted',
+    listModels: (payload) => ipcRenderer.invoke('ai-config:list-models', pickOwn(payload, [
+      'capability', 'apiUrl', 'apiKey', 'credentialSource', 'webSecurity',
     ])),
-    testDraft: () => ipcRenderer.invoke('ai-config:test-draft'),
-    buildAndActivate: () => ipcRenderer.invoke('ai-config:build-and-activate'),
+    testCapability: (payload) => ipcRenderer.invoke('ai-config:test-capability', pickOwn(payload, [
+      'capability', 'apiUrl', 'model', 'apiKey', 'credentialSource', 'consentAccepted', 'webSecurity',
+    ])),
+    completeSetup: (payload) => ipcRenderer.invoke('ai-config:complete-setup', pickOwn(payload, [
+      'capabilities', 'bulkEmbeddingAccepted',
+    ])),
+    cancelSetup: () => ipcRenderer.invoke('ai-config:cancel-setup'),
     pauseBuild: () => ipcRenderer.invoke('ai-config:pause-build'),
     resumeBuild: () => ipcRenderer.invoke('ai-config:resume-build'),
     cancelBuild: () => ipcRenderer.invoke('ai-config:cancel-build'),
-    removeConnection: (id) => ipcRenderer.invoke('ai-config:remove-connection', safeText(id, '', 100)),
     openExternal: (url) => ipcRenderer.invoke('ai-config:open-external', safeText(url, '', 500)),
     onStatus: (listener) => {
       if (typeof listener !== 'function') return () => {};
