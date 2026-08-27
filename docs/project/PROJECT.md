@@ -48,7 +48,7 @@ last_reviewed: 2026-08-27
 
 ## Current State
 
-- `package.json` 当前版本为 `0.5.3`，Git `main` 当前基线为 `75077d1`。
+- `package.json` 当前版本为 `0.5.3`；Git `main` 已包含网页古籍分类一致性修复提交 `d460c3d`，远端与部署状态以实时检查为准。
 - Electron 主进程、PWA 渲染适配器和 Web AI Worker 均通过 `shared/corpus-knowledge.cjs` 合并正文与分类索引。
 - 网页状态、书内条目和检索证据已验证使用 495 条规则、190 条占例和 578 条义理。
 - GitHub Release 工作流支持手动候选构建，并仅在版本标签路径发布正式桌面产物。
@@ -59,8 +59,8 @@ last_reviewed: 2026-08-27
 
 ## Next Actions
 
-1. 如需用户可见生效，另行确认推送和 Cloudflare Pages 部署。
-2. 部署后在新标签页验证活动资源与 Service Worker 已切换到包含共享分类装配的版本。
+1. Cloudflare Pages 完成自动构建后，在新标签页验证活动资源与 Service Worker 已切换到包含共享分类装配的版本。
+2. 已打开的旧 PWA 标签页通过更新提示切换版本，或关闭后重新打开再验收分类统计。
 
 ## Goal History
 

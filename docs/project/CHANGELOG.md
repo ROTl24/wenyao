@@ -18,7 +18,7 @@ last_reviewed: 2026-08-27
 - 结果：网页设置统计、古籍书内条目和 Web AI 检索证据统一使用 495 条规则、190 条占例与 578 条义理分类。
 - 原因：正文与分类索引分离存储时，PWA 绕过分类装配并把全部 1263 条语料视为义理。
 - 验证：`npm.cmd test`、`npm.cmd run typecheck`、`npm.cmd run build:renderer`、`npm.cmd run verify:web`。
-- Git：实现、回归测试和知识记录位于本条所在提交；未推送、未部署。
+- Git：`d460c3d`；远端与部署状态不在成果条目中固化，以实时检查为准。
 - Agent Note：[内置古籍分类由跨运行时共享入口装配](../../.agents/notes/implemented/bug-fix/2026-08-27-shared-corpus-knowledge.md)。
 - 文档影响：PROJECT、PROJECT_CONTEXT、DECISIONS、LESSONS。
 
