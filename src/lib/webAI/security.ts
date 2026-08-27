@@ -15,6 +15,11 @@ export interface ValidatedWebConnection {
   origins: string[];
 }
 
+export interface ValidatedWebModelCatalog {
+  baseUrl: string;
+  origins: string[];
+}
+
 const SECRET_FIELD = /(?:api[-_]?key|authorization|bearer|token|secret|password|credential)/i;
 const SECRET_QUERY_FIELD = /^(?:api[-_]?key|key|access[-_]?token|token|authorization|signature|sig|secret|password|credential)$/i;
 const PRIVATE_IPV4 = /^(?:0\.|127\.|10\.|100\.(?:6[4-9]|[7-9]\d|1[01]\d|12[0-7])\.|192\.168\.|169\.254\.|172\.(?:1[6-9]|2\d|3[01])\.)/;
@@ -126,6 +131,12 @@ export function validateWebConnection(input: AIConnection): ValidatedWebConnecti
   };
   const origins = [...new Set(Object.values(endpoints).filter(Boolean).map((value) => new URL(value).origin))].sort();
   return { connection, endpoints, origins };
+}
+
+export function validateWebModelCatalog(baseUrl: string): ValidatedWebModelCatalog {
+  const normalizedBaseUrl = normalizeHttpsUrl(baseUrl, '模型目录基础地址').toString().replace(/\/$/, '');
+  const catalogUrl = normalizeHttpsUrl(`${normalizedBaseUrl}/models`, '模型目录地址');
+  return { baseUrl: normalizedBaseUrl, origins: [catalogUrl.origin] };
 }
 
 export function assertConfirmedOrigins(origins: string[], confirmation: WebSecurityConfirmation | undefined): void {

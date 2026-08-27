@@ -2,7 +2,7 @@ import { ArrowLeft, Check, KeyRound, Link2, Pause, Play, Search, ShieldCheck, X 
 import { useMemo, useState } from 'react';
 import setupCore from '../../shared/ai-setup-core.cjs';
 import { desktop } from '../lib/desktop';
-import { usesBundledVectorPack, validateWebConnection } from '../lib/webAI/security';
+import { usesBundledVectorPack, validateWebConnection, validateWebModelCatalog } from '../lib/webAI/security';
 import type { AICapability, AIConfigStatus, AIConnection, AIProviderCatalog } from '../types/desktop';
 
 interface Props {
@@ -80,9 +80,13 @@ export function AISetupWizard({ catalog, status, onStatus, onReady, onClose }: P
   const batchRequests = Math.ceil(status.corpusCount / batchSize);
 
   const webOrigins = useMemo(() => {
-    if (!isWeb || step > 2 || !form.apiUrl.trim() || !form.model.trim()) return [];
+    if (!isWeb || step > 2 || !form.apiUrl.trim()) return [];
     try {
-      return validateWebConnection(capabilityConnection({ capability: currentCapability, apiUrl: form.apiUrl, model: form.model })).origins;
+      const location = normalizeCapabilityLocation(currentCapability, form.apiUrl);
+      const catalogOrigins = validateWebModelCatalog(location.baseUrl).origins;
+      if (!form.model.trim()) return catalogOrigins;
+      const capabilityOrigins = validateWebConnection(capabilityConnection({ capability: currentCapability, apiUrl: form.apiUrl, model: form.model })).origins;
+      return [...new Set([...catalogOrigins, ...capabilityOrigins])].sort();
     } catch { return []; }
   }, [currentCapability, form.apiUrl, form.model, isWeb, step]);
 

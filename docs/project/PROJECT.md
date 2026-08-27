@@ -20,9 +20,9 @@ last_reviewed: 2026-08-27
 
 ## Current Goal
 
-- 目标版本：`G-004`
-- 目标：所有 OpenAI Chat 生成模型采用统一的可展示响应契约与短推理探测预算，不以模型名称添加孤立补丁。
-- 来源：`user-confirmed`，2026-08-27 用户要求对所有模型进行通用根层修复并直接测试。
+- 目标版本：`G-005`
+- 目标：PWA 模型目录的服务域名确认来自实际目录地址，在模型名称未知时仍能安全发现模型。
+- 来源：`user-confirmed`，2026-08-27 用户确认修复网站模型目录被域名确认错误拦截的问题。
 
 ## Scope
 
@@ -47,6 +47,7 @@ last_reviewed: 2026-08-27
 | 网页古籍分类一致性 | `verified` | 网页统计、书内条目和 AI 检索均使用 495 规则、190 占例、578 义理分类 | 浏览器与 Worker 回归测试、全量测试、PWA 构建验证 |
 | 自定义 AI 地址规范化 | `verified` | 裸域名默认使用 `/v1`，显式路径和 DeepSeek 官方根地址保持原语义，界面显示实际规范化结果 | `shared/ai-setup-core.cjs`、共享核心与向导回归测试 |
 | OpenAI Chat 通用响应契约 | `verified` | 桌面端与 PWA 统一解析字符串及文本块正文，最小测试允许短推理并准确区分空正文原因 | `shared/chat-completion-core.cjs`、Provider、Runtime 与 Worker 回归测试 |
+| PWA 模型目录域名确认 | `verified` | 模型名称为空时仍按规范化目录地址显示并确认 HTTPS origin，界面与 Worker 共用目录安全入口 | `src/lib/webAI/security.ts`、向导与 Worker 回归测试 |
 
 ## Current State
 
@@ -55,6 +56,7 @@ last_reviewed: 2026-08-27
 - 网页状态、书内条目和检索证据已验证使用 495 条规则、190 条占例和 578 条义理。
 - Electron 与 PWA 共用自定义 AI 地址规范化：裸域名默认补全 `/v1`，失败后不会自动切换地址或重复请求。
 - Electron 与 PWA 共用 OpenAI Chat 响应解析；所有生成模型使用 512 Token 单次最小测试预算，未指定采样参数时不发送 `temperature`。
+- PWA 模型目录域名确认由规范化后的 `/models` 安全目标生成，不依赖尚未发现的模型名称。
 - GitHub Release 工作流支持手动候选构建，并仅在版本标签路径发布正式桌面产物。
 
 ## Blockers
@@ -74,3 +76,4 @@ last_reviewed: 2026-08-27
 | `G-002` | `verified` | 2026-08-27 | 共享分类装配、运行时回归测试与 PWA 静态产物验证完成 |
 | `G-003` | `verified` | 2026-08-27 | 共享地址规范化、界面可见补全与跨运行时回归测试完成 |
 | `G-004` | `verified` | 2026-08-27 | 共享 Chat 响应分类、通用探测预算与跨运行时回归测试完成 |
+| `G-005` | `verified` | 2026-08-27 | 模型目录独立安全目标、界面域名展示与 Worker 回归测试完成 |

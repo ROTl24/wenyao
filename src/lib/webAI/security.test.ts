@@ -5,6 +5,7 @@ import {
   assertConfirmedOrigins,
   confirmationPhrase,
   validateWebConnection,
+  validateWebModelCatalog,
   WebAIError,
 } from './security';
 
@@ -68,6 +69,13 @@ describe('网页 AI 服务边界', () => {
     const { origins } = validateWebConnection(customConnection());
     expect(() => assertConfirmedOrigins(origins, { confirmedOrigins: ['https://ai.example.com'] })).toThrow(/完整确认/);
     expect(() => assertConfirmedOrigins(origins, { confirmedOrigins: ['https://evil.example'] })).toThrow(/完整确认/);
+  });
+
+  it('validates a model catalog origin without requiring a model name', () => {
+    expect(validateWebModelCatalog('https://api.example.com/v1')).toEqual({
+      baseUrl: 'https://api.example.com/v1',
+      origins: ['https://api.example.com'],
+    });
   });
 
   it('sends one hardened request and never exposes a provider response body in the error', async () => {

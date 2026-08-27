@@ -12,6 +12,16 @@ last_reviewed: 2026-08-27
 
 ## Entries
 
+### CHG-20260827-model-catalog-origin-confirmation
+
+- 日期：2026-08-27
+- 结果：PWA 在模型名称为空时仍能显示并确认规范化模型目录的 HTTPS origin，目录请求不再被错误的空确认拦截。
+- 原因：配置界面曾依赖完整能力连接计算域名，而完整能力连接要求模型名称非空，形成模型发现的循环前置条件。
+- 验证：`npm.cmd test`、`npm.cmd run typecheck`、`npm.cmd run build:renderer`、`npm.cmd run verify:web`。
+- Git：实现、测试与知识记录位于同一提交；远端与部署状态不在成果条目中固化，以实时检查为准。
+- Agent Note：[模型目录域名确认独立于模型名称](../../.agents/notes/implemented/bug-fix/2026-08-27-model-catalog-origin-confirmation.md)。
+- 文档影响：PROJECT、PROJECT_CONTEXT、DECISIONS、LESSONS。
+
 ### CHG-20260827-openai-chat-probe-response
 
 - 日期：2026-08-27

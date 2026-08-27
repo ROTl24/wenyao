@@ -12,7 +12,7 @@ import type { AICapability, AIConfigStatus, AIConnection, AIPipeline, DesktopApi
 import type { EvidenceEntry } from '../retrieval';
 import { createWebProvider, discoverWebModels } from './provider';
 import type { TestCapabilityPayload, WebAIRequest, WebAIResponse, WebAIStatusEvent } from './protocol';
-import { assertConfirmedOrigins, toDesktopError, usesBundledVectorPack, validateWebConnection, type WebSecurityConfirmation, WebAIError } from './security';
+import { assertConfirmedOrigins, toDesktopError, usesBundledVectorPack, validateWebConnection, validateWebModelCatalog, type WebSecurityConfirmation, WebAIError } from './security';
 
 const workerScope = self as unknown as DedicatedWorkerGlobalScope;
 const capabilities = ['generation', 'embedding', 'rerank'] as const;
@@ -125,12 +125,11 @@ function keyForCapability(capability: AICapability): string {
 
 async function listModels(payload: Parameters<DesktopApi['aiConfig']['listModels']>[0]) {
   const location = normalizeCapabilityLocation(payload.capability, payload.apiUrl);
-  const temporary = capabilityConnection({ capability: payload.capability, apiUrl: payload.apiUrl, model: 'model-list' });
-  const validated = validateWebConnection(temporary);
-  assertConfirmedOrigins(validated.origins, payload.webSecurity as WebSecurityConfirmation | undefined);
+  const catalog = validateWebModelCatalog(location.baseUrl);
+  assertConfirmedOrigins(catalog.origins, payload.webSecurity as WebSecurityConfirmation | undefined);
   const apiKey = String(payload.apiKey || '').trim() || (payload.credentialSource ? keyForCapability(payload.credentialSource) : '');
   if (!apiKey) throw new WebAIError({ code: 'WEB_AI_KEY_REQUIRED', message: '请填写 API Key。', dataSafe: true, nextAction: '密钥只会保留在当前页面的隔离 Worker 内存。' });
-  const discovered = await discoverWebModels(location.baseUrl, apiKey, payload.capability);
+  const discovered = await discoverWebModels(catalog.baseUrl, apiKey, payload.capability);
   const modelIds = filterModels(payload.capability, discovered);
   return { ok: true, modelIds, ...(modelIds.length ? {} : { warning: '模型目录未标注该类能力，请手动填写模型名称。' }) };
 }

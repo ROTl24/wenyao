@@ -110,6 +110,30 @@ describe('AI 能力三步向导', () => {
     expect(screen.getByText(/仅填写域名时自动补全/)).toBeVisible();
   });
 
+  it('模型名为空时仍确认规范化后的模型目录域名', async () => {
+    const listModels = vi.spyOn(desktop.aiConfig, 'listModels').mockResolvedValue({
+      ok: true,
+      modelIds: ['gpt-5.4'],
+    });
+    render(<Harness />);
+
+    const apiUrl = screen.getByLabelText('API 调用地址');
+    fireEvent.change(apiUrl, { target: { value: 'https://api.shuaiapi.com/' } });
+    fireEvent.blur(apiUrl);
+    fireEvent.change(screen.getByLabelText('API Key'), { target: { value: 'test-key' } });
+    fireEvent.click(screen.getByRole('checkbox'));
+
+    expect(screen.getByText('https://api.shuaiapi.com')).toBeVisible();
+    fireEvent.click(screen.getByRole('button', { name: '获取模型列表' }));
+
+    await waitFor(() => expect(listModels).toHaveBeenCalledWith(expect.objectContaining({
+      capability: 'generation',
+      apiUrl: 'https://api.shuaiapi.com/v1',
+      webSecurity: { confirmedOrigins: ['https://api.shuaiapi.com'] },
+    })));
+    expect(screen.getByLabelText('模型名称')).toHaveValue('gpt-5.4');
+  });
+
   it('模型目录失败时保留手动回退且不触发最小测试', async () => {
     const listModels = vi.spyOn(desktop.aiConfig, 'listModels').mockResolvedValue({
       ok: false,

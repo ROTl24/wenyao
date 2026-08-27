@@ -43,6 +43,9 @@ describe('PWA 隔离 Worker 的可选能力链路', () => {
         calls.bundled += 1;
         return new Response(new Uint8Array(1263 * 1024 * 4));
       }
+      if (url.endsWith('/models')) {
+        return providerResponse({ data: [{ id: 'chat-test' }] });
+      }
       const body = JSON.parse(String(init?.body || '{}'));
       if (url.endsWith('/chat/completions')) {
         calls.generation += 1;
@@ -75,6 +78,17 @@ describe('PWA 隔离 Worker 的可选能力链路', () => {
     generationBodies.length = 0;
     await call('clear');
     posted.length = 0;
+  });
+
+  it('模型目录确认不依赖预先填写模型名称', async () => {
+    const result = await call<{ ok: boolean; modelIds: string[] }>('listModels', {
+      capability: 'generation',
+      apiUrl: 'https://api.example.com/v1',
+      apiKey: 'session-key',
+      webSecurity: { confirmedOrigins: ['https://api.example.com'] },
+    });
+
+    expect(result).toEqual({ ok: true, modelIds: ['chat-test'] });
   });
 
   it('仅主模型、向量融合和完整重排三种模式都按实际能力发请求', async () => {

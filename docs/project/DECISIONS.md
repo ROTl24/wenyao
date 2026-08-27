@@ -13,6 +13,7 @@ last_reviewed: 2026-08-27
 | `ADR-20260827-shared-corpus-knowledge` | `accepted` | 跨运行时内置古籍分类装配 | [Agent Note](../../.agents/notes/implemented/bug-fix/2026-08-27-shared-corpus-knowledge.md) | 无 |
 | `ADR-20260827-openai-base-url-default` | `accepted` | 自定义 OpenAI 兼容服务裸域名默认使用 `/v1` | [Agent Note](../../.agents/notes/implemented/bug-fix/2026-08-27-openai-base-url-default.md) | 无 |
 | `ADR-20260827-openai-chat-probe-response` | `accepted` | OpenAI Chat 探测预算与可展示响应分类 | [Agent Note](../../.agents/notes/implemented/bug-fix/2026-08-27-openai-chat-probe-response.md) | 取代按单一服务处理 16 Token 探测失败的局部规则 |
+| `ADR-20260827-model-catalog-origin-confirmation` | `accepted` | PWA 模型目录使用独立域名确认目标 | [Agent Note](../../.agents/notes/implemented/bug-fix/2026-08-27-model-catalog-origin-confirmation.md) | 无 |
 
 ## Active Decisions
 
@@ -42,3 +43,12 @@ last_reviewed: 2026-08-27
 - 权威 Note：[OpenAI Chat 探测与响应采用跨运行时共享契约](../../.agents/notes/implemented/bug-fix/2026-08-27-openai-chat-probe-response.md)。
 - 重新考虑：项目引入 Responses API、模型目录提供可靠的能力元数据，或服务商形成可无计费协商的标准探测协议时。
 - Supersedes：DeepSeek 官方连接使用 16 Token 探测预算的局部决策。
+
+### ADR-20260827-model-catalog-origin-confirmation
+
+- Status: `accepted`
+- Source: `user-confirmed` / `code-verified`
+- 主题：PWA 配置界面与隔离 Worker 从规范化模型目录地址计算同一组确认 origin，目录发现不依赖模型名称。
+- 权威 Note：[模型目录域名确认独立于模型名称](../../.agents/notes/implemented/bug-fix/2026-08-27-model-catalog-origin-confirmation.md)。
+- 重新考虑：模型目录迁移到与能力接口不同的受信任服务，或配置协议引入经过用户确认的独立目录 URL 时。
+- Supersedes：无。

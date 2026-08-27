@@ -13,6 +13,7 @@ last_reviewed: 2026-08-27
 | `LES-20260827-corpus-metadata-parity` | `active` | Electron、PWA、Worker 的内置语料边界 | 共享算法不等于共享输入语义，分类元数据必须在所有运行时统一装配 |
 | `LES-20260827-openai-html-response` | `active` | 自定义 AI Base URL 与能力接口 | HTTP 200 的管理页面 HTML 仍是错误接口，裸域名必须在请求前规范化 |
 | `LES-20260827-chat-visible-output` | `active` | OpenAI Chat 生成模型与最小测试 | HTTP 200 和推理输出不等于可展示正文，探测预算与空正文原因必须独立验证 |
+| `LES-20260827-model-catalog-before-model` | `active` | PWA 模型目录与出站域名确认 | 模型发现发生在模型选择之前，目录安全目标不能依赖模型名称 |
 
 ## Active Lessons
 
@@ -55,3 +56,16 @@ last_reviewed: 2026-08-27
 - 不再适用：生成协议能够在不计费的能力协商中证明最终文本输出，或应用不再消费 Chat `message.content` 时。
 - 证据：`shared/chat-completion-core.cjs`、`shared/ai-setup-core.cjs`、`electron/services/ai-provider.test.cjs`、`src/lib/webAI/provider.test.ts`。
 - 相关 Note：[OpenAI Chat 探测与响应采用跨运行时共享契约](../../.agents/notes/implemented/bug-fix/2026-08-27-openai-chat-probe-response.md)。
+
+### LES-20260827-model-catalog-before-model
+
+- Status: `active`
+- Source: `code-verified`
+- 适用范围：PWA AI 配置向导、Web AI Worker 与模型目录请求。
+- 症状：API 地址和密钥已填写、域名确认框已勾选，但模型名称为空时目录请求被报告为“服务域名尚未得到完整确认”。
+- 已验证根因：界面只有在模型名称非空时才构造完整能力连接和确认 origin，目录发现因此提交空的 `confirmedOrigins`。
+- 正确规则：模型目录使用由规范化 Base URL 构造的独立安全目标；界面展示与 Worker 校验必须共用该目标。
+- 防线：向导空模型回归测试、安全目标单元测试和 Worker 目录请求测试。
+- 不再适用：配置流程不再提供模型发现，或模型目录通过不携带用户凭据的受信任本地清单提供时。
+- 证据：`src/components/AISetupWizard.test.tsx`、`src/lib/webAI/security.test.ts`、`src/lib/webAI/worker.test.ts`。
+- 相关 Note：[模型目录域名确认独立于模型名称](../../.agents/notes/implemented/bug-fix/2026-08-27-model-catalog-origin-confirmation.md)。
