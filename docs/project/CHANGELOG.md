@@ -12,6 +12,16 @@ last_reviewed: 2026-08-27
 
 ## Entries
 
+### CHG-20260827-release-054
+
+- 日期：2026-08-27
+- 结果：`0.5.4` 桌面版本包含 `0.5.3` 之后的古籍分类、自定义地址、Chat 响应和模型目录修复；既有 Windows 安装版通过 GitHub 稳定更新通道发现该版本。
+- 原因：网站与 `main` 已包含修复，而桌面正式 Release 仍停留在 `0.5.3`。
+- 验证：全量测试、类型检查、Renderer 构建、Windows 安装包验收、GitHub Actions 双平台构建以及正式 Release 更新元数据校验。
+- Git：版本标签 `v0.5.4`；远端 Release 与资产状态以实时检查为准。
+- Agent Note：[桌面稳定版本通过可验证发布元数据驱动 Windows 在线更新](../../.agents/notes/implemented/architecture/2026-08-27-desktop-update-release-contract.md)。
+- 文档影响：README、PROJECT、PROJECT_CONTEXT、DECISIONS、LESSONS。
+
 ### CHG-20260827-model-catalog-origin-confirmation
 
 - 日期：2026-08-27

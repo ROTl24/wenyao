@@ -23,6 +23,7 @@ last_reviewed: 2026-08-27
 - 自定义 OpenAI 兼容服务只填写裸域名时默认使用 `/v1`；显式 Base Path 或完整能力地址具有最高优先级，地址失败不会触发自动重试。
 - OpenAI Chat 生成能力只把最终可展示文本作为成功；内部推理、工具调用和拒答不能替代 `message.content`，最小测试失败不会自动重试。
 - PWA 模型目录的确认域名由规范化后的目录地址确定，不得依赖尚未发现的模型名称或绕过 HTTPS 公网边界。
+- Windows 正式版本通过 GitHub `latest` 稳定通道检查更新；正式 Release 必须同时提供与版本一致的 `latest.yml`、NSIS 安装包和 blockmap，下载仍由用户确认触发。
 
 ## Project Preferences
 
@@ -51,6 +52,7 @@ last_reviewed: 2026-08-27
 - 主要开发环境为 Windows PowerShell；项目短命令使用 `npm.cmd`。
 - Renderer 使用 React、TypeScript、Vite 与 Vitest；桌面端使用 Electron 和 Node 测试运行器。
 - macOS DMG 必须在 macOS 构建环境验证；Windows 本地不能替代该产物验收。
+- macOS 免费发行版采用 ad-hoc 签名和手动更新；没有原生更新逻辑的既有版本不能通过发布新版本远程获得自动更新能力。
 - PWA 使用提示式 Service Worker 更新；构建成功不等于已打开页面立即切换到新资源。
 
 ## Easy-to-Misread Context
@@ -73,6 +75,7 @@ last_reviewed: 2026-08-27
 | OpenAI Chat 响应分类 | `shared/chat-completion-core.cjs` | `code-verified` | 2026-08-27 |
 | 构建与测试入口 | `package.json`、`vite.config.ts` | `code-verified` | 2026-08-27 |
 | 桌面发布流程 | `.github/workflows/release-desktop.yml` | `code-verified` | 2026-08-27 |
+| Windows 在线更新 | `electron/services/update-manager.cjs`、`scripts/verify-release.mjs` | `code-verified` | 2026-08-27 |
 
 ## Superseded Context
 

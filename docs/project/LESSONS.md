@@ -14,6 +14,7 @@ last_reviewed: 2026-08-27
 | `LES-20260827-openai-html-response` | `active` | 自定义 AI Base URL 与能力接口 | HTTP 200 的管理页面 HTML 仍是错误接口，裸域名必须在请求前规范化 |
 | `LES-20260827-chat-visible-output` | `active` | OpenAI Chat 生成模型与最小测试 | HTTP 200 和推理输出不等于可展示正文，探测预算与空正文原因必须独立验证 |
 | `LES-20260827-model-catalog-before-model` | `active` | PWA 模型目录与出站域名确认 | 模型发现发生在模型选择之前，目录安全目标不能依赖模型名称 |
+| `LES-20260827-release-metadata-drives-update` | `active` | Windows 桌面在线更新与 GitHub Release | 代码和安装包上传不等于旧客户端可更新，稳定 Release 元数据与资产必须共同验证 |
 
 ## Active Lessons
 
@@ -69,3 +70,16 @@ last_reviewed: 2026-08-27
 - 不再适用：配置流程不再提供模型发现，或模型目录通过不携带用户凭据的受信任本地清单提供时。
 - 证据：`src/components/AISetupWizard.test.tsx`、`src/lib/webAI/security.test.ts`、`src/lib/webAI/worker.test.ts`。
 - 相关 Note：[模型目录域名确认独立于模型名称](../../.agents/notes/implemented/bug-fix/2026-08-27-model-catalog-origin-confirmation.md)。
+
+### LES-20260827-release-metadata-drives-update
+
+- Status: `active`
+- Source: `code-verified`
+- 适用范围：GitHub 正式桌面 Release、Windows `electron-updater` 与版本标签。
+- 症状：源码和新安装包已经存在，但旧客户端仍可能无法发现新版本。
+- 已验证根因：更新发现依赖 GitHub 最新稳定 Release 中与安装包匹配的 `latest.yml`，下载还依赖安装包、blockmap 和 SHA-512 完整性一致。
+- 正确规则：版本标签、`package.json`、`latest.yml`、NSIS 安装包和 blockmap 必须版本一致；Release 必须从草稿切换为最新稳定版本后才算更新通道生效。
+- 防线：`scripts/verify-release.mjs`、GitHub Actions 资产摘要校验、正式 Release 远端元数据校验和旧版本语义比较。
+- 不再适用：Windows 更新提供方不再使用 GitHub Releases 或更新协议不再消费 `latest.yml` 时。
+- 证据：`electron/services/update-manager.cjs`、`.github/workflows/release-desktop.yml`、`scripts/verify-release.mjs`。
+- 相关 Note：[桌面稳定版本通过可验证发布元数据驱动 Windows 在线更新](../../.agents/notes/implemented/architecture/2026-08-27-desktop-update-release-contract.md)。

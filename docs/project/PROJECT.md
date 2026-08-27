@@ -20,9 +20,9 @@ last_reviewed: 2026-08-27
 
 ## Current Goal
 
-- 目标版本：`G-005`
-- 目标：PWA 模型目录的服务域名确认来自实际目录地址，在模型名称未知时仍能安全发现模型。
-- 来源：`user-confirmed`，2026-08-27 用户确认修复网站模型目录被域名确认错误拦截的问题。
+- 目标版本：`G-006`
+- 目标：发布包含当前共享 AI 与古籍修复的 `0.5.4` 桌面版本，并使既有 Windows 安装版通过 GitHub 稳定更新通道发现和安装新版本。
+- 来源：`user-confirmed`，2026-08-27 用户要求同步桌面端、GitHub 与旧版软件更新链路。
 
 ## Scope
 
@@ -48,16 +48,18 @@ last_reviewed: 2026-08-27
 | 自定义 AI 地址规范化 | `verified` | 裸域名默认使用 `/v1`，显式路径和 DeepSeek 官方根地址保持原语义，界面显示实际规范化结果 | `shared/ai-setup-core.cjs`、共享核心与向导回归测试 |
 | OpenAI Chat 通用响应契约 | `verified` | 桌面端与 PWA 统一解析字符串及文本块正文，最小测试允许短推理并准确区分空正文原因 | `shared/chat-completion-core.cjs`、Provider、Runtime 与 Worker 回归测试 |
 | PWA 模型目录域名确认 | `verified` | 模型名称为空时仍按规范化目录地址显示并确认 HTTPS origin，界面与 Worker 共用目录安全入口 | `src/lib/webAI/security.ts`、向导与 Worker 回归测试 |
+| Windows 稳定更新通道 | `verified` | 打包版启动及每六小时检查 GitHub Releases，用户确认后下载并在退出或重启时安装，正式 Release 同时发布 `latest.yml`、安装包与 blockmap | `electron/services/update-manager.cjs`、`scripts/verify-release.mjs`、`.github/workflows/release-desktop.yml` |
 
 ## Current State
 
-- `package.json` 当前版本为 `0.5.3`；Git `main` 已包含网页古籍分类一致性修复提交 `d460c3d`，远端与部署状态以实时检查为准。
+- `package.json` 当前版本为 `0.5.4`；桌面正式构建从同一提交打包当前 Renderer、Electron 服务、共享 AI 核心与古籍数据。
 - Electron 主进程、PWA 渲染适配器和 Web AI Worker 均通过 `shared/corpus-knowledge.cjs` 合并正文与分类索引。
 - 网页状态、书内条目和检索证据已验证使用 495 条规则、190 条占例和 578 条义理。
 - Electron 与 PWA 共用自定义 AI 地址规范化：裸域名默认补全 `/v1`，失败后不会自动切换地址或重复请求。
 - Electron 与 PWA 共用 OpenAI Chat 响应解析；所有生成模型使用 512 Token 单次最小测试预算，未指定采样参数时不发送 `temperature`。
 - PWA 模型目录域名确认由规范化后的 `/models` 安全目标生成，不依赖尚未发现的模型名称。
-- GitHub Release 工作流支持手动候选构建，并仅在版本标签路径发布正式桌面产物。
+- GitHub Release 工作流支持手动候选构建，并仅在版本标签路径发布正式桌面产物；Windows 稳定 Release 的 `latest.yml` 驱动既有安装版发现更新。
+- macOS 免费发行版没有 Developer ID 与公证票据，`0.5.3` 客户端保持 GitHub Releases 手动更新，不能由后续版本远程改为自动更新。
 
 ## Blockers
 
@@ -65,8 +67,7 @@ last_reviewed: 2026-08-27
 
 ## Next Actions
 
-1. Cloudflare Pages 完成自动构建后，在新标签页验证活动资源与 Service Worker 已切换到包含共享分类装配的版本。
-2. 已打开的旧 PWA 标签页通过更新提示切换版本，或关闭后重新打开再验收分类统计。
+- 无已确认后续动作。
 
 ## Goal History
 
@@ -77,3 +78,4 @@ last_reviewed: 2026-08-27
 | `G-003` | `verified` | 2026-08-27 | 共享地址规范化、界面可见补全与跨运行时回归测试完成 |
 | `G-004` | `verified` | 2026-08-27 | 共享 Chat 响应分类、通用探测预算与跨运行时回归测试完成 |
 | `G-005` | `verified` | 2026-08-27 | 模型目录独立安全目标、界面域名展示与 Worker 回归测试完成 |
+| `G-006` | `verified` | 2026-08-27 | `0.5.4` 桌面版本定义与 Windows 稳定更新发布契约完成 |
