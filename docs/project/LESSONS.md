@@ -12,6 +12,7 @@ last_reviewed: 2026-08-27
 |---|---|---|---|
 | `LES-20260827-corpus-metadata-parity` | `active` | Electron、PWA、Worker 的内置语料边界 | 共享算法不等于共享输入语义，分类元数据必须在所有运行时统一装配 |
 | `LES-20260827-openai-html-response` | `active` | 自定义 AI Base URL 与能力接口 | HTTP 200 的管理页面 HTML 仍是错误接口，裸域名必须在请求前规范化 |
+| `LES-20260827-chat-visible-output` | `active` | OpenAI Chat 生成模型与最小测试 | HTTP 200 和推理输出不等于可展示正文，探测预算与空正文原因必须独立验证 |
 
 ## Active Lessons
 
@@ -41,3 +42,16 @@ last_reviewed: 2026-08-27
 - 不再适用：配置协议能从服务端元数据无计费地可靠发现，并由用户确认实际能力接口时。
 - 证据：`shared/ai-setup-core.cjs`、`electron/services/ai-setup-core.test.cjs`、`src/components/AISetupWizard.test.tsx`。
 - 相关 Note：[自定义 OpenAI 兼容服务裸域名使用版本化基址](../../.agents/notes/implemented/bug-fix/2026-08-27-openai-base-url-default.md)。
+
+### LES-20260827-chat-visible-output
+
+- Status: `active`
+- Source: `user-confirmed` / `code-verified`
+- 适用范围：OpenAI Chat 生成能力、Electron Provider、PWA 流式 Provider 与最小连接测试。
+- 症状：模型目录正常且 Chat 接口返回 HTTP 200，但界面提示没有可展示内容。
+- 已验证根因：固定 16 Token 探测预算可能被模型推理消耗，响应只含 `reasoning_content` 并以 `length` 结束；两端旧解析器又把所有空正文归为协议错误。
+- 正确规则：探测需要为短推理保留有限余量，最终成功仍以可展示正文为准；额度耗尽、只有推理、非文本结果和协议结构错误必须分别报告。
+- 防线：共享响应解析核心、桌面与网页 Provider 回归测试、Runtime 与 Worker 单次请求测试。
+- 不再适用：生成协议能够在不计费的能力协商中证明最终文本输出，或应用不再消费 Chat `message.content` 时。
+- 证据：`shared/chat-completion-core.cjs`、`shared/ai-setup-core.cjs`、`electron/services/ai-provider.test.cjs`、`src/lib/webAI/provider.test.ts`。
+- 相关 Note：[OpenAI Chat 探测与响应采用跨运行时共享契约](../../.agents/notes/implemented/bug-fix/2026-08-27-openai-chat-probe-response.md)。

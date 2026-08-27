@@ -12,6 +12,16 @@ last_reviewed: 2026-08-27
 
 ## Entries
 
+### CHG-20260827-openai-chat-probe-response
+
+- 日期：2026-08-27
+- 结果：所有 OpenAI Chat 生成模型在 Electron 与 PWA 共用 512 Token 单次探测预算、文本正文解析和空正文原因分类。
+- 原因：16 Token 可能在模型输出最终正文前被推理消耗，且旧解析器无法区分额度耗尽、推理输出、非文本结果和协议结构错误。
+- 验证：`npm.cmd test`、`npm.cmd run typecheck`、`npm.cmd run build:renderer`、`npm.cmd run verify:web`。
+- Git：实现、测试与知识记录位于同一提交；远端与部署状态不在成果条目中固化，以实时检查为准。
+- Agent Note：[OpenAI Chat 探测与响应采用跨运行时共享契约](../../.agents/notes/implemented/bug-fix/2026-08-27-openai-chat-probe-response.md)。
+- 文档影响：PROJECT、PROJECT_CONTEXT、DECISIONS、LESSONS。
+
 ### CHG-20260827-custom-api-v1-default
 
 - 日期：2026-08-27

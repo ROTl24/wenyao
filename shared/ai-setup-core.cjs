@@ -7,6 +7,7 @@ const ENDPOINT_SUFFIX = Object.freeze({
 });
 const MODELS_SUFFIX = /\/models\/?$/i;
 const SECRET_QUERY_FIELD = /^(?:api[-_]?key|key|access[-_]?token|token|authorization|signature|sig|secret|password|credential)$/i;
+const GENERATION_PROBE_MAX_TOKENS = 512;
 
 function parsedUrl(value) {
   let url;
@@ -122,7 +123,7 @@ function filterModels(capability, values) {
 
 function generationProbeOptions(connection) {
   return {
-    maxTokens: 16,
+    maxTokens: GENERATION_PROBE_MAX_TOKENS,
     ...(connection?.providerId === 'deepseek' ? { thinking: false } : {}),
   };
 }

@@ -110,7 +110,7 @@ describe('PWA 隔离 Worker 的可选能力链路', () => {
     expect(calls.rerank).toBe(2);
   });
 
-  it('DeepSeek 最小测试关闭默认思考模式并且只发一次请求', async () => {
+  it('生成模型最小测试统一使用短推理预算，DeepSeek 官方适配仍只发一次请求', async () => {
     const result = await call<{ ok: boolean }>('testCapability', {
       capability: 'generation',
       apiUrl: 'https://api.deepseek.com',
@@ -123,7 +123,7 @@ describe('PWA 隔离 Worker 的可选能力链路', () => {
     expect(result.ok).toBe(true);
     expect(calls.generation).toBe(1);
     expect(generationBodies[0]).toMatchObject({
-      max_tokens: 16,
+      max_tokens: 512,
       thinking: { type: 'disabled' },
     });
   });

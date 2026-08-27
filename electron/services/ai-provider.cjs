@@ -1,5 +1,6 @@
 const crypto = require('node:crypto');
 const { setTimeout: delay } = require('node:timers/promises');
+const { inspectChatCompletion } = require('../../shared/chat-completion-core.cjs');
 
 function validateBaseUrl(value) {
   let url;
@@ -182,7 +183,7 @@ function createProviderClient({ connection, apiKey = '', fetchImpl = fetch, usag
     return Array.isArray(json.data) ? json.data.map((item) => String(item.id || '')).filter(Boolean) : [];
   }
 
-  async function chat({ messages, signal, maxTokens = 8192, temperature = 0, thinking }) {
+  async function chat({ messages, signal, maxTokens = 8192, temperature, thinking }) {
     const definition = connection.capabilities?.generation;
     if (!definition || definition.protocol !== 'openai-chat') throw new Error(`${label}未配置兼容的解读能力`);
     const json = await requestJson({
@@ -194,20 +195,37 @@ function createProviderClient({ connection, apiKey = '', fetchImpl = fetch, usag
       body: {
         model: definition.model,
         messages,
-        temperature,
+        ...(temperature === undefined ? {} : { temperature }),
         max_tokens: maxTokens,
         ...(thinking === undefined ? {} : { thinking: { type: thinking ? 'enabled' : 'disabled' } }),
       },
     });
     record('generation', definition.model, json);
-    const content = json?.choices?.[0]?.message?.content;
-    if (typeof content !== 'string' || !content.trim()) {
-      const error = new Error(`${label}没有返回可展示的解读内容`);
-      error.publicCode = 'AI_INVALID_RESPONSE';
-      error.publicNextAction = '请重试；如持续失败，请更换解读模型。';
-      throw error;
-    }
-    return { content, raw: json };
+    const result = inspectChatCompletion(json);
+    if (result.status === 'content') return { content: result.content, raw: json };
+    const error = result.status === 'output_limit'
+      ? new Error(`${label}在生成可展示正文前耗尽了输出额度`)
+      : result.status === 'reasoning_only'
+        ? new Error(`${label}只返回了推理过程，没有返回可展示正文`)
+        : result.status === 'non_text'
+          ? new Error(`${label}返回了非文本结果，无法用于解读`)
+          : new Error(`${label}返回的数据不符合 OpenAI Chat 响应协议`);
+    error.publicCode = result.status === 'output_limit'
+      ? 'AI_OUTPUT_LIMIT'
+      : result.status === 'reasoning_only'
+        ? 'AI_NO_VISIBLE_CONTENT'
+        : result.status === 'non_text'
+          ? 'AI_NON_TEXT_RESPONSE'
+          : 'AI_INVALID_RESPONSE';
+    error.publicNextAction = result.status === 'output_limit'
+      ? '请提高模型输出上限，或在服务商侧关闭强制思考后手动重试；问爻不会自动重试。'
+      : result.status === 'reasoning_only'
+        ? '请确认服务商会把最终答案放在 message.content；问爻不会把内部推理当作解读正文。'
+        : result.status === 'non_text'
+          ? '请选择会直接返回文本内容的对话模型，并关闭强制工具调用。'
+          : '请确认所选接口兼容 OpenAI Chat Completions，且正文位于 choices[0].message.content。';
+    error.technicalDetails = JSON.stringify({ finishReason: result.finishReason, responseStatus: result.status });
+    throw error;
   }
 
   async function embed(input, { signal } = {}) {

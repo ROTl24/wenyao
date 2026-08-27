@@ -5,6 +5,7 @@ const browserCommonJSModules = [
   '/shared/corpus-knowledge.cjs?import',
   '/shared/retrieval-core.cjs?import',
   '/shared/ai-setup-core.cjs?import',
+  '/shared/chat-completion-core.cjs?import',
   '/electron/services/ai.cjs?import',
   '/electron/services/system-prompt.cjs?import',
   '/electron/services/liuyao-domain.cjs?import',

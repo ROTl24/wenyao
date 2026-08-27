@@ -21,6 +21,7 @@ last_reviewed: 2026-08-27
 - 起卦、排盘、本机历史和内置古籍不依赖付费模型调用。
 - 真实模型验证可能产生费用，必须在明确范围、成本与停止规则后获得授权。
 - 自定义 OpenAI 兼容服务只填写裸域名时默认使用 `/v1`；显式 Base Path 或完整能力地址具有最高优先级，地址失败不会触发自动重试。
+- OpenAI Chat 生成能力只把最终可展示文本作为成功；内部推理、工具调用和拒答不能替代 `message.content`，最小测试失败不会自动重试。
 
 ## Project Preferences
 
@@ -67,6 +68,7 @@ last_reviewed: 2026-08-27
 | 语料正文与分类 | `resources/corpus.json`、`resources/knowledge-index.json` | `code-verified` | 2026-08-27 |
 | 运行时能力边界 | `src/lib/desktop.ts`、`electron/main.cjs` | `code-verified` | 2026-08-27 |
 | 自定义 AI 地址规范化 | `shared/ai-setup-core.cjs` | `code-verified` | 2026-08-27 |
+| OpenAI Chat 响应分类 | `shared/chat-completion-core.cjs` | `code-verified` | 2026-08-27 |
 | 构建与测试入口 | `package.json`、`vite.config.ts` | `code-verified` | 2026-08-27 |
 | 桌面发布流程 | `.github/workflows/release-desktop.yml` | `code-verified` | 2026-08-27 |
 

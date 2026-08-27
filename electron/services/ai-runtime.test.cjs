@@ -185,7 +185,7 @@ test('生成、向量和重排最小测试失败都不会自动重试', async ()
   }
 });
 
-test('DeepSeek 最小测试关闭默认思考模式并在极短预算内读取最终正文', async () => {
+test('生成模型最小测试统一使用短推理预算，DeepSeek 官方适配仍关闭默认思考', async () => {
   let requestBody = null;
   let requests = 0;
   const { runtime } = runtimeFixture({
@@ -220,7 +220,7 @@ test('DeepSeek 最小测试关闭默认思考模式并在极短预算内读取�
 
   assert.equal(result.ok, true, JSON.stringify(result));
   assert.equal(requests, 1);
-  assert.equal(requestBody.max_tokens, 16);
+  assert.equal(requestBody.max_tokens, 512);
   assert.deepEqual(requestBody.thinking, { type: 'disabled' });
 });
 

@@ -60,6 +60,55 @@ test('custom model discovery reads a generic OpenAI-compatible catalog with an a
   assert.equal(request.options.headers.authorization, 'Bearer secret-key');
 });
 
+test('chat accepts OpenAI-compatible text content blocks without model-specific handling', async () => {
+  let requestBody;
+  const client = createProviderClient({
+    connection: {
+      id: 'custom', label: '自定义', providerId: 'custom', baseUrl: 'https://relay.example.com/v1',
+      capabilities: { generation: { protocol: 'openai-chat', model: 'any-chat-model' } },
+    },
+    apiKey: 'secret',
+    fetchImpl: async (_url, options) => {
+      requestBody = JSON.parse(options.body);
+      return response(200, {
+        choices: [{
+          finish_reason: 'stop',
+          message: { content: [{ type: 'text', text: '连接' }, { type: 'output_text', text: '成功' }] },
+        }],
+      });
+    },
+  });
+
+  await assert.doesNotReject(async () => {
+    assert.equal((await client.chat({ messages: [{ role: 'user', content: '测试' }] })).content, '连接成功');
+  });
+  assert.equal(Object.hasOwn(requestBody, 'temperature'), false);
+});
+
+test('chat distinguishes reasoning budget exhaustion from an incompatible response', async () => {
+  const client = createProviderClient({
+    connection: {
+      id: 'custom', label: '自定义', providerId: 'custom', baseUrl: 'https://relay.example.com/v1',
+      capabilities: { generation: { protocol: 'openai-chat', model: 'reasoning-model' } },
+    },
+    apiKey: 'secret',
+    fetchImpl: async () => response(200, {
+      choices: [{
+        finish_reason: 'length',
+        message: { content: '', reasoning_content: '正在检查如何作答' },
+      }],
+      usage: { completion_tokens: 512, completion_tokens_details: { reasoning_tokens: 512 } },
+    }),
+  });
+
+  await assert.rejects(
+    () => client.chat({ messages: [{ role: 'user', content: '测试' }], maxTokens: 512 }),
+    (error) => error.publicCode === 'AI_OUTPUT_LIMIT'
+      && /输出额度/.test(error.message)
+      && /不会自动重试/.test(error.publicNextAction),
+  );
+});
+
 test('SiliconFlow model discovery requests the selected capability category', async () => {
   let requestUrl = '';
   await discoverModels({

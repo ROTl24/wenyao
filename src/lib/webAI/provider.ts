@@ -1,5 +1,15 @@
 import type { AICapability, AIConnection } from '../../types/desktop';
 import { normalizeHttpsUrl, toDesktopError, validateWebConnection, WebAIError } from './security';
+import chatCompletionCore from '../../../shared/chat-completion-core.cjs';
+
+const { hasReasoning, inspectChatCompletion, textValue } = chatCompletionCore as {
+  hasReasoning: (value: unknown) => boolean;
+  inspectChatCompletion: (
+    response: Record<string, any>,
+    options?: { reasoningObserved?: boolean },
+  ) => { status: 'content' | 'output_limit' | 'reasoning_only' | 'non_text' | 'invalid'; content: string; finishReason: string };
+  textValue: (value: unknown) => string;
+};
 
 interface UsageRecord {
   capability: 'generation' | 'embedding' | 'rerank';
@@ -105,6 +115,12 @@ interface StreamedChatState {
   usageValue?: unknown;
   completed: boolean;
   finishReason: string;
+  reasoningObserved: boolean;
+}
+
+interface ChatTransportResult {
+  json: Record<string, any>;
+  reasoningObserved: boolean;
 }
 
 function consumeStreamEvent(event: string, state: StreamedChatState): void {
@@ -125,35 +141,39 @@ function consumeStreamEvent(event: string, state: StreamedChatState): void {
     throw new WebAIError({ code: 'WEB_AI_INVALID_RESPONSE', message: 'AI 服务返回了无法解析的流式数据。', dataSafe: true, nextAction: '请确认自定义服务兼容 OpenAI Chat 流式协议。' });
   }
   const choice = chunk.choices?.[0];
-  const delta = choice?.delta?.content;
-  if (typeof delta === 'string') state.content += delta;
+  const delta = choice?.delta;
+  state.content += textValue(delta?.content);
+  if (hasReasoning(delta?.reasoning_content)) state.reasoningObserved = true;
   if (typeof choice?.finish_reason === 'string' && choice.finish_reason) state.finishReason = choice.finish_reason;
   if (chunk.usage) state.usageValue = chunk.usage;
 }
 
-function streamedChatResult(state: StreamedChatState): Record<string, any> {
+function streamedChatResult(state: StreamedChatState): ChatTransportResult {
   if (!state.completed && !state.finishReason) {
     throw new WebAIError({ code: 'WEB_AI_STREAM_INCOMPLETE', message: 'AI 服务在解读完成前中断了流式响应。', dataSafe: true, nextAction: '请先到服务商控制台确认用量，再决定是否手动重试；问爻不会自动重试。' });
   }
   return {
-    choices: [{ message: { content: state.content }, finish_reason: state.finishReason || null }],
-    ...(state.usageValue ? { usage: state.usageValue } : {}),
+    json: {
+      choices: [{ message: { content: state.content }, finish_reason: state.finishReason || null }],
+      ...(state.usageValue ? { usage: state.usageValue } : {}),
+    },
+    reasoningObserved: state.reasoningObserved,
   };
 }
 
-function parseStreamedChat(text: string): Record<string, any> {
-  const state: StreamedChatState = { content: '', completed: false, finishReason: '' };
+function parseStreamedChat(text: string): ChatTransportResult {
+  const state: StreamedChatState = { content: '', completed: false, finishReason: '', reasoningObserved: false };
   text.replace(/\r\n/g, '\n').split(/\n\n+/).forEach((event) => consumeStreamEvent(event, state));
   return streamedChatResult(state);
 }
 
-async function readStreamedChat(response: Response, onChunk: () => void): Promise<Record<string, any>> {
+async function readStreamedChat(response: Response, onChunk: () => void): Promise<ChatTransportResult> {
   const declared = Number(response.headers.get('content-length') || 0);
   if (declared > MAX_RESPONSE_BYTES) throw new Error('AI 服务响应超过 4 MB 安全上限。');
   if (!response.body) return parseStreamedChat(await response.text());
   const reader = response.body.getReader();
   const decoder = new TextDecoder();
-  const state: StreamedChatState = { content: '', completed: false, finishReason: '' };
+  const state: StreamedChatState = { content: '', completed: false, finishReason: '', reasoningObserved: false };
   let buffer = '';
   let received = 0;
   while (true) {
@@ -189,7 +209,7 @@ async function streamChatRequest(
   apiKey: string,
   body: unknown,
   options: { signal?: AbortSignal; fetchImpl?: typeof fetch } = {},
-): Promise<Record<string, any>> {
+): Promise<ChatTransportResult> {
   const timeout = streamSignal(options.signal);
   try {
     const response = await (options.fetchImpl || fetch)(url, {
@@ -217,7 +237,7 @@ async function streamChatRequest(
     const text = await boundedText(response, timeout.receivedChunk);
     if (text.trimStart().startsWith('data:')) return parseStreamedChat(text);
     try {
-      return text ? JSON.parse(text) as Record<string, any> : {};
+      return { json: text ? JSON.parse(text) as Record<string, any> : {}, reasoningObserved: false };
     } catch {
       throw new WebAIError({ code: 'WEB_AI_INVALID_RESPONSE', message: 'AI 服务返回了无法解析的数据。', dataSafe: true, nextAction: '请确认自定义服务兼容所选协议。' });
     }
@@ -315,21 +335,31 @@ export function createWebProvider(
 
   return {
     origins: validated.origins,
-    async chat({ messages, signal, maxTokens = 8192, temperature = 0, thinking }: { messages: Array<{ role: string; content: string }>; signal?: AbortSignal; maxTokens?: number; temperature?: number; thinking?: boolean }) {
+    async chat({ messages, signal, maxTokens = 8192, temperature, thinking }: { messages: Array<{ role: string; content: string }>; signal?: AbortSignal; maxTokens?: number; temperature?: number; thinking?: boolean }) {
       const definition = validated.connection.capabilities.generation!;
-      const json = await streamChatRequest(validated.endpoints.generation!, apiKey, {
+      const transport = await streamChatRequest(validated.endpoints.generation!, apiKey, {
         model: definition.model,
         messages,
-        temperature,
+        ...(temperature === undefined ? {} : { temperature }),
         max_tokens: maxTokens,
         ...(thinking === undefined ? {} : { thinking: { type: thinking ? 'enabled' : 'disabled' } }),
         stream: true,
         stream_options: { include_usage: true },
       }, { signal });
+      const { json } = transport;
       recordUsage('generation', definition.model, json);
-      const content = json.choices?.[0]?.message?.content;
-      if (typeof content !== 'string' || !content.trim()) throw new WebAIError({ code: 'WEB_AI_INVALID_RESPONSE', message: '解读模型没有返回可展示的内容。', dataSafe: true, nextAction: '请核对模型和 OpenAI Chat 兼容协议。' });
-      return { content, raw: json };
+      const result = inspectChatCompletion(json, { reasoningObserved: transport.reasoningObserved });
+      if (result.status === 'content') return { content: result.content, raw: json };
+      if (result.status === 'output_limit') {
+        throw new WebAIError({ code: 'WEB_AI_OUTPUT_LIMIT', message: '解读模型在生成可展示正文前耗尽了输出额度。', dataSafe: true, nextAction: '请提高模型输出上限，或在服务商侧关闭强制思考后手动重试；问爻不会自动重试。' });
+      }
+      if (result.status === 'reasoning_only') {
+        throw new WebAIError({ code: 'WEB_AI_NO_VISIBLE_CONTENT', message: '解读模型只返回了推理过程，没有返回可展示正文。', dataSafe: true, nextAction: '请确认服务商会把最终答案放在 message.content；问爻不会把内部推理当作解读正文。' });
+      }
+      if (result.status === 'non_text') {
+        throw new WebAIError({ code: 'WEB_AI_NON_TEXT_RESPONSE', message: '解读模型返回了非文本结果，无法用于解读。', dataSafe: true, nextAction: '请选择会直接返回文本内容的对话模型，并关闭强制工具调用。' });
+      }
+      throw new WebAIError({ code: 'WEB_AI_INVALID_RESPONSE', message: '解读模型返回的数据不符合 OpenAI Chat 响应协议。', dataSafe: true, nextAction: '请确认正文位于 choices[0].message.content。' });
     },
     async embed(input: string | string[], { signal }: { signal?: AbortSignal } = {}) {
       const definition = validated.connection.capabilities.embedding!;

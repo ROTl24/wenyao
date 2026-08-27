@@ -144,6 +144,55 @@ describe('网页自定义 AI 模型发现', () => {
     expect(fetchMock).toHaveBeenCalledTimes(1);
   });
 
+  it('accepts OpenAI-compatible text content blocks and omits unspecified sampling options', async () => {
+    const fetchMock = vi.fn().mockResolvedValue(new Response(JSON.stringify({
+      choices: [{
+        finish_reason: 'stop',
+        message: { content: [{ type: 'text', text: '连接' }, { type: 'output_text', text: '成功' }] },
+      }],
+    }), { status: 200, headers: { 'content-type': 'application/json' } }));
+    vi.stubGlobal('fetch', fetchMock);
+    const connection: AIConnection = {
+      id: 'custom', providerId: 'custom', presetId: null, label: '自定义', region: '',
+      baseUrl: 'https://api.example.com/v1', fields: {}, hasApiKey: true,
+      capabilities: { generation: { protocol: 'openai-chat', model: 'any-chat-model' } },
+      createdAt: '', updatedAt: '',
+    };
+
+    await expect(createWebProvider(connection, 'secret').chat({
+      messages: [{ role: 'user', content: '测试' }],
+    })).resolves.toMatchObject({ content: '连接成功' });
+    const request = fetchMock.mock.calls[0][1] as RequestInit;
+    expect(JSON.parse(String(request.body))).not.toHaveProperty('temperature');
+  });
+
+  it('distinguishes a reasoning-only length stop without retrying the billable request', async () => {
+    const fetchMock = vi.fn().mockResolvedValue(new Response([
+      'data: {"choices":[{"delta":{"reasoning_content":"正在检查如何作答"},"finish_reason":null}]}',
+      'data: {"choices":[{"delta":{},"finish_reason":"length"}],"usage":{"completion_tokens":512,"completion_tokens_details":{"reasoning_tokens":512}}}',
+      'data: [DONE]',
+      '',
+    ].join('\n\n'), { status: 200, headers: { 'content-type': 'text/event-stream' } }));
+    vi.stubGlobal('fetch', fetchMock);
+    const connection: AIConnection = {
+      id: 'custom', providerId: 'custom', presetId: null, label: '自定义', region: '',
+      baseUrl: 'https://api.example.com/v1', fields: {}, hasApiKey: true,
+      capabilities: { generation: { protocol: 'openai-chat', model: 'reasoning-model' } },
+      createdAt: '', updatedAt: '',
+    };
+
+    await expect(createWebProvider(connection, 'secret').chat({
+      messages: [{ role: 'user', content: '测试' }], maxTokens: 512,
+    })).rejects.toMatchObject({
+      detail: {
+        code: 'WEB_AI_OUTPUT_LIMIT',
+        message: expect.stringContaining('输出额度'),
+        nextAction: expect.stringContaining('问爻不会自动重试'),
+      },
+    });
+    expect(fetchMock).toHaveBeenCalledTimes(1);
+  });
+
   it('rejects an incomplete chat stream without retrying the billable request', async () => {
     const fetchMock = vi.fn().mockResolvedValue(new Response(
       'data: {"choices":[{"delta":{"content":"未完成"},"finish_reason":null}]}\n\n',
