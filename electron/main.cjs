@@ -21,6 +21,7 @@ const { createRuntimeProfile, runtimeProfileArgument } = require('./services/run
 const { createSecretStore } = require('./services/secret-store.cjs');
 const { createWindowOptions } = require('./services/window-options.cjs');
 const { FeedbackService } = require('./services/feedback.cjs');
+const { hydrateCorpusKnowledge } = require('../shared/corpus-knowledge.cjs');
 const feedbackConfig = require('../config/feedback.json');
 
 const runtimeProfile = createRuntimeProfile({
@@ -77,16 +78,11 @@ function loadCorpus() {
   try {
     const parsed = JSON.parse(fs.readFileSync(resourcePath('corpus.json'), 'utf8'));
     if (!Array.isArray(parsed)) return [];
-    let knowledge = new Map();
+    let knowledge = {};
     try {
-      const index = JSON.parse(fs.readFileSync(resourcePath('knowledge-index.json'), 'utf8'));
-      knowledge = new Map((index.units || []).map((unit) => [unit.id, unit]));
+      knowledge = JSON.parse(fs.readFileSync(resourcePath('knowledge-index.json'), 'utf8'));
     } catch {}
-    return parsed.map((entry) => ({
-      ...entry,
-      knowledgeKind: knowledge.get(entry.id)?.kind || 'doctrine',
-      topics: knowledge.get(entry.id)?.topics || entry.tags || [],
-    }));
+    return hydrateCorpusKnowledge(parsed, knowledge);
   } catch {
     return [];
   }

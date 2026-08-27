@@ -82,8 +82,10 @@ describe('PWA 隔离 Worker 的可选能力链路', () => {
     const mainOnly = await call<{ ok: boolean; status: { activeCapabilities: Record<string, unknown> } }>('completeSetup', { capabilities: ['generation'] });
     expect(mainOnly.ok).toBe(true);
     expect(Object.keys(mainOnly.status.activeCapabilities)).toEqual(['generation']);
-    const lexical = await call<{ diagnostics: { vectorUsed: boolean; rerankUsed: boolean } }>('search', { query: '事业', domainTerms: ['官鬼'] });
+    const lexical = await call<{ evidence: Array<{ id: string; knowledgeKind?: string }>; diagnostics: { vectorUsed: boolean; rerankUsed: boolean } }>('search', { query: '事业', domainTerms: ['官鬼'] });
     expect(lexical.diagnostics).toMatchObject({ vectorUsed: false, rerankUsed: false });
+    expect(lexical.evidence.length).toBeGreaterThan(0);
+    expect(lexical.evidence.every((entry) => ['rule', 'case', 'doctrine'].includes(entry.knowledgeKind || ''))).toBe(true);
     expect(calls).toMatchObject({ generation: 1, embedding: 0, rerank: 0 });
 
     await call('clear');

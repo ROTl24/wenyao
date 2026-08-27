@@ -1,11 +1,13 @@
 /// <reference lib="webworker" />
 
-import corpus from '../../../resources/corpus.json';
+import rawCorpus from '../../../resources/corpus.json';
 import vectorMetadata from '../../../resources/corpus-vectors.json';
 import corpusManifest from '../../../resources/corpus-manifest.json';
+import knowledgeIndex from '../../../resources/knowledge-index.json';
 import aiCore from '../../../electron/services/ai.cjs';
 import retrievalCore from '../../../shared/retrieval-core.cjs';
 import setupCore from '../../../shared/ai-setup-core.cjs';
+import corpusKnowledge from '../../../shared/corpus-knowledge.cjs';
 import type { AICapability, AIConfigStatus, AIConnection, AIPipeline, DesktopApi, DesktopError } from '../../types/desktop';
 import type { EvidenceEntry } from '../retrieval';
 import { createWebProvider, discoverWebModels } from './provider';
@@ -21,6 +23,7 @@ const { capabilityConnection, filterModels, generationProbeOptions, normalizeCap
   normalizeCapabilityLocation(capability: AICapability, apiUrl: string): { baseUrl: string };
 };
 const bundledVectorsUrl = new URL('../../../resources/corpus-vectors.f32', import.meta.url).href;
+const corpus = corpusKnowledge.hydrateCorpusKnowledge(rawCorpus, knowledgeIndex) as EvidenceEntry[];
 const keys = new Map<string, string>();
 const confirmedOrigins = new Map<string, string[]>();
 let vectors: { fingerprint: string; dimensions: number; ids: string[]; values: Float32Array } | null = null;

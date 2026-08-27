@@ -124,6 +124,27 @@ describe('平台能力', () => {
     expect(resolved.sessions).toBe(bridge.sessions);
     expect(resolved.ai).toBe(bridge.ai);
   });
+
+  it('exposes the classified built-in corpus to browser UI and book browsing', async () => {
+    await expect(desktop.corpus.status()).resolves.toMatchObject({
+      count: 1263,
+      bookCount: 5,
+      ruleCount: 495,
+      caseCount: 190,
+      doctrineCount: 578,
+    });
+
+    const listing = await desktop.corpus.books({ query: '易隐', limit: 10 });
+    const entries = await desktop.corpus.bookEntries({
+      bookId: listing.items[0].id,
+      query: '卜筮者，隐君子',
+      limit: 10,
+    });
+
+    expect(entries.items).toEqual([
+      expect.objectContaining({ id: 'YIYIN-0001', knowledgeKind: 'rule' }),
+    ]);
+  });
 });
 
 describe('浏览器会话存储', () => {

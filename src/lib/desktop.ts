@@ -1,5 +1,6 @@
-import corpus from '../../resources/corpus.json';
+import rawCorpus from '../../resources/corpus.json';
 import corpusManifest from '../../resources/corpus-manifest.json';
+import knowledgeIndex from '../../resources/knowledge-index.json';
 import aiProviderCatalog from '../../config/ai-providers.json';
 import publicLinks from '../../config/public-links.json';
 import feedbackConfig from '../../config/feedback.json';
@@ -15,6 +16,7 @@ import type {
 import type { UpdateState } from '../types/desktop';
 import type { DivinationSession } from './session';
 import { searchLocalEvidence } from './retrieval';
+import type { EvidenceEntry } from './retrieval';
 import { WebAIClient, emptyWebAIStatus } from './webAI/client';
 import { isTrustedWebAIOrigin } from './webAI/security';
 import { createBrowserFeedbackApi } from './feedback';
@@ -23,6 +25,10 @@ import {
   sanitizeRendererSession,
   validateSessionForSave,
 } from './sessionValidation';
+import corpusKnowledge from '../../shared/corpus-knowledge.cjs';
+
+const corpus = corpusKnowledge.hydrateCorpusKnowledge(rawCorpus, knowledgeIndex) as EvidenceEntry[];
+const browserKnowledgeCounts = corpusKnowledge.countKnowledgeKinds(corpus) as Pick<CorpusStatus, 'ruleCount' | 'caseCount' | 'doctrineCount'>;
 
 const STORAGE_KEY = 'wenyao-browser-sessions';
 const browserAIEnabled = isTrustedWebAIOrigin();
@@ -97,9 +103,7 @@ const browserCorpusStatus: CorpusStatus = {
   pendingIndexCount: 0,
   originalCount: corpus.filter((entry) => entry.sourceType === 'original').length,
   summaryCount: corpus.filter((entry) => entry.sourceType === 'summary').length,
-  ruleCount: 0,
-  caseCount: 0,
-  doctrineCount: corpus.length,
+  ...browserKnowledgeCounts,
   vectorReady: false,
   vectorModel: '',
   readyShardIds: [],
@@ -209,7 +213,7 @@ const browserFallback: DesktopApi = {
       const book = browserCorpusBooks.find((item) => item.id === payload.bookId);
       const query = String(payload.query || '').toLowerCase();
       const entries = book ? corpus.filter((entry) => entry.source === book.title && (!query || `${entry.title}${entry.text}`.toLowerCase().includes(query))) : [];
-      return { items: entries.slice(0, payload.limit || 30).map((entry) => ({ id: entry.id, title: entry.title, location: entry.location, text: entry.text, tags: entry.tags, knowledgeKind: 'doctrine' as const })), total: entries.length };
+      return { items: entries.slice(0, payload.limit || 30).map((entry) => ({ id: entry.id, title: entry.title, location: entry.location, text: entry.text, tags: entry.tags, knowledgeKind: entry.knowledgeKind || 'doctrine' })), total: entries.length };
     },
     async selectImportFiles() { return { ok: false, error: webOnlyLocalCorpusError }; },
     async previewDroppedFiles() { return { ok: false, error: webOnlyLocalCorpusError }; },

@@ -2,6 +2,7 @@ import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 import { createServer, type ViteDevServer } from 'vite';
 
 const browserCommonJSModules = [
+  '/shared/corpus-knowledge.cjs?import',
   '/shared/retrieval-core.cjs?import',
   '/shared/ai-setup-core.cjs?import',
   '/electron/services/ai.cjs?import',
