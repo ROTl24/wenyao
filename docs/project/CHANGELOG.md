@@ -12,6 +12,16 @@ last_reviewed: 2026-08-27
 
 ## Entries
 
+### CHG-20260827-custom-api-v1-default
+
+- 日期：2026-08-27
+- 结果：自定义 OpenAI 兼容服务只填写裸域名时，桌面端与 PWA 自动使用 `/v1` 并在配置界面显示规范化地址。
+- 原因：裸域名直接拼接能力路径可能命中返回 HTTP 200 HTML 的管理页面，造成模型响应解析失败。
+- 验证：`npm.cmd test`、`npm.cmd run build:renderer`、`npm.cmd run verify:web`。
+- Git：实现、测试与知识记录位于同一提交；远端与部署状态不在成果条目中固化，以实时检查为准。
+- Agent Note：[自定义 OpenAI 兼容服务裸域名使用版本化基址](../../.agents/notes/implemented/bug-fix/2026-08-27-openai-base-url-default.md)。
+- 文档影响：PROJECT、PROJECT_CONTEXT、DECISIONS、LESSONS。
+
 ### CHG-20260827-web-corpus-classification
 
 - 日期：2026-08-27

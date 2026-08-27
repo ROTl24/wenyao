@@ -101,6 +101,15 @@ describe('AI 能力三步向导', () => {
     expect(screen.getByLabelText('模型名称')).toHaveAttribute('placeholder', '目录不可用时可手动填写');
   });
 
+  it('自定义服务只填写裸域名时在界面补全 v1', () => {
+    render(<Harness />);
+    const apiUrl = screen.getByLabelText('API 调用地址');
+    fireEvent.change(apiUrl, { target: { value: 'https://api.shuaiapi.com/' } });
+    fireEvent.blur(apiUrl);
+    expect(apiUrl).toHaveValue('https://api.shuaiapi.com/v1');
+    expect(screen.getByText(/仅填写域名时自动补全/)).toBeVisible();
+  });
+
   it('模型目录失败时保留手动回退且不触发最小测试', async () => {
     const listModels = vi.spyOn(desktop.aiConfig, 'listModels').mockResolvedValue({
       ok: false,

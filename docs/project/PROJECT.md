@@ -20,9 +20,9 @@ last_reviewed: 2026-08-27
 
 ## Current Goal
 
-- 目标版本：`G-002`
-- 目标：修复网页版古籍分类元数据缺失，使桌面端与 PWA 使用同一分类语义，并以自动化测试防止统计与检索再次漂移。
-- 来源：`user-confirmed`，2026-08-27 用户确认实施。
+- 目标版本：`G-003`
+- 目标：自定义 OpenAI 兼容服务只填写裸域名时自动使用 `/v1`，同时保留显式接口路径与单次最小测试的费用边界。
+- 来源：`user-confirmed`，2026-08-27 用户确认实施自动补全。
 
 ## Scope
 
@@ -45,12 +45,14 @@ last_reviewed: 2026-08-27
 | 跨平台本地优先应用 | `verified` | Electron 与 PWA 构建入口存在，四种起卦和排盘具备自动化测试 | `package.json`、`vite.config.ts`、`src/lib/*.test.ts` |
 | 五书混合检索 | `verified` | 1263 条语料可经共享检索核心检索，分类索引覆盖全部语料 ID | `resources/corpus.json`、`resources/knowledge-index.json`、`shared/retrieval-core.cjs` |
 | 网页古籍分类一致性 | `verified` | 网页统计、书内条目和 AI 检索均使用 495 规则、190 占例、578 义理分类 | 浏览器与 Worker 回归测试、全量测试、PWA 构建验证 |
+| 自定义 AI 地址规范化 | `verified` | 裸域名默认使用 `/v1`，显式路径和 DeepSeek 官方根地址保持原语义，界面显示实际规范化结果 | `shared/ai-setup-core.cjs`、共享核心与向导回归测试 |
 
 ## Current State
 
 - `package.json` 当前版本为 `0.5.3`；Git `main` 已包含网页古籍分类一致性修复提交 `d460c3d`，远端与部署状态以实时检查为准。
 - Electron 主进程、PWA 渲染适配器和 Web AI Worker 均通过 `shared/corpus-knowledge.cjs` 合并正文与分类索引。
 - 网页状态、书内条目和检索证据已验证使用 495 条规则、190 条占例和 578 条义理。
+- Electron 与 PWA 共用自定义 AI 地址规范化：裸域名默认补全 `/v1`，失败后不会自动切换地址或重复请求。
 - GitHub Release 工作流支持手动候选构建，并仅在版本标签路径发布正式桌面产物。
 
 ## Blockers
@@ -68,3 +70,4 @@ last_reviewed: 2026-08-27
 |---|---|---|---|
 | `G-001` | `verified` | 2026-08-26 | Git 历史存在 `release: 问爻 0.5.3`，当前仓库包含三种运行形态与对应构建配置 |
 | `G-002` | `verified` | 2026-08-27 | 共享分类装配、运行时回归测试与 PWA 静态产物验证完成 |
+| `G-003` | `verified` | 2026-08-27 | 共享地址规范化、界面可见补全与跨运行时回归测试完成 |

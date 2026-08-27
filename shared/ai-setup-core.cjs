@@ -39,9 +39,12 @@ function normalizeCapabilityLocation(capability, value) {
     basePath = pathname.replace(MODELS_SUFFIX, '') || '/';
   } else if (url.search) {
     throw new Error('基础 API 地址不能带查询参数；请粘贴 Base URL 或该能力的完整调用地址');
+  } else if (pathname === '/' && !['deepseek', 'alibaba'].includes(providerIdentity(url.origin).providerId)) {
+    basePath = '/v1';
   }
   const baseUrl = `${url.origin}${basePath === '/' ? '' : basePath}`.replace(/\/$/, '');
-  return { baseUrl, path, displayUrl: `${baseUrl}${path}` };
+  const displayUrl = `${baseUrl}${path}`;
+  return { baseUrl, path, displayUrl, canonicalUrl: match ? displayUrl : baseUrl };
 }
 
 function providerIdentity(baseUrl) {

@@ -30,7 +30,7 @@ const descriptions: Record<AICapability, string> = {
 };
 const { capabilityConnection, normalizeCapabilityLocation } = setupCore as {
   capabilityConnection(input: { capability: AICapability; apiUrl: string; model: string; id?: string; createdAt?: string; dimensions?: number }): AIConnection;
-  normalizeCapabilityLocation(capability: AICapability, apiUrl: string): { baseUrl: string };
+  normalizeCapabilityLocation(capability: AICapability, apiUrl: string): { baseUrl: string; canonicalUrl: string };
 };
 
 function apiUrlFor(connection: AIConnection, capability: AICapability): string {
@@ -104,6 +104,13 @@ export function AISetupWizard({ catalog, status, onStatus, onReady, onClose }: P
     } catch (error) {
       setNotice(error instanceof Error ? error.message : '无法沿用上一项连接。');
     }
+  };
+
+  const normalizeApiUrl = () => {
+    try {
+      const canonicalUrl = normalizeCapabilityLocation(currentCapability, form.apiUrl).canonicalUrl;
+      if (canonicalUrl !== form.apiUrl.trim()) updateForm(currentCapability, { apiUrl: canonicalUrl, models: [] });
+    } catch { /* 输入过程中保留原值，由操作入口提供完整校验信息。 */ }
   };
 
   const security = () => (isWeb ? { confirmedOrigins: webOrigins } : undefined);
@@ -208,9 +215,9 @@ export function AISetupWizard({ catalog, status, onStatus, onReady, onClose }: P
           </button> : null}
 
           <label className="ai-setup-field">API 调用地址
-            <input value={form.apiUrl} onChange={(event) => updateForm(currentCapability, { apiUrl: event.target.value, models: [] })} placeholder="https://api.example.com/v1" />
+            <input value={form.apiUrl} onChange={(event) => updateForm(currentCapability, { apiUrl: event.target.value, models: [] })} onBlur={normalizeApiUrl} placeholder="https://api.example.com/v1" />
           </label>
-          <small className="ai-field-help">可填写 Base URL，也可填写该能力的完整接口地址。</small>
+          <small className="ai-field-help">可填写 Base URL，也可填写该能力的完整接口地址；自定义服务仅填写域名时自动补全 /v1。</small>
           <label className="ai-setup-field">API Key
             <input type="password" autoComplete="off" value={form.apiKey} onChange={(event) => updateForm(currentCapability, { apiKey: event.target.value, credentialSource: undefined })} placeholder={form.credentialSource ? '已引用安全存储中的密钥；如需更换可直接粘贴' : isWeb ? '仅保留在当前页面的隔离 Worker 内存' : '由系统安全存储加密保存'} />
           </label>

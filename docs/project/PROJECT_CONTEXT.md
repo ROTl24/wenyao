@@ -20,6 +20,7 @@ last_reviewed: 2026-08-27
 - 桌面密钥由系统安全存储保护；PWA 密钥只存在于当前页面会话的 Worker 内存中。
 - 起卦、排盘、本机历史和内置古籍不依赖付费模型调用。
 - 真实模型验证可能产生费用，必须在明确范围、成本与停止规则后获得授权。
+- 自定义 OpenAI 兼容服务只填写裸域名时默认使用 `/v1`；显式 Base Path 或完整能力地址具有最高优先级，地址失败不会触发自动重试。
 
 ## Project Preferences
 
@@ -54,6 +55,7 @@ last_reviewed: 2026-08-27
 
 - `corpus.json` 保存正文，`knowledge-index.json` 保存知识分类；只加载前者会让条目仍可检索，但分类统计、证据标签和分类多样性语义失真。
 - HTTP 200、新 HTML 或本地构建不能证明当前 PWA 标签页已使用新 Service Worker 控制的资源。
+- 模型接口返回 HTTP 200 但正文是管理页面 HTML 时，属于接口路径错误，不代表模型连接成功；裸域名补全只发生在请求前，不会失败后换地址重试。
 - 检索回归指标证明召回链稳定，不证明现实预测准确率。
 - 桌面端允许导入自有古籍，PWA 只浏览和检索内置古籍。
 
@@ -64,6 +66,7 @@ last_reviewed: 2026-08-27
 | 项目目标与状态 | `docs/project/PROJECT.md` | `user-confirmed` / `code-verified` | 2026-08-27 |
 | 语料正文与分类 | `resources/corpus.json`、`resources/knowledge-index.json` | `code-verified` | 2026-08-27 |
 | 运行时能力边界 | `src/lib/desktop.ts`、`electron/main.cjs` | `code-verified` | 2026-08-27 |
+| 自定义 AI 地址规范化 | `shared/ai-setup-core.cjs` | `code-verified` | 2026-08-27 |
 | 构建与测试入口 | `package.json`、`vite.config.ts` | `code-verified` | 2026-08-27 |
 | 桌面发布流程 | `.github/workflows/release-desktop.yml` | `code-verified` | 2026-08-27 |
 
