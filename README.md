@@ -12,6 +12,7 @@
   <a href="https://github.com/ROTl24/wenyao/releases/latest"><img src="https://img.shields.io/github/v/release/ROTl24/wenyao?style=flat-square&color=d4483b&label=%E6%9C%80%E6%96%B0%E7%89%88%E6%9C%AC" alt="Latest Release"></a>
   <a href="https://github.com/ROTl24/wenyao/releases"><img src="https://img.shields.io/github/downloads/ROTl24/wenyao/total?style=flat-square&color=4a7c59&label=%E4%B8%8B%E8%BD%BD%E9%87%8F" alt="Downloads"></a>
   <a href="https://wenyao-9pu.pages.dev"><img src="https://img.shields.io/badge/%E5%9C%A8%E7%BA%BF%E4%BD%93%E9%AA%8C-PWA-blue?style=flat-square" alt="在线体验"></a>
+  <a href="LICENSE"><img src="https://img.shields.io/badge/License-MIT-d4483b?style=flat-square" alt="MIT License"></a>
   <img src="https://img.shields.io/badge/%E5%B9%B3%E5%8F%B0-Windows%20%7C%20macOS%20%7C%20PWA-8B6914?style=flat-square" alt="Platforms">
 </p>
 
@@ -258,6 +259,10 @@ npm run verify:macos-release
 | **v0.5.1** | macOS 13+ 通用桌面版（Intel + Apple Silicon） |
 | **v0.4.0** | 一站式多供应商 AI 连接向导；打包版数据保存在安装目录 `data\` |
 | **v0.3.0** | 应用内在线更新 |
+
+## 📄 开源许可
+
+问爻原创源代码以 [MIT License](LICENSE) 发布，可自由使用、修改与分发，但须保留版权与许可声明。第三方依赖、字体、古籍及数据继续遵循各自的许可与来源说明。
 
 ---
 

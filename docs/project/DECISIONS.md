@@ -1,7 +1,7 @@
 ---
 project_docs_schema: 1
 document_type: decisions
-last_reviewed: 2026-08-27
+last_reviewed: 2026-08-30
 ---
 
 # 项目决策
@@ -15,6 +15,7 @@ last_reviewed: 2026-08-27
 | `ADR-20260827-openai-chat-probe-response` | `accepted` | OpenAI Chat 探测预算与可展示响应分类 | [Agent Note](../../.agents/notes/implemented/bug-fix/2026-08-27-openai-chat-probe-response.md) | 取代按单一服务处理 16 Token 探测失败的局部规则 |
 | `ADR-20260827-model-catalog-origin-confirmation` | `accepted` | PWA 模型目录使用独立域名确认目标 | [Agent Note](../../.agents/notes/implemented/bug-fix/2026-08-27-model-catalog-origin-confirmation.md) | 无 |
 | `ADR-20260827-desktop-update-release-contract` | `accepted` | 桌面稳定版本与 Windows 在线更新发布契约 | [Agent Note](../../.agents/notes/implemented/architecture/2026-08-27-desktop-update-release-contract.md) | 无 |
+| `ADR-20260830-mit-license` | `accepted` | 问爻原创源代码使用 MIT License | [Agent Note](../../.agents/notes/implemented/process/2026-08-30-mit-license.md) | 取代无明确许可证的源码公开状态 |
 
 ## Active Decisions
 
@@ -62,3 +63,12 @@ last_reviewed: 2026-08-27
 - 权威 Note：[桌面稳定版本通过可验证发布元数据驱动 Windows 在线更新](../../.agents/notes/implemented/architecture/2026-08-27-desktop-update-release-contract.md)。
 - 重新考虑：项目获得 Windows/macOS 代码签名与 Apple 公证能力，或更换 GitHub Releases 更新服务时。
 - Supersedes：无。
+
+### ADR-20260830-mit-license
+
+- Status: `accepted`
+- Source: `user-confirmed` / `code-verified`
+- 主题：问爻原创源代码使用 MIT License 免费开源，第三方依赖、字体、古籍和数据保留各自许可，第三方 AI 服务费用不属于软件免费承诺。
+- 权威 Note：[问爻原创源代码采用 MIT 许可](../../.agents/notes/implemented/process/2026-08-30-mit-license.md)。
+- 重新考虑：版权主体、贡献者协议、商业授权策略或第三方资产边界发生变化时。
+- Supersedes：无明确许可证的源码公开状态。

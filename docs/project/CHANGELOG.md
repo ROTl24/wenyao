@@ -1,7 +1,7 @@
 ---
 project_docs_schema: 1
 document_type: changelog
-last_reviewed: 2026-08-27
+last_reviewed: 2026-08-30
 ---
 
 # 项目成果记录
@@ -11,6 +11,16 @@ last_reviewed: 2026-08-27
 - 当前记录周期：2026 年。
 
 ## Entries
+
+### CHG-20260830-mit-license
+
+- 日期：2026-08-30
+- 结果：问爻原创源代码以 MIT License 免费开源，根许可证、包元数据和 README 使用同一许可声明，并保留第三方许可与 AI 服务费用边界。
+- 原因：公开源码但没有许可证不能向外部使用者授予明确的使用、修改和分发权，也不能准确宣称开源。
+- 验证：标准 MIT 文本、JSON 元数据、README 链接、项目知识严格审计与 `git diff --check`。
+- Git：实现与知识记录位于同一本地提交；未推送。
+- Agent Note：[问爻原创源代码采用 MIT 许可](../../.agents/notes/implemented/process/2026-08-30-mit-license.md)。
+- 文档影响：README、PROJECT、PROJECT_CONTEXT、DECISIONS、CHANGELOG。
 
 ### CHG-20260827-release-054
 
