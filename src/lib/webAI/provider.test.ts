@@ -1,5 +1,5 @@
 import { afterEach, describe, expect, it, vi } from 'vitest';
-import { createWebProvider, discoverWebModels } from './provider';
+import { createWebProvider, discoverWebModels, secureJsonRequest } from './provider';
 import type { AIConnection } from '../../types/desktop';
 
 describe('网页自定义 AI 模型发现', () => {
@@ -41,6 +41,30 @@ describe('网页自定义 AI 模型发现', () => {
     expect(JSON.parse(String(request.body))).toEqual({
       model: 'embed-model', input: ['测试'], encoding_format: 'float',
     });
+  });
+
+  it('recognizes a provider quota rejection returned as HTTP 400 without exposing secrets', async () => {
+    const fetchMock = vi.fn().mockResolvedValue(new Response(JSON.stringify({
+      error: { code: 'request_limit_exceeded', message: 'limit reached for sk-dangerous-secret' },
+    }), {
+      status: 400,
+      headers: {
+        'modelscope-ratelimit-model-requests-remaining': '0',
+        'x-request-id': 'web-request-400',
+      },
+    }));
+    vi.stubGlobal('fetch', fetchMock);
+
+    const error = await secureJsonRequest('https://api.example.com/v1/embeddings', 'secret', {
+      model: 'embed-model', input: ['测试'],
+    }).catch((value) => value);
+    expect(error).toMatchObject({
+      detail: {
+        code: 'WEB_AI_RATE_LIMITED',
+        technicalDetails: expect.stringContaining('web-request-400'),
+      },
+    });
+    expect(error.detail.technicalDetails).not.toContain('sk-dangerous-secret');
   });
 
   it('keeps a continuously active chat stream alive without a total deadline', async () => {

@@ -89,6 +89,7 @@ export interface AIDraft {
     completed: number;
     total: number;
     progress: number;
+    failedRange?: { shardId?: string; start: number; end: number; total: number } | null;
     error?: DesktopError | null;
   } | null;
   bulkEmbeddingAccepted?: boolean;

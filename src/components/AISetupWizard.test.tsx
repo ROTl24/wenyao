@@ -242,4 +242,39 @@ describe('AI 能力三步向导', () => {
     expect(screen.getByRole('heading', { name: '正在准备向量检索' })).toBeVisible();
     expect(screen.getByText(/50\.0%/)).toBeVisible();
   });
+
+  it('建库失败后阻止原样重发，并提供重新测试或降级关键词检索', async () => {
+    const failed = draftStatus(['generation', 'embedding']);
+    failed.status = 'error';
+    failed.draft!.tests.embedding = {
+      status: 'failed',
+      error: { code: 'AI_RATE_LIMITED', message: '向量服务限额已耗尽', dataSafe: true, nextAction: '确认限额恢复后重新测试。' },
+    };
+    failed.draft!.indexTask = {
+      stage: 'error', completed: 450, total: 1263, progress: 35.6,
+      failedRange: { start: 450, end: 460, total: 1263 },
+      error: {
+        code: 'AI_RATE_LIMITED', message: '向量服务限额已耗尽', dataSafe: true,
+        nextAction: '确认限额恢复后重新测试；问爻不会自动重试。',
+        technicalDetails: '{"status":400,"requestId":"request-400"}',
+      },
+    };
+    const resumeBuild = vi.spyOn(desktop.aiConfig, 'resumeBuild');
+    const completeSetup = vi.spyOn(desktop.aiConfig, 'completeSetup').mockResolvedValue({ ok: true, status: readyStatus(['generation']) });
+
+    const { unmount } = render(<Harness initial={failed} />);
+    expect(screen.queryByRole('button', { name: '手动继续' })).not.toBeInTheDocument();
+    expect(screen.getByText(/失败批次：451–460/)).toBeVisible();
+    fireEvent.click(screen.getByText('查看诊断信息'));
+    expect(screen.getByText(/request-400/)).toBeVisible();
+    fireEvent.click(screen.getByRole('button', { name: '检查向量配置' }));
+    expect(screen.getByRole('heading', { name: '向量检索模型（可选）' })).toBeVisible();
+    expect(screen.getByRole('button', { name: '下一步' })).toBeDisabled();
+    expect(resumeBuild).not.toHaveBeenCalled();
+    unmount();
+
+    render(<Harness initial={failed} />);
+    fireEvent.click(screen.getByRole('button', { name: '跳过向量并完成' }));
+    await waitFor(() => expect(completeSetup).toHaveBeenCalledWith({ capabilities: ['generation'], bulkEmbeddingAccepted: false }));
+  });
 });

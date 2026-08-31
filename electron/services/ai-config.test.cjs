@@ -1,4 +1,5 @@
 const assert = require('node:assert/strict');
+const crypto = require('node:crypto');
 const test = require('node:test');
 const {
   embeddingFingerprint,
@@ -119,5 +120,17 @@ test('embedding fingerprint is stable across corpus shards', () => {
   assert.notEqual(
     embeddingFingerprint({ connection }),
     embeddingFingerprint({ connection: { ...connection, baseUrl: 'https://api.other.com/v1' } }),
+  );
+  const legacyIdentity = JSON.stringify({
+    providerId: connection.providerId,
+    baseUrl: connection.baseUrl,
+    protocol: connection.capabilities.embedding.protocol,
+    model: connection.capabilities.embedding.model,
+    dimensions: connection.capabilities.embedding.dimensions,
+  });
+  assert.equal(
+    embeddingFingerprint({ connection }),
+    crypto.createHash('sha256').update(legacyIdentity).digest('hex'),
+    '桌面端必须继续识别已付费构建的完整批次断点',
   );
 });

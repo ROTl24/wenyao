@@ -100,6 +100,7 @@ describe('网页 AI 服务边界', () => {
 
     expect(fetchImpl).toHaveBeenCalledTimes(1);
     expect(error.detail.message).not.toContain('session-secret');
-    expect(error.detail).not.toHaveProperty('technicalDetails');
+    expect(error.detail.technicalDetails).toBe('{"status":500}');
+    expect(error.detail.technicalDetails).not.toContain('session-secret');
   });
 });

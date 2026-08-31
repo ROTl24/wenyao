@@ -1,6 +1,7 @@
 const fs = require('node:fs');
 const path = require('node:path');
 const { LocalVectorIndex, ResumableVectorBuilder } = require('./vector-index.cjs');
+const { composeEmbeddingDocument } = require('../../shared/embedding-core.cjs');
 
 function safePathPart(value) {
   const normalized = String(value || '').replace(/[^a-zA-Z0-9_-]/g, '-').slice(0, 160);
@@ -79,9 +80,23 @@ class CorpusIndexCoordinator {
           await new Promise((resolve) => setTimeout(resolve, 200));
         }
         if (control.cancelled) continue;
-        const batch = shard.entries.slice(builder.completed, builder.completed + batchSize)
-          .map((entry) => `${entry.source || shard.title}\n${entry.title}\n${entry.text}`);
-        const vectors = await embed(batch);
+        const batchStart = builder.completed;
+        const batchEntries = shard.entries.slice(batchStart, batchStart + batchSize);
+        const batch = batchEntries.map((entry) => composeEmbeddingDocument(entry, shard.title));
+        let vectors;
+        try {
+          vectors = await embed(batch);
+        } catch (error) {
+          if (error && typeof error === 'object') {
+            error.indexFailure = {
+              shardId: shard.id,
+              start: completedBefore + batchStart,
+              end: completedBefore + batchStart + batchEntries.length,
+              total,
+            };
+          }
+          throw error;
+        }
         builder.append(vectors);
         onProgress({
           shardId: shard.id,

@@ -21,8 +21,14 @@ class MemoryStore {
   appendAIUsage(entry) { this.ai.usage.push(structuredClone(entry)); }
 }
 
-function json(status, value) {
-  return { ok: status >= 200 && status < 300, status, text: async () => JSON.stringify(value) };
+function json(status, value, headers = {}) {
+  const normalized = Object.fromEntries(Object.entries(headers).map(([name, entry]) => [name.toLowerCase(), String(entry)]));
+  return {
+    ok: status >= 200 && status < 300,
+    status,
+    headers: { get: (name) => normalized[String(name).toLowerCase()] || null },
+    text: async () => JSON.stringify(value),
+  };
 }
 
 function corpusEntries() {
@@ -183,6 +189,54 @@ test('生成、向量和重排最小测试失败都不会自动重试', async ()
     assert.equal(result.ok, false);
     assert.equal(fixture.calls[capability], before + 1);
   }
+});
+
+test('建库失败后保存失败范围并阻止未经重新测试的原样续发', async () => {
+  let embeddingRequests = 0;
+  const entries = Array.from({ length: 12 }, (_, index) => ({
+    id: `E${index + 1}`,
+    title: `章节${index + 1}`,
+    text: `古籍正文${index + 1}`,
+    source: '测试书',
+    location: `卷${index + 1}`,
+    tags: [],
+    sourceType: 'original',
+    knowledgeKind: 'rule',
+  }));
+  const fixture = runtimeFixture({
+    corpus: entries,
+    corpusHash: 'corpus-resume-guard',
+    fetchImpl: async (url, options = {}) => {
+      const target = String(url);
+      const body = JSON.parse(options.body || '{}');
+      if (target.endsWith('/chat/completions')) return json(200, { choices: [{ message: { content: '连接成功' } }] });
+      if (target.endsWith('/embeddings')) {
+        embeddingRequests += 1;
+        if (embeddingRequests === 3) {
+          return json(400, { error: { code: 'request_limit_exceeded', message: 'request limit exceeded' } }, {
+            'modelscope-ratelimit-model-requests-remaining': '0',
+            'x-request-id': 'runtime-request-400',
+          });
+        }
+        return json(200, { data: body.input.map((_, index) => ({ index, embedding: [1, 0] })) });
+      }
+      return json(200, { results: [{ index: 0, relevance_score: 1 }] });
+    },
+  });
+
+  await testCapability(fixture.runtime, 'generation');
+  await testCapability(fixture.runtime, 'embedding');
+  const result = await fixture.runtime.completeSetup({ capabilities: ['generation', 'embedding'], bulkEmbeddingAccepted: true });
+
+  assert.equal(result.ok, false);
+  assert.equal(result.error.code, 'AI_RATE_LIMITED');
+  assert.deepEqual(result.status.draft.indexTask.failedRange, { shardId: 'builtin', start: 10, end: 12, total: 12 });
+  assert.equal(result.status.draft.tests.embedding.status, 'failed');
+  const requestsBeforeResume = embeddingRequests;
+  const resumed = fixture.runtime.resumeBuild();
+  await new Promise((resolve) => setImmediate(resolve));
+  assert.equal(resumed.status, 'error');
+  assert.equal(embeddingRequests, requestsBeforeResume);
 });
 
 test('生成模型最小测试统一使用短推理预算，DeepSeek 官方适配仍关闭默认思考', async () => {

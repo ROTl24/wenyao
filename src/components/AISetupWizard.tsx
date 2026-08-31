@@ -187,6 +187,8 @@ export function AISetupWizard({ catalog, status, onStatus, onReady, onClose }: P
   };
 
   const progress = status.draft?.indexTask?.progress || 0;
+  const indexTask = status.draft?.indexTask;
+  const indexError = indexTask?.error || undefined;
   const testPassed = test?.status === 'passed';
   const canTest = Boolean(form.apiUrl.trim() && form.model.trim() && (form.apiKey.trim() || form.credentialSource));
   const pageExamples = catalog.capabilityExamples[currentCapability];
@@ -258,10 +260,16 @@ export function AISetupWizard({ catalog, status, onStatus, onReady, onClose }: P
         {step === 3 && !finished ? <>
           <header><p>索引准备</p><h2 id="ai-setup-title">{status.draft?.pipeline.embedding ? '正在准备向量检索' : '正在切换配置'}</h2><span>新配置完全准备成功前，旧的活动方案不会被覆盖。失败后可手动继续，不会自动重试远程请求。</span></header>
           {status.draft?.pipeline.embedding ? <><div className="ai-build-progress"><span style={{ transform: `scaleX(${progress / 100})` }} /></div><p className="ai-build-progress-label">{progress.toFixed(1)}% · {status.draft?.indexTask?.completed || 0}/{status.draft?.indexTask?.total || status.corpusCount}</p></> : null}
-          {notice || status.draft?.indexTask?.error ? <div className="ai-setup-error" role="alert">{notice || errorText(status.draft?.indexTask?.error || undefined)}</div> : null}
+          {notice || indexError ? <div className="ai-setup-error" role="alert">
+            <span>{notice || errorText(indexError)}</span>
+            {indexTask?.failedRange ? <p>失败批次：{indexTask.failedRange.start + 1}–{indexTask.failedRange.end}（共 {indexTask.failedRange.total} 段）</p> : null}
+            {indexError?.technicalDetails ? <details><summary>查看诊断信息</summary><pre>{indexError.technicalDetails}</pre></details> : null}
+          </div> : null}
           <div className="ai-setup-actions">
             {status.status === 'building' ? <button type="button" onClick={() => void desktop.aiConfig.pauseBuild().then(onStatus)}><Pause size={15} />暂停</button> : null}
-            {status.status === 'paused' || status.status === 'error' ? <button type="button" onClick={() => void desktop.aiConfig.resumeBuild().then(onStatus)}><Play size={15} />手动继续</button> : null}
+            {status.status === 'paused' ? <button type="button" onClick={() => void desktop.aiConfig.resumeBuild().then(onStatus)}><Play size={15} />手动继续</button> : null}
+            {status.status === 'error' ? <button type="button" onClick={() => { setNotice(''); setStep(1); }}><ArrowLeft size={15} />检查向量配置</button> : null}
+            {status.status === 'error' ? <button type="button" onClick={() => void complete(['generation'])}>跳过向量并完成</button> : null}
             <button type="button" onClick={onClose}>关闭</button>
           </div>
         </> : null}

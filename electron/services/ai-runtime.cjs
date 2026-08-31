@@ -603,7 +603,7 @@ class AIRuntime {
     const shards = this.corpusLibrary.getShardDescriptors({ enabledOnly: true, indexRequestedOnly: true });
     if (!shards.length) throw runtimeError('没有已启用的古籍可建立索引', 'CORPUS_EMPTY', '请先启用至少一本古籍。');
     const client = this.#client(embedding.connection, embedding.apiKey);
-    this.#updateDraftTask({ stage: 'building', fingerprint: identity.fingerprint, completed: 0, total: shards.reduce((sum, shard) => sum + shard.entries.length, 0), progress: 0, error: null });
+    this.#updateDraftTask({ stage: 'building', fingerprint: identity.fingerprint, completed: 0, total: shards.reduce((sum, shard) => sum + shard.entries.length, 0), progress: 0, failedRange: null, error: null });
     try {
       const result = await this.corpusIndex.buildShards({
         identity,
@@ -616,6 +616,7 @@ class AIRuntime {
           completed: progress.completed,
           total: progress.total,
           progress: Math.round(progress.progress * 10) / 10,
+          failedRange: null,
           error: null,
         }),
       });
@@ -629,8 +630,22 @@ class AIRuntime {
       this.#activateDraft(this.store.getRawAIState(), identity.fingerprint);
       return { ok: true, status: this.getStatus() };
     } catch (error) {
-      this.#updateDraftTask({ stage: 'error', fingerprint: identity.fingerprint, error: structuredProviderError(error, 'VECTOR_INDEX_FAILED') });
-      return { ok: false, error: structuredProviderError(error, 'VECTOR_INDEX_FAILED'), status: this.getStatus() };
+      const detail = structuredProviderError(error, 'VECTOR_INDEX_FAILED');
+      const state = this.store.getRawAIState();
+      if (state.draft) {
+        state.draft.tests.embedding = { status: 'failed', checkedAt: new Date().toISOString(), error: detail };
+        state.draft.indexTask = {
+          ...(state.draft.indexTask || {}),
+          stage: 'error',
+          fingerprint: identity.fingerprint,
+          failedRange: error?.indexFailure || null,
+          error: detail,
+          updatedAt: new Date().toISOString(),
+        };
+        this.store.saveAIState(state);
+        this.#emit();
+      }
+      return { ok: false, error: detail, status: this.getStatus() };
     }
   }
 
@@ -656,12 +671,13 @@ class AIRuntime {
   }
 
   resumeBuild() {
+    const state = this.store.getRawAIState();
+    if (state.draft?.indexTask?.stage === 'error') return this.getStatus();
     if (this.vectorBuildControl) {
       this.vectorBuildControl.paused = false;
       this.#updateDraftTask({ stage: 'building' });
       return this.getStatus();
     }
-    const state = this.store.getRawAIState();
     const capabilities = configuredCapabilities(state.draft?.pipeline);
     void this.completeSetup({
       capabilities,

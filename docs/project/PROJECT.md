@@ -1,7 +1,7 @@
 ---
 project_docs_schema: 1
 document_type: project
-last_reviewed: 2026-08-30
+last_reviewed: 2026-08-31
 ---
 
 # 项目状态
@@ -51,6 +51,7 @@ last_reviewed: 2026-08-30
 | PWA 模型目录域名确认 | `verified` | 模型名称为空时仍按规范化目录地址显示并确认 HTTPS origin，界面与 Worker 共用目录安全入口 | `src/lib/webAI/security.ts`、向导与 Worker 回归测试 |
 | Windows 稳定更新通道 | `verified` | 打包版启动及每六小时检查 GitHub Releases，用户确认后下载并在退出或重启时安装，正式 Release 同时发布 `latest.yml`、安装包与 blockmap | `electron/services/update-manager.cjs`、`scripts/verify-release.mjs`、`.github/workflows/release-desktop.yml` |
 | MIT 开源许可 | `verified` | 根许可证、包元数据、README 与项目知识记录一致声明 MIT，第三方许可边界保持独立 | `LICENSE`、`package.json`、`README.md`、Agent Note |
+| 远程向量建库可恢复性 | `verified` | 失败批次可诊断且不能原样续发，重新测试后从完整批次断点恢复，桌面与 PWA 共用向量文档契约 | Provider、Runtime、Worker 与向导回归测试 |
 
 ## Current State
 
@@ -63,6 +64,7 @@ last_reviewed: 2026-08-30
 - GitHub Release 工作流支持手动候选构建，并仅在版本标签路径发布正式桌面产物；Windows 稳定 Release 的 `latest.yml` 驱动既有安装版发现更新。
 - macOS 免费发行版没有 Developer ID 与公证票据，`0.5.3` 客户端保持 GitHub Releases 手动更新，不能由后续版本远程改为自动更新。
 - 问爻原创源代码采用 MIT License；第三方依赖、字体、古籍和数据继续按各自许可分发，第三方 AI 服务费用不属于软件免费承诺。
+- 远程向量建库按完整批次保存断点；错误状态需要重新测试向量能力或显式降级为本地 BM25，PWA 同时保存当前 Worker 与 IndexedDB 批次断点。
 
 ## Blockers
 

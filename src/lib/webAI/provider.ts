@@ -1,6 +1,7 @@
 import type { AICapability, AIConnection } from '../../types/desktop';
 import { normalizeHttpsUrl, toDesktopError, validateWebConnection, WebAIError } from './security';
 import chatCompletionCore from '../../../shared/chat-completion-core.cjs';
+import providerResponseCore from '../../../shared/provider-response-core.cjs';
 
 const { hasReasoning, inspectChatCompletion, textValue } = chatCompletionCore as {
   hasReasoning: (value: unknown) => boolean;
@@ -9,6 +10,9 @@ const { hasReasoning, inspectChatCompletion, textValue } = chatCompletionCore as
     options?: { reasoningObserved?: boolean },
   ) => { status: 'content' | 'output_limit' | 'reasoning_only' | 'non_text' | 'invalid'; content: string; finishReason: string };
   textValue: (value: unknown) => string;
+};
+const { classifyProviderFailure } = providerResponseCore as {
+  classifyProviderFailure(input: { status: number; headers?: Headers; body?: string; label?: string; codePrefix?: string; includeProviderMessage?: boolean }): import('../../types/desktop').DesktopError;
 };
 
 interface UsageRecord {
@@ -64,12 +68,14 @@ async function boundedText(response: Response, onChunk: () => void = () => {}): 
   return new TextDecoder().decode(merged);
 }
 
-function providerFailure(status: number): WebAIError {
-  if (status === 401 || status === 403) return new WebAIError({ code: 'WEB_AI_AUTH_FAILED', message: '访问密钥无效或没有模型权限。', dataSafe: true, nextAction: '请重新输入密钥，并确认账号已开通所选模型。' });
-  if (status === 402) return new WebAIError({ code: 'WEB_AI_BALANCE_REQUIRED', message: 'AI 服务账号余额或额度不足。', dataSafe: true, nextAction: '请到服务商控制台检查余额和用量。' });
-  if (status === 404) return new WebAIError({ code: 'WEB_AI_MODEL_UNAVAILABLE', message: 'AI 接口或模型不存在。', dataSafe: true, nextAction: '请核对自定义路径和模型名称。' });
-  if (status === 429) return new WebAIError({ code: 'WEB_AI_RATE_LIMITED', message: 'AI 服务当前请求过于频繁。', dataSafe: true, nextAction: '请稍后手动重试；问爻不会自动重试。' });
-  return new WebAIError({ code: 'WEB_AI_PROVIDER_FAILED', message: `AI 服务请求失败（${status}）。`, dataSafe: true, nextAction: '请到服务商控制台核对服务状态；响应正文不会在问爻中保存或展示。' });
+function providerFailure(response: Response, body: string): WebAIError {
+  return new WebAIError(classifyProviderFailure({
+    status: response.status,
+    headers: response.headers,
+    body,
+    codePrefix: 'WEB_AI_',
+    includeProviderMessage: false,
+  }));
 }
 
 function combinedSignal(outer?: AbortSignal): { signal: AbortSignal; dispose(): void } {
@@ -228,8 +234,8 @@ async function streamChatRequest(
       signal: timeout.signal,
     });
     if (!response.ok) {
-      await boundedText(response, timeout.receivedChunk);
-      throw providerFailure(response.status);
+      const text = await boundedText(response, timeout.receivedChunk);
+      throw providerFailure(response, text);
     }
     if (response.headers.get('content-type')?.includes('text/event-stream')) {
       return await readStreamedChat(response, timeout.receivedChunk);
@@ -278,7 +284,7 @@ export async function secureJsonRequest(
       signal: timeout.signal,
     });
     const text = await boundedText(response);
-    if (!response.ok) throw providerFailure(response.status);
+    if (!response.ok) throw providerFailure(response, text);
     try {
       return text ? JSON.parse(text) as Record<string, any> : {};
     } catch {

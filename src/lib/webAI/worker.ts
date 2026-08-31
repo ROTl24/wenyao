@@ -8,6 +8,7 @@ import aiCore from '../../../electron/services/ai.cjs';
 import retrievalCore from '../../../shared/retrieval-core.cjs';
 import setupCore from '../../../shared/ai-setup-core.cjs';
 import corpusKnowledge from '../../../shared/corpus-knowledge.cjs';
+import embeddingCore from '../../../shared/embedding-core.cjs';
 import type { AICapability, AIConfigStatus, AIConnection, AIPipeline, DesktopApi, DesktopError } from '../../types/desktop';
 import type { EvidenceEntry } from '../retrieval';
 import { createWebProvider, discoverWebModels } from './provider';
@@ -22,11 +23,16 @@ const { capabilityConnection, filterModels, generationProbeOptions, normalizeCap
   generationProbeOptions(connection: AIConnection): { maxTokens: number; thinking?: boolean };
   normalizeCapabilityLocation(capability: AICapability, apiUrl: string): { baseUrl: string };
 };
+const { EMBEDDING_DOCUMENT_VERSION, composeEmbeddingDocument } = embeddingCore as {
+  EMBEDDING_DOCUMENT_VERSION: string;
+  composeEmbeddingDocument(entry: EvidenceEntry, fallbackTitle?: string): string;
+};
 const bundledVectorsUrl = new URL('../../../resources/corpus-vectors.f32', import.meta.url).href;
 const corpus = corpusKnowledge.hydrateCorpusKnowledge(rawCorpus, knowledgeIndex) as EvidenceEntry[];
 const keys = new Map<string, string>();
 const confirmedOrigins = new Map<string, string[]>();
 let vectors: { fingerprint: string; dimensions: number; ids: string[]; values: Float32Array } | null = null;
+let vectorCheckpoint: { fingerprint: string; dimensions: number; ids: string[]; completed: number; values: Float32Array } | null = null;
 let buildControl: { paused: boolean; canceled: boolean; resume?: () => void } | null = null;
 let paidOperation = '';
 
@@ -43,6 +49,15 @@ const initialStatus: AIConfigStatus = {
   usage: [],
 };
 let status = structuredClone(initialStatus);
+
+interface StoredVectorBuild {
+  fingerprint: string;
+  dimensions: number;
+  ids: string[];
+  total: number;
+  completed: number;
+  chunks: Array<{ offset: number; length: number }>;
+}
 
 function emitStatus(): void {
   workerScope.postMessage({ event: 'status', status: structuredClone(status) } satisfies WebAIStatusEvent);
@@ -193,13 +208,26 @@ async function testCapability(payload: TestCapabilityPayload): Promise<{ ok: boo
 
 function fingerprint(connection: AIConnection): string {
   const embedding = connection.capabilities.embedding!;
-  return [new URL(connection.baseUrl).origin, embedding.model, embedding.dimensions, vectorMetadata.corpusHash].join('|');
+  return [new URL(connection.baseUrl).origin, embedding.model, embedding.dimensions, vectorMetadata.corpusHash, EMBEDDING_DOCUMENT_VERSION].join('|');
 }
 
 function openVectorDatabase(): Promise<IDBDatabase> {
   return new Promise((resolve, reject) => {
-    const request = indexedDB.open('wenyao-web-ai-vectors', 1);
-    request.onupgradeneeded = () => request.result.createObjectStore('indexes', { keyPath: 'fingerprint' });
+    const request = indexedDB.open('wenyao-web-ai-vectors', 2);
+    request.onupgradeneeded = () => {
+      if (!request.result.objectStoreNames.contains('indexes')) request.result.createObjectStore('indexes', { keyPath: 'fingerprint' });
+      if (!request.result.objectStoreNames.contains('builds')) request.result.createObjectStore('builds', { keyPath: 'fingerprint' });
+      if (!request.result.objectStoreNames.contains('batches')) {
+        request.result.createObjectStore('batches', { keyPath: ['fingerprint', 'offset'] }).createIndex('fingerprint', 'fingerprint');
+      }
+    };
+    request.onsuccess = () => resolve(request.result);
+    request.onerror = () => reject(request.error);
+  });
+}
+
+function requestValue<T>(request: IDBRequest<T>): Promise<T> {
+  return new Promise((resolve, reject) => {
     request.onsuccess = () => resolve(request.result);
     request.onerror = () => reject(request.error);
   });
@@ -233,6 +261,107 @@ async function storeVectors(value: NonNullable<typeof vectors>): Promise<boolean
   } catch { return false; } finally { database.close(); }
 }
 
+function sameVectorBuild(meta: StoredVectorBuild, dimensions: number, ids: string[]): boolean {
+  return meta.dimensions === dimensions
+    && meta.total === ids.length
+    && meta.ids.length === ids.length
+    && meta.ids.every((id, index) => id === ids[index]);
+}
+
+function memoryVectorCheckpoint(targetFingerprint: string, dimensions: number, ids: string[]): { completed: number; values: Float32Array } | null {
+  if (!vectorCheckpoint
+    || vectorCheckpoint.fingerprint !== targetFingerprint
+    || vectorCheckpoint.dimensions !== dimensions
+    || vectorCheckpoint.ids.length !== ids.length
+    || vectorCheckpoint.ids.some((id, index) => id !== ids[index])) return null;
+  return { completed: vectorCheckpoint.completed, values: vectorCheckpoint.values };
+}
+
+async function loadVectorCheckpoint(targetFingerprint: string, dimensions: number, ids: string[]): Promise<{ completed: number; values: Float32Array } | null> {
+  let database: IDBDatabase;
+  try { database = await openVectorDatabase(); } catch { return null; }
+  try {
+    const meta = await requestValue(database.transaction('builds', 'readonly').objectStore('builds').get(targetFingerprint)) as StoredVectorBuild | undefined;
+    if (!meta || !sameVectorBuild(meta, dimensions, ids)) return null;
+    const values = new Float32Array(ids.length * dimensions);
+    let contiguous = 0;
+    for (const chunk of [...meta.chunks].sort((left, right) => left.offset - right.offset)) {
+      if (chunk.offset !== contiguous || chunk.length < 1 || chunk.offset + chunk.length > meta.completed) return null;
+      const saved = await requestValue(database.transaction('batches', 'readonly').objectStore('batches').get([targetFingerprint, chunk.offset])) as { buffer?: ArrayBuffer } | undefined;
+      if (!saved?.buffer) return null;
+      const batch = new Float32Array(saved.buffer);
+      if (batch.length !== chunk.length * dimensions) return null;
+      values.set(batch, chunk.offset * dimensions);
+      contiguous += chunk.length;
+    }
+    return contiguous === meta.completed ? { completed: contiguous, values } : null;
+  } catch {
+    return null;
+  } finally { database.close(); }
+}
+
+async function storeVectorCheckpointBatch(
+  targetFingerprint: string,
+  dimensions: number,
+  ids: string[],
+  offset: number,
+  embedded: number[][],
+): Promise<boolean> {
+  let database: IDBDatabase;
+  try { database = await openVectorDatabase(); } catch { return false; }
+  try {
+    return await new Promise<boolean>((resolve) => {
+      const transaction = database.transaction(['builds', 'batches'], 'readwrite');
+      const builds = transaction.objectStore('builds');
+      const request = builds.get(targetFingerprint);
+      let accepted = false;
+      request.onsuccess = () => {
+        const existing = request.result as StoredVectorBuild | undefined;
+        const meta: StoredVectorBuild = existing && sameVectorBuild(existing, dimensions, ids)
+          ? existing
+          : { fingerprint: targetFingerprint, dimensions, ids, total: ids.length, completed: 0, chunks: [] };
+        if (offset !== meta.completed || embedded.some((vector) => vector.length !== dimensions)) {
+          transaction.abort();
+          return;
+        }
+        const values = new Float32Array(embedded.length * dimensions);
+        embedded.forEach((vector, index) => values.set(vector, index * dimensions));
+        transaction.objectStore('batches').put({ fingerprint: targetFingerprint, offset, buffer: values.buffer });
+        builds.put({
+          ...meta,
+          completed: offset + embedded.length,
+          chunks: [...meta.chunks, { offset, length: embedded.length }],
+        });
+        accepted = true;
+      };
+      request.onerror = () => transaction.abort();
+      transaction.oncomplete = () => resolve(accepted);
+      transaction.onerror = () => resolve(false);
+      transaction.onabort = () => resolve(false);
+    });
+  } finally { database.close(); }
+}
+
+async function clearVectorCheckpoint(targetFingerprint: string): Promise<void> {
+  let database: IDBDatabase;
+  try { database = await openVectorDatabase(); } catch { return; }
+  try {
+    await new Promise<void>((resolve) => {
+      const transaction = database.transaction(['builds', 'batches'], 'readwrite');
+      transaction.objectStore('builds').delete(targetFingerprint);
+      const cursor = transaction.objectStore('batches').index('fingerprint').openCursor(IDBKeyRange.only(targetFingerprint));
+      cursor.onsuccess = () => {
+        if (!cursor.result) return;
+        cursor.result.delete();
+        cursor.result.continue();
+      };
+      transaction.oncomplete = () => resolve();
+      transaction.onerror = () => resolve();
+      transaction.onabort = () => resolve();
+    });
+  } finally { database.close(); }
+}
+
 async function bundledVectorIndex(targetFingerprint: string): Promise<NonNullable<typeof vectors>> {
   const response = await fetch(bundledVectorsUrl, { cache: 'force-cache', credentials: 'same-origin', redirect: 'error' });
   if (!response.ok) throw new Error('内置向量索引加载失败。');
@@ -254,6 +383,7 @@ function activateDraft(targetFingerprint: string, nextVectors: typeof vectors): 
   status.activePipeline = structuredClone(draft.pipeline);
   status.activeFingerprint = targetFingerprint;
   vectors = nextVectors;
+  if (!targetFingerprint) vectorCheckpoint = null;
   const resolved = pipelineConnections(status.activePipeline);
   status.activeCapabilities = Object.fromEntries(capabilities.filter((capability) => resolved[capability]).map((capability) => {
     const connection = resolved[capability]!;
@@ -292,32 +422,78 @@ async function completeSetup(payload: Parameters<DesktopApi['aiConfig']['complet
     draft.bulkEmbeddingAccepted = true;
     buildControl = { paused: false, canceled: false };
     status.status = 'building'; status.message = '正在本机准备向量索引。';
-    draft.indexTask = { stage: 'building', completed: 0, total: corpus.length, progress: 0, error: null }; emitStatus();
+    draft.indexTask = { stage: 'building', completed: 0, total: corpus.length, progress: 0, failedRange: null, error: null }; emitStatus();
+    let checkpointPersistenceFailed = false;
     try {
-      let persistenceWarning = false;
       const definition = embeddingConnection.capabilities.embedding!;
       const batchSize = Math.max(1, Math.min(50, Number(definition.batchSize || 10)));
-      const values = new Float32Array(corpus.length * dimensions);
+      const ids = corpus.map((entry) => entry.id);
+      const checkpoint = memoryVectorCheckpoint(targetFingerprint, dimensions, ids)
+        || await loadVectorCheckpoint(targetFingerprint, dimensions, ids);
+      const values = checkpoint?.values || new Float32Array(corpus.length * dimensions);
+      const startOffset = checkpoint?.completed || 0;
       const embedder = provider(embeddingConnection);
-      for (let offset = 0; offset < corpus.length; offset += batchSize) {
+      draft.indexTask = {
+        stage: 'building',
+        completed: startOffset,
+        total: corpus.length,
+        progress: corpus.length ? startOffset / corpus.length * 100 : 100,
+        failedRange: null,
+        error: null,
+      };
+      emitStatus();
+      for (let offset = startOffset; offset < corpus.length; offset += batchSize) {
         await waitIfPaused();
         if (buildControl?.canceled) throw new WebAIError({ code: 'WEB_AI_BUILD_CANCELED', message: '向量索引构建已取消。', dataSafe: true, nextAction: '需要使用向量检索时可重新开始。' });
         const batch = corpus.slice(offset, offset + batchSize);
-        const embedded = await embedder.embed(batch.map((entry) => `${entry.source} ${entry.title} ${entry.location}\n${entry.text}`));
+        let embedded: number[][];
+        try {
+          embedded = await embedder.embed(batch.map((entry) => composeEmbeddingDocument(entry)));
+        } catch (error) {
+          if (error && typeof error === 'object') {
+            (error as { indexFailure?: { start: number; end: number; total: number } }).indexFailure = {
+              start: offset,
+              end: offset + batch.length,
+              total: corpus.length,
+            };
+          }
+          throw error;
+        }
         embedded.forEach((vector, index) => values.set(vector, (offset + index) * dimensions));
+        vectorCheckpoint = {
+          fingerprint: targetFingerprint,
+          dimensions,
+          ids,
+          completed: offset + embedded.length,
+          values,
+        };
+        if (!(await storeVectorCheckpointBatch(targetFingerprint, dimensions, ids, offset, embedded))) checkpointPersistenceFailed = true;
         const completed = Math.min(corpus.length, offset + batch.length);
-        draft.indexTask = { stage: 'building', completed, total: corpus.length, progress: completed / corpus.length * 100, error: null }; emitStatus();
+        draft.indexTask = { stage: 'building', completed, total: corpus.length, progress: completed / corpus.length * 100, failedRange: null, error: null }; emitStatus();
       }
-      nextVectors = { fingerprint: targetFingerprint, dimensions, ids: corpus.map((entry) => entry.id), values };
-      persistenceWarning = !(await storeVectors(nextVectors));
+      nextVectors = { fingerprint: targetFingerprint, dimensions, ids, values };
+      const stored = await storeVectors(nextVectors);
+      if (stored) await clearVectorCheckpoint(targetFingerprint);
+      vectorCheckpoint = null;
       activateDraft(targetFingerprint, nextVectors);
-      if (persistenceWarning) status.message = 'AI 服务已就绪，但浏览器未能保存自定义向量索引；刷新后需要重新构建。';
+      if (!stored) status.message = 'AI 服务已就绪，但浏览器未能保存自定义向量索引；刷新后需要重新构建。';
       emitStatus();
       return { ok: true, status: structuredClone(status) };
     } catch (error) {
       const detail = toDesktopError(error, 'WEB_AI_INDEX_FAILED');
+      if (checkpointPersistenceFailed) detail.nextAction = `${detail.nextAction} 浏览器未能保存本次断点，重新开始时可能需要从头构建。`;
       status.status = 'error'; status.message = detail.message;
-      if (status.draft?.indexTask) status.draft.indexTask = { ...status.draft.indexTask, stage: 'error', error: detail };
+      if (status.draft?.indexTask) {
+        status.draft.indexTask = {
+          ...status.draft.indexTask,
+          stage: 'error',
+          failedRange: error && typeof error === 'object'
+            ? (error as { indexFailure?: { start: number; end: number; total: number } }).indexFailure || null
+            : null,
+          error: detail,
+        };
+        status.draft.tests.embedding = { status: 'failed', checkedAt: new Date().toISOString(), error: detail };
+      }
       emitStatus();
       return { ok: false, status: structuredClone(status), error: detail };
     } finally { buildControl = null; }
@@ -390,6 +566,7 @@ function pauseBuild(): AIConfigStatus {
 }
 
 async function resumeBuild(): Promise<AIConfigStatus> {
+  if (status.draft?.indexTask?.stage === 'error') return structuredClone(status);
   if (buildControl) {
     buildControl.paused = false; status.status = 'building'; status.message = '正在继续准备本地向量索引。';
     if (status.draft?.indexTask) status.draft.indexTask.stage = 'building';
@@ -421,7 +598,7 @@ function cancelSetup(): AIConfigStatus {
 }
 
 function clear(): void {
-  keys.clear(); confirmedOrigins.clear(); vectors = null; status = structuredClone(initialStatus); buildControl = null; emitStatus();
+  keys.clear(); confirmedOrigins.clear(); vectors = null; vectorCheckpoint = null; status = structuredClone(initialStatus); buildControl = null; emitStatus();
 }
 
 workerScope.addEventListener('message', (event: MessageEvent<WebAIRequest>) => {

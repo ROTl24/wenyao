@@ -5,7 +5,6 @@ const {
   discoverModels,
   providerError,
   validateBaseUrl,
-  withTransientRetry,
 } = require('./ai-provider.cjs');
 
 function response(status, value) {
@@ -144,21 +143,11 @@ test('embedding dimension can be discovered from the first response', async () =
   assert.equal(vectors[0].length, 3);
 });
 
-test('provider errors are categorized and transient operations retry without retrying auth failures', async () => {
+test('provider errors are categorized without any automatic retry helper', () => {
   const unavailable = providerError({ status: 503 }, 'maintenance', '测试服务');
-  let attempts = 0;
-  const value = await withTransientRetry(async () => {
-    attempts += 1;
-    if (attempts < 3) throw unavailable;
-    return 'ok';
-  }, { retries: 2, delayImpl: async () => {} });
-  assert.equal(value, 'ok');
-  assert.equal(attempts, 3);
-
   const auth = providerError({ status: 401 }, 'invalid key', '测试服务');
-  attempts = 0;
-  await assert.rejects(() => withTransientRetry(async () => { attempts += 1; throw auth; }, { retries: 2, delayImpl: async () => {} }), /访问密钥无效/);
-  assert.equal(attempts, 1);
+  assert.equal(unavailable.publicCode, 'AI_PROVIDER_UNAVAILABLE');
+  assert.equal(auth.publicCode, 'AI_AUTH_FAILED');
 });
 
 test('custom provider URL requires HTTPS except localhost', () => {

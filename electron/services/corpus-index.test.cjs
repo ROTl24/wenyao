@@ -55,3 +55,47 @@ test('旧单体索引可无付费调用迁移为内置分片', () => {
   assert.equal(coordinator.migrateLegacyBuiltIn({ identity, shard: builtIn, legacyBases: [legacyBase] }), true);
   assert.equal(coordinator.hasShard(identity, builtIn), true);
 });
+
+test('远程批次失败会报告精确范围，并从已落盘断点恢复而不重复发送', async () => {
+  const root = fs.mkdtempSync(path.join(os.tmpdir(), 'wenyao-shard-resume-'));
+  const coordinator = new CorpusIndexCoordinator({ indexRoot: root });
+  const source = shard('builtin', 'hash-resume', ['A1', 'A2', 'A3', 'A4', 'A5']);
+  let requests = 0;
+
+  await assert.rejects(
+    () => coordinator.buildShards({
+      identity,
+      shards: [source],
+      control: { paused: false, cancelled: false },
+      embed: async (documents) => {
+        requests += 1;
+        if (requests === 2) throw new Error('provider rejected batch');
+        return documents.map((document) => document.endsWith('A1') ? [1, 0] : [0, 1]);
+      },
+    }),
+    (error) => {
+      assert.deepEqual(error.indexFailure, {
+        shardId: 'builtin',
+        start: 2,
+        end: 4,
+        total: 5,
+      });
+      return true;
+    },
+  );
+
+  const resumedDocuments = [];
+  const result = await coordinator.buildShards({
+    identity,
+    shards: [source],
+    control: { paused: false, cancelled: false },
+    embed: async (documents) => {
+      resumedDocuments.push(...documents);
+      return documents.map(() => [0, 1]);
+    },
+  });
+
+  assert.equal(result.ok, true);
+  assert.equal(resumedDocuments[0].endsWith('A3'), true);
+  assert.equal(resumedDocuments.some((document) => document.endsWith('A1')), false);
+});

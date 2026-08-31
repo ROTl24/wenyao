@@ -1,6 +1,6 @@
 const crypto = require('node:crypto');
-const { setTimeout: delay } = require('node:timers/promises');
 const { inspectChatCompletion } = require('../../shared/chat-completion-core.cjs');
+const { classifyProviderFailure } = require('../../shared/provider-response-core.cjs');
 
 function validateBaseUrl(value) {
   let url;
@@ -20,37 +20,12 @@ function endpoint(baseUrl, path) {
 }
 
 function providerError(response, body, label = 'AI 服务') {
-  const text = String(body || '').slice(0, 1000);
-  const lower = text.toLowerCase();
-  let message = `${label}请求失败（${response.status}）`;
-  let publicCode = 'AI_PROVIDER_FAILED';
-  let publicNextAction = '请稍后手动重试；如持续失败，请回到对应能力页面核对接口和模型。';
-  if (response.status === 401 || response.status === 403) {
-    message = `${label}访问密钥无效或没有模型权限`;
-    publicCode = 'AI_AUTH_FAILED';
-    publicNextAction = '请重新创建访问密钥，并确认账号已开通所选模型。';
-  } else if (response.status === 402 || /balance|credit|余额|欠费|insufficient/.test(lower)) {
-    message = `${label}账号余额或额度不足`;
-    publicCode = 'AI_BALANCE_REQUIRED';
-    publicNextAction = '请前往服务商官方页面充值或检查额度。';
-  } else if (response.status === 404 || /model.+not.+found|unknown model|模型不存在/.test(lower)) {
-    message = `${label}接口或模型不存在`;
-    publicCode = 'AI_MODEL_UNAVAILABLE';
-    publicNextAction = '请检查模型是否仍可用，或回到对应能力页面选择其他模型。';
-  } else if (response.status === 429) {
-    message = `${label}当前请求过于频繁`;
-    publicCode = 'AI_RATE_LIMITED';
-    publicNextAction = '请稍候重试，或前往服务商控制台提升额度。';
-  } else if (response.status >= 500) {
-    message = `${label}暂时不可用`;
-    publicCode = 'AI_PROVIDER_UNAVAILABLE';
-    publicNextAction = '服务商暂时异常，请稍后重试。';
-  }
-  const error = new Error(message);
+  const detail = classifyProviderFailure({ status: response.status, headers: response.headers, body, label });
+  const error = new Error(detail.message);
   error.status = response.status;
-  error.publicCode = publicCode;
-  error.publicNextAction = publicNextAction;
-  error.technicalDetails = text;
+  error.publicCode = detail.code;
+  error.publicNextAction = detail.nextAction;
+  error.technicalDetails = detail.technicalDetails;
   return error;
 }
 
@@ -130,28 +105,6 @@ async function discoverModels({ baseUrl, apiKey = '', capability = 'generation',
     throw error;
   }
   return modelIds;
-}
-
-function isTransientProviderError(error) {
-  return error?.publicCode === 'AI_NETWORK_FAILED'
-    || error?.publicCode === 'AI_TIMEOUT'
-    || error?.publicCode === 'AI_RATE_LIMITED'
-    || error?.publicCode === 'AI_PROVIDER_UNAVAILABLE'
-    || error?.status === 429
-    || error?.status >= 500;
-}
-
-async function withTransientRetry(operation, { retries = 2, signal, delayImpl = delay, onRetry = () => {} } = {}) {
-  let attempt = 0;
-  while (true) {
-    try { return await operation(attempt); }
-    catch (error) {
-      if (attempt >= retries || !isTransientProviderError(error) || signal?.aborted) throw error;
-      attempt += 1;
-      onRetry(error, attempt);
-      await delayImpl(Math.min(3000, 350 * (2 ** (attempt - 1))), undefined, { signal });
-    }
-  }
 }
 
 function createProviderClient({ connection, apiKey = '', fetchImpl = fetch, usageSink = () => {} }) {
@@ -313,11 +266,9 @@ module.exports = {
   createProviderClient,
   discoverModels,
   endpoint,
-  isTransientProviderError,
   normalizeUsage,
   providerError,
   requestJson,
   structuredProviderError,
   validateBaseUrl,
-  withTransientRetry,
 };

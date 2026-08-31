@@ -1,7 +1,7 @@
 ---
 project_docs_schema: 1
 document_type: lessons
-last_reviewed: 2026-08-27
+last_reviewed: 2026-08-31
 ---
 
 # 项目教训
@@ -15,6 +15,7 @@ last_reviewed: 2026-08-27
 | `LES-20260827-chat-visible-output` | `active` | OpenAI Chat 生成模型与最小测试 | HTTP 200 和推理输出不等于可展示正文，探测预算与空正文原因必须独立验证 |
 | `LES-20260827-model-catalog-before-model` | `active` | PWA 模型目录与出站域名确认 | 模型发现发生在模型选择之前，目录安全目标不能依赖模型名称 |
 | `LES-20260827-release-metadata-drives-update` | `active` | Windows 桌面在线更新与 GitHub Release | 代码和安装包上传不等于旧客户端可更新，稳定 Release 元数据与资产必须共同验证 |
+| `LES-20260831-paid-batch-recovery` | `active` | Electron、PWA 的远程向量建库 | 可续建不等于可盲目重试，失败恢复必须同时约束完整批次断点、服务状态验证与用户显式动作 |
 
 ## Active Lessons
 
@@ -83,3 +84,16 @@ last_reviewed: 2026-08-27
 - 不再适用：Windows 更新提供方不再使用 GitHub Releases 或更新协议不再消费 `latest.yml` 时。
 - 证据：`electron/services/update-manager.cjs`、`.github/workflows/release-desktop.yml`、`scripts/verify-release.mjs`。
 - 相关 Note：[桌面稳定版本通过可验证发布元数据驱动 Windows 在线更新](../../.agents/notes/implemented/architecture/2026-08-27-desktop-update-release-contract.md)。
+
+### LES-20260831-paid-batch-recovery
+
+- Status: `active`
+- Source: `user-reported` / `code-verified` / `provider-verified`
+- 适用范围：Electron、PWA、OpenAI 兼容向量服务和本地向量断点。
+- 症状：建库在 450/1263 处收到 HTTP 400，点击“手动继续”后仍停在同一位置并再次失败。
+- 已验证根因：成功批次断点本身有效，但服务商失败被压缩为通用状态，错误页允许在服务状态未验证时原样续发；PWA 还缺少逐批持久化，且两端向量文本模板不同。
+- 正确规则：只有有效并已保存的完整批次才能推进断点；错误状态必须先重新测试能力或显式降级，不能直接继续；诊断只保存允许字段；改变文本模板的缓存必须更新指纹，未改变的桌面模板必须保持既有付费断点可识别。
+- 防线：共享失败分类、失败范围、运行时续发守卫、Worker 内存与 IndexedDB 批次断点、跨端共享文档模板和可见恢复路径测试。
+- 不再适用：远程协议提供具有幂等键、明确计费结果和服务端作业断点的建库 API，并由应用验证其恢复契约后。
+- 证据：`shared/provider-response-core.cjs`、`shared/embedding-core.cjs`、`electron/services/ai-runtime.test.cjs`、`src/lib/webAI/worker.test.ts`、`src/components/AISetupWizard.test.tsx`。
+- 相关 Note：[远程向量建库以完整批次断点和显式恢复为边界](../../.agents/notes/implemented/bug-fix/2026-08-31-provider-index-recovery.md)。
