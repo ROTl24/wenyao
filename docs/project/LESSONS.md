@@ -88,7 +88,7 @@ last_reviewed: 2026-08-31
 ### LES-20260831-paid-batch-recovery
 
 - Status: `active`
-- Source: `user-reported` / `code-verified` / `provider-verified`
+- Source: `user-confirmed` / `code-verified` / `external-verified`
 - 适用范围：Electron、PWA、OpenAI 兼容向量服务和本地向量断点。
 - 症状：建库在 450/1263 处收到 HTTP 400，点击“手动继续”后仍停在同一位置并再次失败。
 - 已验证根因：成功批次断点本身有效，但服务商失败被压缩为通用状态，错误页允许在服务状态未验证时原样续发；PWA 还缺少逐批持久化，且两端向量文本模板不同。

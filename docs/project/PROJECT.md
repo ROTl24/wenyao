@@ -55,7 +55,7 @@ last_reviewed: 2026-08-31
 
 ## Current State
 
-- `package.json` 当前版本为 `0.5.4`；桌面正式构建从同一提交打包当前 Renderer、Electron 服务、共享 AI 核心与古籍数据。
+- `package.json` 当前版本为 `0.5.5`；桌面正式构建从同一提交打包当前 Renderer、Electron 服务、共享 AI 核心与古籍数据。
 - Electron 主进程、PWA 渲染适配器和 Web AI Worker 均通过 `shared/corpus-knowledge.cjs` 合并正文与分类索引。
 - 网页状态、书内条目和检索证据已验证使用 495 条规则、190 条占例和 578 条义理。
 - Electron 与 PWA 共用自定义 AI 地址规范化：裸域名默认补全 `/v1`，失败后不会自动切换地址或重复请求。
