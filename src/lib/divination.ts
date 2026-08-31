@@ -62,11 +62,11 @@ export interface FuShenActiveAction {
 export interface TransformationReturnFact {
   id: string;
   lineIndex: number;
-  fromGanZhi: string;
-  toGanZhi: string;
-  elementRelation: ElementRelation;
-  branchRelation: BranchRelation;
-  effects: ActionEffect[];
+  changedGanZhi: string;
+  baseGanZhi: string;
+  changedToBaseElementRelation: ElementRelation;
+  changedToBaseBranchRelation: BranchRelation;
+  returnEffects: ActionEffect[];
 }
 
 export interface TrigramRefrainFacts {
@@ -568,11 +568,11 @@ function buildRelationFacts(
     return {
       id: `return:${line.index}`,
       lineIndex: line.index,
-      fromGanZhi: line.changedGanZhi,
-      toGanZhi: line.ganZhi,
-      elementRelation: elementFact,
-      branchRelation: branchFact,
-      effects: activeEffects(elementFact, branchFact),
+      changedGanZhi: line.changedGanZhi,
+      baseGanZhi: line.ganZhi,
+      changedToBaseElementRelation: elementFact,
+      changedToBaseBranchRelation: branchFact,
+      returnEffects: activeEffects(elementFact, branchFact),
     };
   });
 

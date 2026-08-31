@@ -7,6 +7,7 @@ import type { DivinationSession } from '../lib/session';
 import type { AIConfigStatus } from '../types/desktop';
 import { CASTING_METHOD_LABELS } from '../lib/session';
 import { formatShanghaiDateTime } from '../lib/shanghaiTime';
+import { returnEffectLabels } from '../lib/relationLabels';
 import { HexagramLines } from './HexagramLines';
 import { CastingBasisSummary } from './CastingBasisSummary';
 import { MarkdownContent } from './MarkdownContent';
@@ -405,16 +406,8 @@ function activeActionLabels(actions: ActiveActionFact[]): string[] {
 
 function returnActionLabels(fact?: TransformationReturnFact): string[] {
   if (!fact) return [];
-  return fact.effects.map((effect) => RETURN_EFFECT_LABELS[effect]);
+  return returnEffectLabels(fact.returnEffects);
 }
-
-const RETURN_EFFECT_LABELS: Record<ActionEffect, string> = {
-  生: '回头生',
-  克: '回头克',
-  比和: '回头比和',
-  合: '回头合',
-  冲: '回头冲',
-};
 
 function effectsLabel(effects: ActionEffect[]): string {
   return effects.join('、');

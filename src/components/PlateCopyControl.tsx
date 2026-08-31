@@ -40,6 +40,7 @@ export function PlateCopyControl({ session }: Props) {
   const [format, setFormat] = useState<PlateExportFormat>(readStoredFormat);
   const [copied, setCopied] = useState(false);
   const [fallbackText, setFallbackText] = useState('');
+  const [exportError, setExportError] = useState('');
   const resetTimerRef = useRef<number | null>(null);
   const fallbackRef = useRef<HTMLTextAreaElement>(null);
   const label = PLATE_EXPORT_FORMAT_LABELS[format];
@@ -49,13 +50,29 @@ export function PlateCopyControl({ session }: Props) {
   }, []);
 
   useEffect(() => {
+    setCopied(false);
+    setFallbackText('');
+    setExportError('');
+  }, [session.id]);
+
+  useEffect(() => {
     if (!fallbackText) return;
     fallbackRef.current?.focus();
     fallbackRef.current?.select();
   }, [fallbackText]);
 
   const copy = async () => {
-    const content = formatPlateExport(session, format);
+    let content: string;
+    try {
+      content = formatPlateExport(session, format);
+      setExportError('');
+    } catch (error) {
+      console.error('排盘复制失败', error);
+      setCopied(false);
+      setFallbackText('');
+      setExportError('排盘复制暂时失败，请保留当前记录并稍后重试。');
+      return;
+    }
     try {
       if (!navigator.clipboard?.writeText) throw new Error('Clipboard API unavailable');
       await navigator.clipboard.writeText(content);
@@ -72,23 +89,27 @@ export function PlateCopyControl({ session }: Props) {
   const changeFormat = (next: PlateExportFormat) => {
     setFormat(next);
     setCopied(false);
+    setExportError('');
     storeFormat(next);
   };
 
   return (
     <>
-      <div className="plate-copy-control">
-        <button className={copied ? 'plate-copy-button plate-copy-button--copied' : 'plate-copy-button'} type="button" onClick={copy}>
-          {copied ? <Check aria-hidden="true" size={15} /> : <Copy aria-hidden="true" size={15} />}
-          <span aria-live="polite">{copied ? `已复制 · ${label}` : `复制排盘 · ${label}`}</span>
-        </button>
-        <label className="plate-copy-format">
-          <span className="sr-only">排盘复制格式</span>
-          <select aria-label="排盘复制格式" value={format} onChange={(event) => changeFormat(event.target.value as PlateExportFormat)}>
-            {FORMATS.map((item) => <option key={item} value={item}>{PLATE_EXPORT_FORMAT_LABELS[item]}</option>)}
-          </select>
-          <ChevronDown aria-hidden="true" size={14} />
-        </label>
+      <div className="plate-copy-stack">
+        <div className="plate-copy-control">
+          <button className={copied ? 'plate-copy-button plate-copy-button--copied' : 'plate-copy-button'} type="button" onClick={copy}>
+            {copied ? <Check aria-hidden="true" size={15} /> : <Copy aria-hidden="true" size={15} />}
+            <span aria-live="polite">{copied ? `已复制 · ${label}` : `复制排盘 · ${label}`}</span>
+          </button>
+          <label className="plate-copy-format">
+            <span className="sr-only">排盘复制格式</span>
+            <select aria-label="排盘复制格式" value={format} onChange={(event) => changeFormat(event.target.value as PlateExportFormat)}>
+              {FORMATS.map((item) => <option key={item} value={item}>{PLATE_EXPORT_FORMAT_LABELS[item]}</option>)}
+            </select>
+            <ChevronDown aria-hidden="true" size={14} />
+          </label>
+        </div>
+        {exportError ? <p className="plate-copy-error" role="alert">{exportError}</p> : null}
       </div>
 
       {fallbackText ? (

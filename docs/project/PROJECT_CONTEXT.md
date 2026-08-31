@@ -1,7 +1,7 @@
 ---
 project_docs_schema: 1
 document_type: project_context
-last_reviewed: 2026-08-30
+last_reviewed: 2026-08-31
 ---
 
 # 项目长期上下文
@@ -25,6 +25,7 @@ last_reviewed: 2026-08-30
 - PWA 模型目录的确认域名由规范化后的目录地址确定，不得依赖尚未发现的模型名称或绕过 HTTPS 公网边界。
 - Windows 正式版本通过 GitHub `latest` 稳定通道检查更新；正式 Release 必须同时提供与版本一致的 `latest.yml`、NSIS 安装包和 blockmap，下载仍由用户确认触发。
 - 问爻原创源代码使用 MIT License；第三方依赖、字体、古籍和数据保留各自许可，软件免费不代表第三方 AI 服务免费。
+- 排盘复制中的本卦与变卦表示成卦变化；回头关系表示变爻对同位本爻的作用，所有外部格式必须显式标注双方身份、作用方向和已建模的地支关系范围。
 
 ## Project Preferences
 
@@ -78,6 +79,7 @@ last_reviewed: 2026-08-30
 | 桌面发布流程 | `.github/workflows/release-desktop.yml` | `code-verified` | 2026-08-27 |
 | Windows 在线更新 | `electron/services/update-manager.cjs`、`scripts/verify-release.mjs` | `code-verified` | 2026-08-27 |
 | 开源许可 | `LICENSE`、`package.json`、`README.md` | `user-confirmed` / `code-verified` | 2026-08-30 |
+| 排盘复制与回头关系 | `src/lib/divination.ts`、`src/lib/relationLabels.ts`、`src/lib/plateExport.ts`、`src/lib/plateExport.test.ts` | `user-confirmed` / `code-verified` | 2026-08-31 |
 
 ## Superseded Context
 

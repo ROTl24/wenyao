@@ -1,5 +1,5 @@
 import { fireEvent, render, screen, waitFor } from '@testing-library/react';
-import { beforeEach, describe, expect, it, vi } from 'vitest';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { defaultCastingBasis, lineRecordFromToss } from '../lib/casting';
 import { createToss } from '../lib/divination';
 import { createCompletedSession } from '../lib/session';
@@ -33,6 +33,10 @@ function installClipboard(writeText: ReturnType<typeof vi.fn>) {
 describe('排盘复制控件', () => {
   beforeEach(() => {
     window.localStorage.clear();
+    vi.restoreAllMocks();
+  });
+
+  afterEach(() => {
     vi.restoreAllMocks();
   });
 
@@ -75,5 +79,23 @@ describe('排盘复制控件', () => {
       expect(textarea.selectionStart).toBe(0);
       expect(textarea.selectionEnd).toBe(textarea.value.length);
     });
+  });
+
+  it('contains malformed relation data as a visible export error', async () => {
+    const writeText = vi.fn().mockResolvedValue(undefined);
+    installClipboard(writeText);
+    const malformed = session();
+    malformed.plate!.relationFacts.transformationReturns[0].changedToBaseElementRelation = '未知' as never;
+    const consoleError = vi.spyOn(console, 'error').mockImplementation(() => undefined);
+    const { rerender } = render(<PlateCopyControl session={malformed} />);
+
+    fireEvent.click(screen.getByRole('button', { name: '复制排盘 · 纯文本' }));
+
+    expect(await screen.findByRole('alert')).toHaveTextContent('排盘复制暂时失败，请保留当前记录并稍后重试。');
+    expect(writeText).not.toHaveBeenCalled();
+    expect(consoleError).toHaveBeenCalledWith('排盘复制失败', expect.any(Error));
+
+    rerender(<PlateCopyControl session={{ ...session(), id: 'different-session' }} />);
+    await waitFor(() => expect(screen.queryByRole('alert')).not.toBeInTheDocument());
   });
 });

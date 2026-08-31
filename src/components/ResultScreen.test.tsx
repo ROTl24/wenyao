@@ -230,6 +230,19 @@ describe('ResultScreen Markdown 解读', () => {
     expect(screen.getByLabelText('天乙贵人神煞')).toHaveTextContent('本卦四、五爻');
   });
 
+  it('shows every return effect on the changed line with explicit return labels', () => {
+    const movingSession: DivinationSession = {
+      ...session,
+      plate: buildPlate([9, 7, 7, 7, 7, 7], new Date('2026-07-11T12:00:00+08:00')),
+    };
+
+    renderResult(movingSession);
+
+    const changedFacts = screen.getByLabelText('初爻变爻状态');
+    expect(changedFacts).toHaveTextContent('回头克');
+    expect(changedFacts).toHaveTextContent('回头合');
+  });
+
   it('keeps all six base and changed line facts together in each accessible line group', () => {
     const movingSession: DivinationSession = {
       ...session,

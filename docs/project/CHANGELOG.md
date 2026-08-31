@@ -1,7 +1,7 @@
 ---
 project_docs_schema: 1
 document_type: changelog
-last_reviewed: 2026-08-30
+last_reviewed: 2026-08-31
 ---
 
 # 项目成果记录
@@ -11,6 +11,16 @@ last_reviewed: 2026-08-30
 - 当前记录周期：2026 年。
 
 ## Entries
+
+### CHG-20260831-plate-copy-return-direction
+
+- 日期：2026-08-31
+- 结果：纯文本、Markdown 与 JSON 明确区分本卦到变卦的成卦变化和变爻对本爻的回头作用，不再用无标签反向箭头表达两种不同语义。
+- 原因：无标签的“变爻→本爻”回头关系与排盘中的“本爻→变爻”成卦方向外观相反，外部模型会合理地把同一盘判断为输入矛盾。
+- 验证：风水涣变山泽损截图同盘回归、全量测试、类型检查、Renderer 构建、三种格式的本地页面复制验收；Claude 独立复审意见在提交前逐项处理并复核。
+- Git：实现、测试与知识记录位于同一本地提交；未推送。
+- Agent Note：[排盘复制显式区分成卦变化与回头作用](../../.agents/notes/implemented/bug-fix/2026-08-31-plate-copy-return-direction.md)。
+- 文档影响：PROJECT_CONTEXT、DECISIONS、CHANGELOG、结构化复制 Agent Note 与回头方向 Agent Note。
 
 ### CHG-20260830-mit-license
 

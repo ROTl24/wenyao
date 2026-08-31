@@ -13,6 +13,16 @@ import { CASTING_METHOD_LABELS, type CastingBasis, type LineRecord } from './cas
 import type { DivinationSession } from './session';
 import { SESSION_CATEGORY_LABELS } from './sessionCategories';
 import { formatShanghaiDateTime, shanghaiTime } from './shanghaiTime';
+import {
+  BRANCH_RELATION_SCOPE,
+  branchRelationLabel,
+  directedActionEffectLabels,
+  directedElementRelationLabel,
+  presentTransformationReturn,
+  TRANSFORMATION_RETURN_SCOPE,
+  type TransformationReturnPresentation,
+  type TransformationReturnScope,
+} from './relationLabels';
 
 export type PlateExportFormat = 'text' | 'markdown' | 'json';
 
@@ -41,12 +51,17 @@ const TRANSITION_LABELS = {
   none: '无六合六冲转化',
 } as const;
 
-const instructions = [
-  '请严格依据以下文王纳甲排盘事实解读，不要自行改盘或虚构经文、经历。',
-  '请先复述本卦、变卦、动爻与起卦方式；如发现输入矛盾，请停止分析并指出矛盾。',
-  '请明确所取用神及理由，再分析月日旺衰、动爻、变爻、世应、生克冲合与伏神。',
-  '请区分程序提供的事实、你的推断与不确定内容，最后给出结论、成立条件和可能应期，不强造确定日期。',
-];
+const FACT_BOUNDARY_INSTRUCTION = '请严格依据以下文王纳甲排盘事实解读，不要自行改盘或虚构经文、经历。';
+const ANALYSIS_INSTRUCTION = '请明确所取用神及理由，再分析月日旺衰、动爻、变爻、世应、生克冲合与伏神。';
+const CONCLUSION_INSTRUCTION = '请区分程序提供的事实、你的推断与不确定内容，最后给出结论、成立条件和可能应期，不强造确定日期。';
+const BRANCH_SCOPE_LABEL = BRANCH_RELATION_SCOPE.join('与');
+
+function exportInstructions(hasMovingLines: boolean): string[] {
+  const plateSummaryInstruction = hasMovingLines
+    ? '请先复述本卦、变卦、动爻与起卦方式；本卦与变卦的排列表示成卦变化，回头关系固定表示变爻对同位本爻的作用；如发现输入矛盾，请停止分析并指出矛盾。'
+    : '请先复述本卦与起卦方式；本盘无动爻和变卦；如发现输入矛盾，请停止分析并指出矛盾。';
+  return [FACT_BOUNDARY_INSTRUCTION, plateSummaryInstruction, ANALYSIS_INSTRUCTION, CONCLUSION_INSTRUCTION];
+}
 
 function linePosition(index: number): string {
   return LINE_POSITIONS[index] || `第${index}爻`;
@@ -165,35 +180,43 @@ function exportFuShen(item: FuShen) {
 }
 
 function exportBaseRelation(item: BaseRelationFact) {
+  const leftLine = linePosition(item.leftLineIndex);
+  const rightLine = linePosition(item.rightLineIndex);
   return {
-    leftLine: linePosition(item.leftLineIndex),
-    rightLine: linePosition(item.rightLineIndex),
+    leftLine,
+    rightLine,
     leftActivity: SOURCE_ACTIVITY_LABELS[item.leftActivity],
     rightActivity: SOURCE_ACTIVITY_LABELS[item.rightActivity],
     elementRelation: item.elementRelation,
-    branchRelation: item.branchRelation === 'none' ? '无' : item.branchRelation,
+    elementRelationLabel: directedElementRelationLabel(item.elementRelation, leftLine, rightLine),
+    branchRelation: item.branchRelation,
+    branchRelationLabel: branchRelationLabel(item.branchRelation),
   };
 }
 
 function exportActiveAction(item: ActiveActionFact) {
+  const sourceLine = linePosition(item.sourceLineIndex);
+  const target = item.targetKind === 'line' ? linePosition(item.targetLineIndex) : `${linePosition(item.targetLineIndex)}伏神`;
   return {
-    sourceLine: linePosition(item.sourceLineIndex),
+    sourceLine,
     sourceActivity: SOURCE_ACTIVITY_LABELS[item.sourceActivity],
-    target: item.targetKind === 'line' ? linePosition(item.targetLineIndex) : `${linePosition(item.targetLineIndex)}伏神`,
+    target,
     targetStemBranch: item.targetGanZhi,
     elementRelation: item.elementRelation,
-    branchRelation: item.branchRelation === 'none' ? '无' : item.branchRelation,
+    elementRelationLabel: directedElementRelationLabel(item.elementRelation, sourceLine, target),
+    branchRelation: item.branchRelation,
+    branchRelationLabel: branchRelationLabel(item.branchRelation),
     effects: item.effects,
+    effectLabels: directedActionEffectLabels(item.effects, sourceLine, target),
   };
 }
 
-function exportTransformation(item: TransformationReturnFact) {
+type TransformationReturnExport = TransformationReturnPresentation & { line: string };
+
+function exportTransformationReturn(item: TransformationReturnFact): TransformationReturnExport {
   return {
     line: linePosition(item.lineIndex),
-    transformation: `${item.fromGanZhi} → ${item.toGanZhi}`,
-    elementRelation: item.elementRelation,
-    branchRelation: item.branchRelation === 'none' ? '无' : item.branchRelation,
-    effects: item.effects,
+    ...presentTransformationReturn(item),
   };
 }
 
@@ -232,7 +255,9 @@ export function buildPlateExportDocument(session: DivinationSession) {
     : ['原始起卦逐爻记录缺失，以下盘面来自已保存的结构化排盘。'];
 
   return {
-    instructions,
+    schema: 'wenyao.plate-export' as const,
+    schemaVersion: 2 as const,
+    instructions: exportInstructions(hasMovingLines),
     warnings,
     question: {
       text: session.question,
@@ -267,7 +292,13 @@ export function buildPlateExportDocument(session: DivinationSession) {
       relations: {
         base: plate.relationFacts.baseRelations.map(exportBaseRelation),
         activeActions: plate.relationFacts.activeActions.map(exportActiveAction),
-        transformations: plate.relationFacts.transformationReturns.map(exportTransformation),
+        ...(hasMovingLines ? {
+          transformationReturnScope: {
+            ...TRANSFORMATION_RETURN_SCOPE,
+            branchRelations: [...BRANCH_RELATION_SCOPE] as ['六合', '六冲'],
+          },
+        } : {}),
+        transformationReturns: plate.relationFacts.transformationReturns.map(exportTransformationReturn),
         dynamics: exportDynamics(plate.relationFacts.hexagramDynamics),
       },
     },
@@ -305,6 +336,19 @@ export type PlateExportDocument = ReturnType<typeof buildPlateExportDocument>;
 
 function joinFacts(values: readonly string[]): string {
   return values.length ? values.join('、') : '无';
+}
+
+function transformationReturnLine(item: TransformationReturnExport, scope: TransformationReturnScope): string {
+  const returnEffects = item.returnEffectLabels.length ? item.returnEffectLabels.join('、') : '未命中已建模作用';
+  return `${item.line}回头关系（${item.directionLabel}）：变爻 ${item.changedLine}；本爻 ${item.baseLine}；五行：${item.elementRelationLabel}；回头作用（仅标注生、克、比和、合、冲）：${returnEffects}；地支（仅判断${scope.branchRelations.join('与')}）：${item.branchRelationLabel}`;
+}
+
+function transformationReturnLines(document: PlateExportDocument): string[] {
+  const items = document.plate.relations.transformationReturns;
+  if (!items.length) return [];
+  const scope = document.plate.relations.transformationReturnScope;
+  if (!scope) throw new Error('动卦缺少回头关系范围，无法复制');
+  return items.map((item) => transformationReturnLine(item, scope));
 }
 
 function basisLines(document: PlateExportDocument): string[] {
@@ -354,9 +398,9 @@ function plainText(document: PlateExportDocument): string {
   document.plate.hiddenSpirits.forEach((item) => output.push(`${item.position}：伏神 ${item.hiddenSpirit}；飞神 ${item.flyingSpirit}；${item.flyingEffect}；旺衰 ${item.seasonalStrength}；${item.status}；状态 ${joinFacts(item.facts)}；激活 ${joinFacts(item.activationFactors)}；阻滞 ${joinFacts(item.blockingFactors)}；谨慎 ${joinFacts(item.cautionFactors)}`));
 
   output.push('', '【关系事实】');
-  document.plate.relations.base.forEach((item) => output.push(`${item.leftLine}（${item.leftActivity}）与${item.rightLine}（${item.rightActivity}）：五行${item.elementRelation}，地支${item.branchRelation}`));
-  document.plate.relations.activeActions.forEach((item) => output.push(`${item.sourceLine}（${item.sourceActivity}）作用于${item.target} ${item.targetStemBranch}：${item.effects.join('、') || item.elementRelation}`));
-  document.plate.relations.transformations.forEach((item) => output.push(`${item.line} ${item.transformation}：${item.effects.join('、') || item.elementRelation}；地支${item.branchRelation}`));
+  document.plate.relations.base.forEach((item) => output.push(`${item.leftLine}（${item.leftActivity}）与${item.rightLine}（${item.rightActivity}）：五行${item.elementRelationLabel}；地支（仅判断${BRANCH_SCOPE_LABEL}）：${item.branchRelationLabel}`));
+  document.plate.relations.activeActions.forEach((item) => output.push(`${item.sourceLine}（${item.sourceActivity}）作用于${item.target} ${item.targetStemBranch}（地支仅判断${BRANCH_SCOPE_LABEL}）：${item.effectLabels.join('、') || item.elementRelationLabel}`));
+  output.push(...transformationReturnLines(document));
   const dynamics = document.plate.relations.dynamics;
   output.push(`卦体：本卦${dynamics.base}；变卦${dynamics.changed}；${dynamics.transition}`);
   output.push(`内卦：卦反吟${dynamics.innerTrigram.hexagramFanYin}、爻反吟${dynamics.innerTrigram.lineFanYin}、伏吟${dynamics.innerTrigram.fuYin}`);
@@ -406,9 +450,9 @@ function markdown(document: PlateExportDocument): string {
   document.plate.hiddenSpirits.forEach((item) => output.push(`- **${item.position}：** 伏神 ${item.hiddenSpirit}；飞神 ${item.flyingSpirit}；${item.flyingEffect}；旺衰 ${item.seasonalStrength}；${item.status}；状态 ${joinFacts(item.facts)}；激活 ${joinFacts(item.activationFactors)}；阻滞 ${joinFacts(item.blockingFactors)}；谨慎 ${joinFacts(item.cautionFactors)}`));
 
   output.push('', '## 关系事实', '');
-  document.plate.relations.base.forEach((item) => output.push(`- ${item.leftLine}（${item.leftActivity}）与${item.rightLine}（${item.rightActivity}）：五行${item.elementRelation}，地支${item.branchRelation}`));
-  document.plate.relations.activeActions.forEach((item) => output.push(`- ${item.sourceLine}（${item.sourceActivity}）作用于${item.target} ${item.targetStemBranch}：${item.effects.join('、') || item.elementRelation}`));
-  document.plate.relations.transformations.forEach((item) => output.push(`- ${item.line} ${item.transformation}：${item.effects.join('、') || item.elementRelation}；地支${item.branchRelation}`));
+  document.plate.relations.base.forEach((item) => output.push(`- ${item.leftLine}（${item.leftActivity}）与${item.rightLine}（${item.rightActivity}）：五行${item.elementRelationLabel}；地支（仅判断${BRANCH_SCOPE_LABEL}）：${item.branchRelationLabel}`));
+  document.plate.relations.activeActions.forEach((item) => output.push(`- ${item.sourceLine}（${item.sourceActivity}）作用于${item.target} ${item.targetStemBranch}（地支仅判断${BRANCH_SCOPE_LABEL}）：${item.effectLabels.join('、') || item.elementRelationLabel}`));
+  transformationReturnLines(document).forEach((item) => output.push(`- ${item}`));
   const dynamics = document.plate.relations.dynamics;
   output.push(`- 卦体：本卦${dynamics.base}；变卦${dynamics.changed}；${dynamics.transition}`);
   output.push(`- 内卦：卦反吟${dynamics.innerTrigram.hexagramFanYin}、爻反吟${dynamics.innerTrigram.lineFanYin}、伏吟${dynamics.innerTrigram.fuYin}`);

@@ -143,8 +143,11 @@ describe('排盘不变量', () => {
       expect.objectContaining({
         id: 'return:1',
         lineIndex: 1,
-        fromGanZhi: '辛丑',
-        toGanZhi: '甲子',
+        changedGanZhi: '辛丑',
+        baseGanZhi: '甲子',
+        changedToBaseElementRelation: '克',
+        changedToBaseBranchRelation: '六合',
+        returnEffects: ['克', '合'],
       }),
     ]);
     expect(plate.relationFacts.transformationReturns.every((fact) => fact.lineIndex === 1)).toBe(true);
@@ -236,7 +239,18 @@ describe('排盘不变量', () => {
       line.beast = '旧六神';
     }
     stalePlate.shenSha = [{ name: '驿马', branches: ['申'] }];
-    delete stalePlate.relationFacts;
+    stalePlate.relationFacts = {
+      ...plate.relationFacts,
+      transformationReturns: [{
+        id: 'return:1',
+        lineIndex: 1,
+        fromGanZhi: '旧变爻',
+        toGanZhi: '旧本爻',
+        elementRelation: '被克',
+        branchRelation: 'none',
+        effects: ['克'],
+      }],
+    };
 
     const upgraded = upgradePlate(stalePlate as unknown as typeof plate);
 
@@ -254,6 +268,16 @@ describe('排盘不变量', () => {
     expect(upgraded.lines[1].dayClashAssessment.kind).toBe('hidden-movement');
     expect(upgraded.relationFacts.baseRelations).toHaveLength(15);
     expect(upgraded.relationFacts.activeActions.some((fact) => fact.sourceActivity === 'hidden-moving')).toBe(true);
+    expect(upgraded.relationFacts.transformationReturns).toHaveLength(plate.movingLines.length);
+    for (const fact of upgraded.relationFacts.transformationReturns) {
+      const line = upgraded.lines[fact.lineIndex - 1];
+      expect(fact).toMatchObject({
+        changedGanZhi: line.changedGanZhi,
+        baseGanZhi: line.ganZhi,
+      });
+      expect(fact).not.toHaveProperty('fromGanZhi');
+      expect(fact).not.toHaveProperty('toGanZhi');
+    }
   });
 });
 

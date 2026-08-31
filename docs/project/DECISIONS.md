@@ -1,7 +1,7 @@
 ---
 project_docs_schema: 1
 document_type: decisions
-last_reviewed: 2026-08-30
+last_reviewed: 2026-08-31
 ---
 
 # 项目决策
@@ -10,14 +10,25 @@ last_reviewed: 2026-08-30
 
 | 决策 | 状态 | 主题 | 权威 Note | 替代关系 |
 |---|---|---|---|---|
+| `ADR-20260826-structured-plate-copy` | `accepted` | 三种排盘复制格式共用结构化事实文档 | [Agent Note](../../.agents/notes/implemented/feature/2026-08-26-structured-plate-copy.md) | 无 |
 | `ADR-20260827-shared-corpus-knowledge` | `accepted` | 跨运行时内置古籍分类装配 | [Agent Note](../../.agents/notes/implemented/bug-fix/2026-08-27-shared-corpus-knowledge.md) | 无 |
 | `ADR-20260827-openai-base-url-default` | `accepted` | 自定义 OpenAI 兼容服务裸域名默认使用 `/v1` | [Agent Note](../../.agents/notes/implemented/bug-fix/2026-08-27-openai-base-url-default.md) | 无 |
 | `ADR-20260827-openai-chat-probe-response` | `accepted` | OpenAI Chat 探测预算与可展示响应分类 | [Agent Note](../../.agents/notes/implemented/bug-fix/2026-08-27-openai-chat-probe-response.md) | 取代按单一服务处理 16 Token 探测失败的局部规则 |
 | `ADR-20260827-model-catalog-origin-confirmation` | `accepted` | PWA 模型目录使用独立域名确认目标 | [Agent Note](../../.agents/notes/implemented/bug-fix/2026-08-27-model-catalog-origin-confirmation.md) | 无 |
 | `ADR-20260827-desktop-update-release-contract` | `accepted` | 桌面稳定版本与 Windows 在线更新发布契约 | [Agent Note](../../.agents/notes/implemented/architecture/2026-08-27-desktop-update-release-contract.md) | 无 |
 | `ADR-20260830-mit-license` | `accepted` | 问爻原创源代码使用 MIT License | [Agent Note](../../.agents/notes/implemented/process/2026-08-30-mit-license.md) | 取代无明确许可证的源码公开状态 |
+| `ADR-20260831-plate-copy-return-direction` | `accepted` | 成卦变化与回头作用使用显式方向契约 | [Agent Note](../../.agents/notes/implemented/bug-fix/2026-08-31-plate-copy-return-direction.md) | 取代无标签箭头表达回头关系 |
 
 ## Active Decisions
+
+### ADR-20260826-structured-plate-copy
+
+- Status: `accepted`
+- Source: `code-verified`
+- 主题：纯文本、Markdown 和 JSON 由同一结构化排盘文档生成，并共同覆盖确定性盘面、起卦记录、关系事实和相关经文。
+- 权威 Note：[排盘复制由同一结构化事实文档生成](../../.agents/notes/implemented/feature/2026-08-26-structured-plate-copy.md)。
+- 重新考虑：外部复制协议形成需要版本化兼容的公开 API，或复制内容不再由当前会话的结构化事实生成时。
+- Supersedes：无。
 
 ### ADR-20260827-shared-corpus-knowledge
 
@@ -72,3 +83,12 @@ last_reviewed: 2026-08-30
 - 权威 Note：[问爻原创源代码采用 MIT 许可](../../.agents/notes/implemented/process/2026-08-30-mit-license.md)。
 - 重新考虑：版权主体、贡献者协议、商业授权策略或第三方资产边界发生变化时。
 - Supersedes：无明确许可证的源码公开状态。
+
+### ADR-20260831-plate-copy-return-direction
+
+- Status: `accepted`
+- Source: `user-confirmed` / `code-verified`
+- 主题：本卦与变卦表示成卦变化；回头关系固定表示变爻对同位本爻的作用，领域字段与三种复制格式都显式标注双方身份、作用方向和六合六冲范围。
+- 权威 Note：[排盘复制显式区分成卦变化与回头作用](../../.agents/notes/implemented/bug-fix/2026-08-31-plate-copy-return-direction.md)。
+- 重新考虑：回头作用的领域模型、六合六冲范围或外部复制 Schema 发生变化时。
+- Supersedes：使用无标签箭头同时表达成卦变化和反向回头作用的复制表示。
