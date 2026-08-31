@@ -12,6 +12,15 @@ last_reviewed: 2026-08-31
 
 ## Entries
 
+### CHG-20260831-windows-index-progress-persistence
+
+- 日期：2026-08-31
+- 结果：Windows 在短暂占用 `app-data.json` 时会有限重试原子替换，远程向量建库不再因瞬时 `EPERM` 丢失状态进度或中断。
+- 原因：SiliconFlow 全量验收在 280/1263 处成功保存向量断点后，Windows 拒绝状态文件重命名；服务商请求和向量数据均有效，故障属于本地进度持久化。
+- 验证：故障注入回归、140 项 Electron 测试；真实建库从 280 条完整断点继续到 1263/1263，落盘 1024 维向量文件为 5,173,248 字节且 ID 顺序完整，向量检索返回 40 个候选。整个验收新增 130 条向量调用账本记录、472,292 个输入 Token，未自动重试远程请求。
+- Agent Note：[远程向量建库以完整批次断点和显式恢复为边界](../../.agents/notes/implemented/bug-fix/2026-08-31-provider-index-recovery.md)。
+- 文档影响：PROJECT、PROJECT_CONTEXT、CHANGELOG、LESSONS 与既有向量恢复 Agent Note。
+
 ### CHG-20260831-release-055
 
 - 日期：2026-08-31

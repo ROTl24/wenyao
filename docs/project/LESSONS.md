@@ -91,9 +91,9 @@ last_reviewed: 2026-08-31
 - Source: `user-confirmed` / `code-verified` / `external-verified`
 - 适用范围：Electron、PWA、OpenAI 兼容向量服务和本地向量断点。
 - 症状：建库在 450/1263 处收到 HTTP 400，点击“手动继续”后仍停在同一位置并再次失败。
-- 已验证根因：成功批次断点本身有效，但服务商失败被压缩为通用状态，错误页允许在服务状态未验证时原样续发；PWA 还缺少逐批持久化，且两端向量文本模板不同。
-- 正确规则：只有有效并已保存的完整批次才能推进断点；错误状态必须先重新测试能力或显式降级，不能直接继续；诊断只保存允许字段；改变文本模板的缓存必须更新指纹，未改变的桌面模板必须保持既有付费断点可识别。
-- 防线：共享失败分类、失败范围、运行时续发守卫、Worker 内存与 IndexedDB 批次断点、跨端共享文档模板和可见恢复路径测试。
+- 已验证根因：成功批次断点本身有效，但服务商失败被压缩为通用状态，错误页允许在服务状态未验证时原样续发；PWA 还缺少逐批持久化，且两端向量文本模板不同。Windows 对状态文件的瞬时占用也可能让原子替换返回 `EPERM`，把已成功保存的向量批次误报为建库失败。
+- 正确规则：只有有效并已保存的完整批次才能推进断点；错误状态必须先重新测试能力或显式降级，不能直接继续；诊断只保存允许字段；改变文本模板的缓存必须更新指纹，未改变的桌面模板必须保持既有付费断点可识别。本地状态替换可以做短时、有限的文件系统重试，但不得借此重发远程请求。
+- 防线：共享失败分类、失败范围、运行时续发守卫、Worker 内存与 IndexedDB 批次断点、跨端共享文档模板、Windows 原子替换故障注入和可见恢复路径测试。
 - 不再适用：远程协议提供具有幂等键、明确计费结果和服务端作业断点的建库 API，并由应用验证其恢复契约后。
-- 证据：`shared/provider-response-core.cjs`、`shared/embedding-core.cjs`、`electron/services/ai-runtime.test.cjs`、`src/lib/webAI/worker.test.ts`、`src/components/AISetupWizard.test.tsx`。
+- 证据：`shared/provider-response-core.cjs`、`shared/embedding-core.cjs`、`electron/services/ai-runtime.test.cjs`、`electron/services/store.test.cjs`、`src/lib/webAI/worker.test.ts`、`src/components/AISetupWizard.test.tsx`。
 - 相关 Note：[远程向量建库以完整批次断点和显式恢复为边界](../../.agents/notes/implemented/bug-fix/2026-08-31-provider-index-recovery.md)。

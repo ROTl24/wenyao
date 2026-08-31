@@ -1,3 +1,4 @@
+const crypto = require('node:crypto');
 const fs = require('node:fs');
 const path = require('node:path');
 const {
@@ -11,6 +12,22 @@ const {
 } = require('./session-validation.cjs');
 
 const DEFAULT_STATE = Object.freeze({ sessions: [], settings: {}, feedback: { consent: { technicalUpload: null }, records: [] } });
+const TRANSIENT_REPLACE_ERRORS = new Set(['EACCES', 'EBUSY', 'ENOTEMPTY', 'EPERM']);
+const REPLACE_RETRY_DELAYS_MS = [10, 25, 50, 100, 200];
+const sleepBuffer = new Int32Array(new SharedArrayBuffer(4));
+
+function replaceFileAtomically(source, target) {
+  for (let attempt = 0; ; attempt += 1) {
+    try {
+      fs.renameSync(source, target);
+      return;
+    } catch (error) {
+      const delay = REPLACE_RETRY_DELAYS_MS[attempt];
+      if (!TRANSIENT_REPLACE_ERRORS.has(error?.code) || delay === undefined) throw error;
+      Atomics.wait(sleepBuffer, 0, 0, delay);
+    }
+  }
+}
 
 class JsonStore {
   constructor(filePath) {
@@ -49,9 +66,14 @@ class JsonStore {
   }
 
   #write() {
-    const tmp = `${this.filePath}.tmp`;
-    fs.writeFileSync(tmp, JSON.stringify(this.state, null, 2), { encoding: 'utf8', mode: 0o600 });
-    fs.renameSync(tmp, this.filePath);
+    const tmp = `${this.filePath}.${process.pid}-${crypto.randomUUID()}.tmp`;
+    try {
+      fs.writeFileSync(tmp, JSON.stringify(this.state, null, 2), { encoding: 'utf8', mode: 0o600 });
+      replaceFileAtomically(tmp, this.filePath);
+    } catch (error) {
+      try { fs.unlinkSync(tmp); } catch (cleanupError) { if (cleanupError.code !== 'ENOENT') error.cleanupError = cleanupError; }
+      throw error;
+    }
   }
 
   listSessions() {

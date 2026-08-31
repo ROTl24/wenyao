@@ -100,6 +100,34 @@ test('JsonStore persists, orders and deletes valid sessions atomically', () => {
   assert.equal(fs.existsSync(`${store.filePath}.tmp`), false);
 });
 
+test('JsonStore retries transient Windows failures while replacing app-data atomically', () => {
+  const store = createStore();
+  const originalRenameSync = fs.renameSync;
+  let renameAttempts = 0;
+  fs.renameSync = (source, target) => {
+    if (target === store.filePath && renameAttempts < 2) {
+      renameAttempts += 1;
+      const error = new Error('simulated transient file lock');
+      error.code = 'EPERM';
+      throw error;
+    }
+    renameAttempts += 1;
+    return originalRenameSync(source, target);
+  };
+
+  try {
+    const state = store.getRawAIState();
+    state.consentAcceptedAt = '2026-08-31T00:00:00.000Z';
+    store.saveAIState(state);
+  } finally {
+    fs.renameSync = originalRenameSync;
+  }
+
+  assert.equal(renameAttempts, 3);
+  assert.equal(new JsonStore(store.filePath).getRawAIState().consentAcceptedAt, '2026-08-31T00:00:00.000Z');
+  assert.deepEqual(fs.readdirSync(path.dirname(store.filePath)).filter((name) => name.endsWith('.tmp')), []);
+});
+
 test('JsonStore rejects local substitute reports', () => {
   const store = createStore();
   assert.throws(
