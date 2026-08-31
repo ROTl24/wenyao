@@ -20,9 +20,9 @@ last_reviewed: 2026-08-31
 
 ## Current Goal
 
-- 目标版本：`G-007`
-- 目标：以 MIT License 免费开源问爻原创源代码，并明确第三方许可与 AI 服务费用边界。
-- 来源：`user-confirmed`，2026-08-30 用户确认采用 MIT License。
+- 目标版本：`G-008`
+- 目标：将远程向量建库恢复与排盘复制方向修复作为 `0.5.5` 同步交付到 PWA、Windows、macOS 和 GitHub 源码。
+- 来源：`user-confirmed`，2026-08-31 用户要求更新网站、安装包和 GitHub。
 
 ## Scope
 
@@ -52,6 +52,7 @@ last_reviewed: 2026-08-31
 | Windows 稳定更新通道 | `verified` | 打包版启动及每六小时检查 GitHub Releases，用户确认后下载并在退出或重启时安装，正式 Release 同时发布 `latest.yml`、安装包与 blockmap | `electron/services/update-manager.cjs`、`scripts/verify-release.mjs`、`.github/workflows/release-desktop.yml` |
 | MIT 开源许可 | `verified` | 根许可证、包元数据、README 与项目知识记录一致声明 MIT，第三方许可边界保持独立 | `LICENSE`、`package.json`、`README.md`、Agent Note |
 | 远程向量建库可恢复性 | `verified` | 失败批次可诊断且不能原样续发，重新测试后从完整批次断点恢复，桌面与 PWA 共用向量文档契约 | Provider、Runtime、Worker 与向导回归测试 |
+| `0.5.5` 跨渠道发布 | `verified` | GitHub `main` 包含发布实现与记录，`v0.5.5` 固定正式桌面源码，Cloudflare Pages 运行资源与标签源码构建一致 | `v0.5.5`、GitHub Actions `33402940402`、线上资源摘要校验 |
 
 ## Current State
 
@@ -65,6 +66,7 @@ last_reviewed: 2026-08-31
 - macOS 免费发行版没有 Developer ID 与公证票据，`0.5.3` 客户端保持 GitHub Releases 手动更新，不能由后续版本远程改为自动更新。
 - 问爻原创源代码采用 MIT License；第三方依赖、字体、古籍和数据继续按各自许可分发，第三方 AI 服务费用不属于软件免费承诺。
 - 远程向量建库按完整批次保存断点；错误状态需要重新测试向量能力或显式降级为本地 BM25，PWA 同时保存当前 Worker 与 IndexedDB 批次断点。
+- `v0.5.5` 正式 Release 提供 Windows NSIS、blockmap、`latest.yml`、macOS 通用 DMG 与 SHA-256 清单；Cloudflare Pages 已提供与该版本本地构建摘要一致的 JS、CSS 和 Service Worker 预缓存清单。
 
 ## Blockers
 
@@ -85,3 +87,4 @@ last_reviewed: 2026-08-31
 | `G-005` | `verified` | 2026-08-27 | 模型目录独立安全目标、界面域名展示与 Worker 回归测试完成 |
 | `G-006` | `verified` | 2026-08-27 | `0.5.4` 桌面版本定义与 Windows 稳定更新发布契约完成 |
 | `G-007` | `verified` | 2026-08-30 | 根许可证、包元数据、README 与项目知识记录共同确立 MIT 开源边界 |
+| `G-008` | `verified` | 2026-08-31 | `0.5.5` 源码、Windows 安装包、macOS 通用安装包与 PWA 生产资源完成跨渠道验收 |

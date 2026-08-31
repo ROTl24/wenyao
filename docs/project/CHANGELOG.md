@@ -12,13 +12,23 @@ last_reviewed: 2026-08-31
 
 ## Entries
 
+### CHG-20260831-release-055
+
+- 日期：2026-08-31
+- 结果：`0.5.5` 将远程向量建库恢复与排盘复制方向修复同步发布到 GitHub 源码、Cloudflare Pages、Windows 安装包和 macOS 通用安装包。
+- 原因：仓库中的两项已验证修复尚未进入公开 PWA 和桌面稳定更新通道。
+- 验证：265 项 Renderer 测试、139 项 Electron 测试、类型检查、PWA 发布校验、Windows 本地安装包校验；GitHub Actions 完成 Windows、Apple Silicon、Intel 与发布任务，正式 Release 五项资产摘要有效；线上 JS、CSS 摘要和 Service Worker 预缓存清单与本地构建一致。
+- Git：实现提交 `e88a171`、`0fe1221`；版本提交与标签 `4c381c0` / `v0.5.5`；GitHub Actions `33402940402`。
+- Agent Note：[远程向量建库以完整批次断点和显式恢复为边界](../../.agents/notes/implemented/bug-fix/2026-08-31-provider-index-recovery.md)、[排盘复制显式区分成卦变化与回头作用](../../.agents/notes/implemented/bug-fix/2026-08-31-plate-copy-return-direction.md)。
+- 文档影响：README、PROJECT、PROJECT_CONTEXT、CHANGELOG；发布沿用既有桌面更新契约，无新增 Agent Note。
+
 ### CHG-20260831-plate-copy-return-direction
 
 - 日期：2026-08-31
 - 结果：纯文本、Markdown 与 JSON 明确区分本卦到变卦的成卦变化和变爻对本爻的回头作用，不再用无标签反向箭头表达两种不同语义。
 - 原因：无标签的“变爻→本爻”回头关系与排盘中的“本爻→变爻”成卦方向外观相反，外部模型会合理地把同一盘判断为输入矛盾。
 - 验证：风水涣变山泽损截图同盘回归、全量测试、类型检查、Renderer 构建、三种格式的本地页面复制验收；Claude 独立复审意见在提交前逐项处理并复核。
-- Git：实现、测试与知识记录位于同一本地提交；未推送。
+- Git：实现、测试与知识记录位于提交 `0fe1221`，并由 `v0.5.5` 发布。
 - Agent Note：[排盘复制显式区分成卦变化与回头作用](../../.agents/notes/implemented/bug-fix/2026-08-31-plate-copy-return-direction.md)。
 - 文档影响：PROJECT_CONTEXT、DECISIONS、CHANGELOG、结构化复制 Agent Note 与回头方向 Agent Note。
 
@@ -28,7 +38,7 @@ last_reviewed: 2026-08-31
 - 结果：问爻原创源代码以 MIT License 免费开源，根许可证、包元数据和 README 使用同一许可声明，并保留第三方许可与 AI 服务费用边界。
 - 原因：公开源码但没有许可证不能向外部使用者授予明确的使用、修改和分发权，也不能准确宣称开源。
 - 验证：标准 MIT 文本、JSON 元数据、README 链接、项目知识严格审计与 `git diff --check`。
-- Git：实现与知识记录位于同一本地提交；未推送。
+- Git：实现与知识记录位于提交 `6575f1a`，已推送到 `main`。
 - Agent Note：[问爻原创源代码采用 MIT 许可](../../.agents/notes/implemented/process/2026-08-30-mit-license.md)。
 - 文档影响：README、PROJECT、PROJECT_CONTEXT、DECISIONS、CHANGELOG。
 

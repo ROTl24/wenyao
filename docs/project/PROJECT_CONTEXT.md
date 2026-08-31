@@ -44,8 +44,8 @@ last_reviewed: 2026-08-31
 
 | 系统 | 用途 | 当前证据 | 状态 |
 |---|---|---|---|
-| GitHub `ROTl24/wenyao` | 源码、Actions、桌面 Release | `config/public-links.json`、`.github/workflows/release-desktop.yml` | `code-verified` |
-| Cloudflare Pages | PWA 公开托管 | README 中的 `https://wenyao-9pu.pages.dev` | `code-verified`，当前部署内容未在本次任务中外部验证 |
+| GitHub `ROTl24/wenyao` | 源码、Actions、桌面 Release | `config/public-links.json`、`.github/workflows/release-desktop.yml` | `external-verified`，`v0.5.5` 稳定 Release 与五项资产已核验 |
+| Cloudflare Pages | PWA 公开托管 | README 中的 `https://wenyao-9pu.pages.dev` | `external-verified`，生产 JS、CSS 与 Service Worker 清单和 `0.5.5` 本地构建一致 |
 | OpenAI 兼容 AI 服务 | 生成、向量和重排 | `config/ai-providers.json`、Provider 实现 | `code-verified`，本次任务不调用 |
 | 可选 Cloudflare Worker/D1 | 匿名反馈聚合 | `workers/feedback` | `code-verified`，部署状态未验证 |
 
