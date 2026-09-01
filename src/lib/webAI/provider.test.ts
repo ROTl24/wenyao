@@ -168,6 +168,34 @@ describe('网页自定义 AI 模型发现', () => {
     expect(fetchMock).toHaveBeenCalledTimes(1);
   });
 
+  it('keeps a completed analysis when stream disposal rejects after DONE', async () => {
+    const encoder = new TextEncoder();
+    const fetchMock = vi.fn().mockResolvedValue(new Response(new ReadableStream<Uint8Array>({
+      start(controller) {
+        controller.enqueue(encoder.encode([
+          'data: {"choices":[{"delta":{"content":"完整解读"},"finish_reason":"stop"}]}',
+          'data: [DONE]',
+          '',
+        ].join('\n\n')));
+      },
+      cancel() {
+        return Promise.reject(new TypeError('transport already closed'));
+      },
+    }), { status: 200, headers: { 'content-type': 'text/event-stream' } }));
+    vi.stubGlobal('fetch', fetchMock);
+    const connection: AIConnection = {
+      id: 'custom', providerId: 'custom', presetId: null, label: '自定义', region: '',
+      baseUrl: 'https://api.example.com/v1', fields: {}, hasApiKey: true,
+      capabilities: { generation: { protocol: 'openai-chat', model: 'chat-model' } },
+      createdAt: '', updatedAt: '',
+    };
+
+    await expect(createWebProvider(connection, 'secret').chat({
+      messages: [{ role: 'user', content: '生成完整解读' }],
+    })).resolves.toMatchObject({ content: '完整解读' });
+    expect(fetchMock).toHaveBeenCalledTimes(1);
+  });
+
   it('accepts OpenAI-compatible text content blocks and omits unspecified sampling options', async () => {
     const fetchMock = vi.fn().mockResolvedValue(new Response(JSON.stringify({
       choices: [{

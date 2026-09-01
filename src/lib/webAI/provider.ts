@@ -200,7 +200,7 @@ async function readStreamedChat(response: Response, onChunk: () => void): Promis
       buffer = buffer.slice(boundary.index + boundary[0].length);
       consumeStreamEvent(event, state);
       if (state.completed) {
-        await reader.cancel();
+        void reader.cancel().catch(() => undefined);
         return streamedChatResult(state);
       }
     }

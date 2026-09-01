@@ -1,7 +1,7 @@
 ---
 project_docs_schema: 1
 document_type: project
-last_reviewed: 2026-08-31
+last_reviewed: 2026-09-01
 ---
 
 # 项目状态
@@ -20,9 +20,9 @@ last_reviewed: 2026-08-31
 
 ## Current Goal
 
-- 目标版本：`G-008`
-- 目标：将远程向量建库恢复与排盘复制方向修复作为 `0.5.5` 同步交付到 PWA、Windows、macOS 和 GitHub 源码。
-- 来源：`user-confirmed`，2026-08-31 用户要求更新网站、安装包和 GitHub。
+- 目标版本：`G-009`
+- 目标：消除 PWA 已完成的 AI 流式解读被底层流清理失败覆盖的问题，并通过受控的 SiliconFlow 真实闭环验证生成与自动保存。
+- 来源：`user-confirmed`，2026-09-01 用户要求使用其 SiliconFlow 配置彻底修复并模拟真实用户闭环。
 
 ## Scope
 
@@ -53,6 +53,7 @@ last_reviewed: 2026-08-31
 | MIT 开源许可 | `verified` | 根许可证、包元数据、README 与项目知识记录一致声明 MIT，第三方许可边界保持独立 | `LICENSE`、`package.json`、`README.md`、Agent Note |
 | 远程向量建库可恢复性 | `verified` | 失败批次可诊断且不能原样续发，重新测试后从完整批次断点恢复，桌面与 PWA 共用向量文档契约 | Provider、Runtime、Worker 与向导回归测试 |
 | `0.5.5` 跨渠道发布 | `verified` | GitHub `main` 包含发布实现与记录，`v0.5.5` 固定正式桌面源码，Cloudflare Pages 运行资源与标签源码构建一致 | `v0.5.5`、GitHub Actions `33402940402`、线上资源摘要校验 |
+| 网页 AI 流完成态可靠性 | `verified` | 收到协议终止标记后，底层流清理失败不能覆盖已完成报告；真实浏览器流程能够生成并自动保存解读 | Provider 回归测试、SiliconFlow 受控线上闭环、PWA 构建验证 |
 
 ## Current State
 
@@ -68,14 +69,15 @@ last_reviewed: 2026-08-31
 - 远程向量建库按完整批次保存断点；错误状态需要重新测试向量能力或显式降级为本地 BM25，PWA 同时保存当前 Worker 与 IndexedDB 批次断点。
 - Windows 桌面状态文件使用唯一临时文件和短时本地替换重试维持原子写入；该机制只处理本地瞬时占用，不会重发任何远程模型请求。
 - `v0.5.5` 正式 Release 提供 Windows NSIS、blockmap、`latest.yml`、macOS 通用 DMG 与 SHA-256 清单；Cloudflare Pages 已提供与该版本本地构建摘要一致的 JS、CSS 和 Service Worker 预缓存清单。
+- PWA Chat 收到 `[DONE]` 后立即保留已完成正文；`ReadableStream` 取消或释放失败只影响资源清理，不能再把成功解读改判为网络失败，未完成的中断流仍按单次失败处理且不会自动重试。
 
 ## Blockers
 
-- 无已确认阻塞。
+- 线上运行版本尚未包含本地修复；推送与 Cloudflare Pages 部署需要单独授权。
 
 ## Next Actions
 
-- 无已确认后续动作。
+- 获得明确发布授权后推送并部署本地修复，再以新 Worker 资产完成一次线上闭环验收。
 
 ## Goal History
 
@@ -89,3 +91,4 @@ last_reviewed: 2026-08-31
 | `G-006` | `verified` | 2026-08-27 | `0.5.4` 桌面版本定义与 Windows 稳定更新发布契约完成 |
 | `G-007` | `verified` | 2026-08-30 | 根许可证、包元数据、README 与项目知识记录共同确立 MIT 开源边界 |
 | `G-008` | `verified` | 2026-08-31 | `0.5.5` 源码、Windows 安装包、macOS 通用安装包与 PWA 生产资源完成跨渠道验收 |
+| `G-009` | `verified` | 2026-09-01 | 完成态不再被流清理异常覆盖，Provider 回归、真实生成与历史自动保存验收完成 |

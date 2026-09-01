@@ -1,7 +1,7 @@
 ---
 project_docs_schema: 1
 document_type: changelog
-last_reviewed: 2026-08-31
+last_reviewed: 2026-09-01
 ---
 
 # 项目成果记录
@@ -11,6 +11,16 @@ last_reviewed: 2026-08-31
 - 当前记录周期：2026 年。
 
 ## Entries
+
+### CHG-20260901-web-ai-stream-completion
+
+- 日期：2026-09-01
+- 结果：PWA 在收到 OpenAI Chat 流的 `[DONE]` 后立即保留完整解读，底层 `ReadableStream` 清理拒绝不再把成功结果改判为“无法连接 AI 服务”。
+- 原因：旧实现等待 `reader.cancel()` 完成后才返回已解析结果；若服务商已结束响应而浏览器流取消同时拒绝，该清理异常会进入通用网络错误分支并丢弃完整正文。
+- 验证：先以故障注入测试复现截图中的通用网络失败，再验证修复后的同一用例；Provider 10 项测试、Renderer 构建和 PWA 发布校验通过。受控 SiliconFlow 线上最小测试与完整十一节解读均成功，完整流程生成山地剥之地风升并自动保存到历史；本地开发页的后续调用因 Vite 首次依赖优化刷新中断，不作为修复后真实验收。
+- Git：实现、测试与知识记录位于同一本地提交；未推送、未部署。
+- Agent Note：[网页 AI 流式解读使用分层超时边界](../../.agents/notes/implemented/bug-fix/2026-08-25-web-ai-stream-start-deadline.md)。
+- 文档影响：PROJECT、CHANGELOG、LESSONS 与既有网页流式解读 Agent Note。
 
 ### CHG-20260831-windows-index-progress-persistence
 

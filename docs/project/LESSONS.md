@@ -1,7 +1,7 @@
 ---
 project_docs_schema: 1
 document_type: lessons
-last_reviewed: 2026-08-31
+last_reviewed: 2026-09-01
 ---
 
 # 项目教训
@@ -16,8 +16,23 @@ last_reviewed: 2026-08-31
 | `LES-20260827-model-catalog-before-model` | `active` | PWA 模型目录与出站域名确认 | 模型发现发生在模型选择之前，目录安全目标不能依赖模型名称 |
 | `LES-20260827-release-metadata-drives-update` | `active` | Windows 桌面在线更新与 GitHub Release | 代码和安装包上传不等于旧客户端可更新，稳定 Release 元数据与资产必须共同验证 |
 | `LES-20260831-paid-batch-recovery` | `active` | Electron、PWA 的远程向量建库 | 可续建不等于可盲目重试，失败恢复必须同时约束完整批次断点、服务状态验证与用户显式动作 |
+| `LES-20260901-web-ai-terminal-cleanup` | `active` | PWA OpenAI Chat 流式生成 | 协议完成态不能被底层流清理异常覆盖 |
 
 ## Active Lessons
+
+### LES-20260901-web-ai-terminal-cleanup
+
+- Status: `active`
+- Source: `user-confirmed` / `code-verified`
+- 适用范围：PWA OpenAI Chat SSE 生成与浏览器 `ReadableStream` 生命周期。
+- 症状：AI 服务已经返回完整正文和终止标记，界面仍可能显示“无法连接 AI 服务”，完整报告不会进入自动保存。
+- 错误方向：自动重试、缩短输出或改用公共代理；这些做法不能修复已完成结果被清理异常覆盖的问题，还会增加重复计费或改变安全边界。
+- 已验证根因：Provider 在解析到 `[DONE]` 后仍等待 `reader.cancel()`；底层流已经关闭或异常时，取消操作的拒绝会进入通用网络错误分支并覆盖完成态。
+- 正确规则：协议终止标记确立完成态后应立即返回已解析结果；底层流清理可以继续尝试，但其失败不能逆转业务成功。尚未完成的中断流仍按单次失败处理，不自动重试。
+- 防线：构造正文、`finish_reason`、`[DONE]` 和拒绝取消操作的 Provider 回归测试，直接断言完整正文成功返回。
+- 不再适用：应用不再消费 SSE 流，或底层传输协议提供独立且原子的结果提交语义时。
+- 证据：`src/lib/webAI/provider.ts`、`src/lib/webAI/provider.test.ts`。
+- 相关 Note：[网页 AI 流式解读使用分层超时边界](../../.agents/notes/implemented/bug-fix/2026-08-25-web-ai-stream-start-deadline.md)。
 
 ### LES-20260827-corpus-metadata-parity
 
