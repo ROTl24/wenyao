@@ -20,9 +20,9 @@ last_reviewed: 2026-09-01
 
 ## Current Goal
 
-- 目标版本：`G-009`
-- 目标：消除 PWA 已完成的 AI 流式解读被底层流清理失败覆盖的问题，并通过受控的 SiliconFlow 真实闭环验证生成与自动保存。
-- 来源：`user-confirmed`，2026-09-01 用户要求使用其 SiliconFlow 配置彻底修复并模拟真实用户闭环。
+- 目标版本：`G-010`
+- 目标：将 Windows 状态持久化和 PWA AI 流完成态修复作为 `0.5.6` 同步交付到 GitHub、Windows、macOS 与 Cloudflare Pages。
+- 来源：`user-confirmed`，2026-09-01 用户要求推送并保持安装包、网站和 GitHub 一致。
 
 ## Scope
 
@@ -57,7 +57,7 @@ last_reviewed: 2026-09-01
 
 ## Current State
 
-- `package.json` 当前版本为 `0.5.5`；桌面正式构建从同一提交打包当前 Renderer、Electron 服务、共享 AI 核心与古籍数据。
+- `package.json` 当前版本为 `0.5.6`；桌面正式构建从同一提交打包当前 Renderer、Electron 服务、共享 AI 核心与古籍数据。
 - Electron 主进程、PWA 渲染适配器和 Web AI Worker 均通过 `shared/corpus-knowledge.cjs` 合并正文与分类索引。
 - 网页状态、书内条目和检索证据已验证使用 495 条规则、190 条占例和 578 条义理。
 - Electron 与 PWA 共用自定义 AI 地址规范化：裸域名默认补全 `/v1`，失败后不会自动切换地址或重复请求。
@@ -73,11 +73,11 @@ last_reviewed: 2026-09-01
 
 ## Blockers
 
-- 线上运行版本尚未包含本地修复；推送与 Cloudflare Pages 部署需要单独授权。
+- 无已确认阻塞。
 
 ## Next Actions
 
-- 获得明确发布授权后推送并部署本地修复，再以新 Worker 资产完成一次线上闭环验收。
+- 发布 `0.5.6` 并核对 GitHub 源码、Windows 安装包、macOS 通用 DMG 和 Cloudflare Pages 运行资源来自同一版本实现。
 
 ## Goal History
 
