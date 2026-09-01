@@ -28,4 +28,5 @@ Windows `0.5.3` 及后续正式安装版能够发现更高版本的最新稳定 
 - `scripts/verify-release.mjs` 验证版本、安装包路径、SHA-512、GitHub 更新提供方和正式发布工作流资产契约。
 - `.github/workflows/release-desktop.yml` 在版本标签上运行全量测试，分别构建并验证 Windows、Apple Silicon 和 Intel 产物，资产摘要一致后才发布稳定 Release。
 - `0.5.4` 本地验收通过 245 项 Renderer 测试和 134 项 Electron 测试；Windows 安装包为 151,282,377 字节，打包后的主 Bundle、AI 地址核心、Chat 响应核心、古籍分类核心与 Electron Provider 均和当前源码构建逐字节一致。
+- `0.5.6` 通过 266 项 Renderer 测试和 140 项 Electron 测试；GitHub Actions `33490650166` 完成 Windows、macOS Apple Silicon、Intel 运行时与发布任务，最新稳定 Release 的五项资产、`latest.yml` 和 DMG SHA-256 清单均有效。
 - 正式发布验收比较远端 `latest.yml` 与 Release 资产，并从旧版本号验证稳定通道选择新版本。

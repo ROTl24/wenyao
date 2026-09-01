@@ -12,13 +12,23 @@ last_reviewed: 2026-09-01
 
 ## Entries
 
+### CHG-20260901-release-056
+
+- 日期：2026-09-01
+- 结果：`0.5.6` 将 Windows 状态文件原子替换恢复与 PWA AI 流完成态修复同步发布到 GitHub 源码、Cloudflare Pages、Windows 安装包和 macOS 通用安装包。
+- 原因：两项已验证修复只存在于本地提交，线上 PWA、稳定更新通道和公开安装包尚未包含相同实现。
+- 验证：266 项 Renderer 测试、140 项 Electron 测试、类型构建、PWA 发布校验与 Windows 本地安装包校验通过；GitHub Actions `33490650166` 的 Windows、macOS Apple Silicon、Intel 验收和 publish 任务全部成功。最新稳定 Release 包含五项预期资产，`latest.yml` 指向 `0.5.6` 安装包，DMG 摘要与 `SHA256SUMS.txt` 一致。Cloudflare Pages 主 JS、CSS、AI Worker 与 manifest 的 SHA-256 和本地构建一致，Service Worker 预缓存 URL 集合一致；关闭旧 Worker 控制的测试标签后重新打开，浏览器加载新主 Bundle 且无应用控制台错误。
+- Git：实现提交 `dc269f7`、`9094f3d`；版本提交与标签 `e11ad87` / `v0.5.6`；GitHub Actions `33490650166`。
+- Agent Note：[桌面稳定版本通过可验证发布元数据驱动 Windows 在线更新](../../.agents/notes/implemented/architecture/2026-08-27-desktop-update-release-contract.md)、[远程向量建库以完整批次断点和显式恢复为边界](../../.agents/notes/implemented/bug-fix/2026-08-31-provider-index-recovery.md)、[网页 AI 流式解读使用分层超时边界](../../.agents/notes/implemented/bug-fix/2026-08-25-web-ai-stream-start-deadline.md)。
+- 文档影响：README、PROJECT、PROJECT_CONTEXT、CHANGELOG 与既有桌面发布、向量恢复、网页流式解读 Agent Note。
+
 ### CHG-20260901-web-ai-stream-completion
 
 - 日期：2026-09-01
 - 结果：PWA 在收到 OpenAI Chat 流的 `[DONE]` 后立即保留完整解读，底层 `ReadableStream` 清理拒绝不再把成功结果改判为“无法连接 AI 服务”。
 - 原因：旧实现等待 `reader.cancel()` 完成后才返回已解析结果；若服务商已结束响应而浏览器流取消同时拒绝，该清理异常会进入通用网络错误分支并丢弃完整正文。
 - 验证：先以故障注入测试复现截图中的通用网络失败，再验证修复后的同一用例；Provider 10 项测试、Renderer 构建和 PWA 发布校验通过。受控 SiliconFlow 线上最小测试与完整十一节解读均成功，完整流程生成山地剥之地风升并自动保存到历史；本地开发页的后续调用因 Vite 首次依赖优化刷新中断，不作为修复后真实验收。
-- Git：实现、测试与知识记录位于同一本地提交；未推送、未部署。
+- Git：实现、测试与知识记录位于提交 `9094f3d`，并由 `v0.5.6` 发布。
 - Agent Note：[网页 AI 流式解读使用分层超时边界](../../.agents/notes/implemented/bug-fix/2026-08-25-web-ai-stream-start-deadline.md)。
 - 文档影响：PROJECT、CHANGELOG、LESSONS 与既有网页流式解读 Agent Note。
 

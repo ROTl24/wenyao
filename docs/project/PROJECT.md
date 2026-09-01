@@ -54,6 +54,7 @@ last_reviewed: 2026-09-01
 | 远程向量建库可恢复性 | `verified` | 失败批次可诊断且不能原样续发，重新测试后从完整批次断点恢复，桌面与 PWA 共用向量文档契约 | Provider、Runtime、Worker 与向导回归测试 |
 | `0.5.5` 跨渠道发布 | `verified` | GitHub `main` 包含发布实现与记录，`v0.5.5` 固定正式桌面源码，Cloudflare Pages 运行资源与标签源码构建一致 | `v0.5.5`、GitHub Actions `33402940402`、线上资源摘要校验 |
 | 网页 AI 流完成态可靠性 | `verified` | 收到协议终止标记后，底层流清理失败不能覆盖已完成报告；真实浏览器流程能够生成并自动保存解读 | Provider 回归测试、SiliconFlow 受控线上闭环、PWA 构建验证 |
+| `0.5.6` 跨渠道发布 | `verified` | GitHub 最新稳定 Release、Windows 更新资产、macOS 通用 DMG 与 Cloudflare Pages 运行资源均来自 `v0.5.6` 实现 | `v0.5.6`、GitHub Actions `33490650166`、远端资产与线上摘要校验 |
 
 ## Current State
 
@@ -68,7 +69,7 @@ last_reviewed: 2026-09-01
 - 问爻原创源代码采用 MIT License；第三方依赖、字体、古籍和数据继续按各自许可分发，第三方 AI 服务费用不属于软件免费承诺。
 - 远程向量建库按完整批次保存断点；错误状态需要重新测试向量能力或显式降级为本地 BM25，PWA 同时保存当前 Worker 与 IndexedDB 批次断点。
 - Windows 桌面状态文件使用唯一临时文件和短时本地替换重试维持原子写入；该机制只处理本地瞬时占用，不会重发任何远程模型请求。
-- `v0.5.5` 正式 Release 提供 Windows NSIS、blockmap、`latest.yml`、macOS 通用 DMG 与 SHA-256 清单；Cloudflare Pages 已提供与该版本本地构建摘要一致的 JS、CSS 和 Service Worker 预缓存清单。
+- `v0.5.6` 正式 Release 提供 Windows NSIS、blockmap、`latest.yml`、macOS 通用 DMG 与 SHA-256 清单；Cloudflare Pages 的主 JS、CSS、AI Worker 和 manifest 与该版本本地构建摘要一致，Service Worker 预缓存同一运行资源。
 - PWA Chat 收到 `[DONE]` 后立即保留已完成正文；`ReadableStream` 取消或释放失败只影响资源清理，不能再把成功解读改判为网络失败，未完成的中断流仍按单次失败处理且不会自动重试。
 
 ## Blockers
@@ -77,7 +78,7 @@ last_reviewed: 2026-09-01
 
 ## Next Actions
 
-- 发布 `0.5.6` 并核对 GitHub 源码、Windows 安装包、macOS 通用 DMG 和 Cloudflare Pages 运行资源来自同一版本实现。
+- 无已确认后续动作。
 
 ## Goal History
 
@@ -92,3 +93,4 @@ last_reviewed: 2026-09-01
 | `G-007` | `verified` | 2026-08-30 | 根许可证、包元数据、README 与项目知识记录共同确立 MIT 开源边界 |
 | `G-008` | `verified` | 2026-08-31 | `0.5.5` 源码、Windows 安装包、macOS 通用安装包与 PWA 生产资源完成跨渠道验收 |
 | `G-009` | `verified` | 2026-09-01 | 完成态不再被流清理异常覆盖，Provider 回归、真实生成与历史自动保存验收完成 |
+| `G-010` | `verified` | 2026-09-01 | `0.5.6` 源码、Windows 安装包、macOS 通用 DMG 与 PWA 生产资源完成跨渠道验收 |

@@ -26,4 +26,4 @@ Status: implemented
 
 ## Verification
 
-`npm.cmd run test:unit -- src/lib/webAI/provider.test.ts` 验证两分钟首段延迟、超过十分钟的持续流和 `[DONE]` 后清理拒绝都能完成，并保留流中断失败与禁止自动重试的契约。Renderer 构建和 `npm.cmd run verify:web` 验证应用与网页版发布产物。受控 SiliconFlow 线上流程验证最小连接、完整十一节解读和历史自动保存；本地开发页因 Vite 首次依赖优化刷新中断的调用不作为修复后真实验收。
+`npm.cmd run test:unit -- src/lib/webAI/provider.test.ts` 验证两分钟首段延迟、超过十分钟的持续流和 `[DONE]` 后清理拒绝都能完成，并保留流中断失败与禁止自动重试的契约。Renderer 构建和 `npm.cmd run verify:web` 验证应用与网页版发布产物。受控 SiliconFlow 线上流程验证最小连接、完整十一节解读和历史自动保存；本地开发页因 Vite 首次依赖优化刷新中断的调用不作为修复后真实验收。`v0.5.6` 发布后，Cloudflare Pages 的 AI Worker 摘要与包含本决策的本地构建一致，关闭旧 Worker 控制的测试标签再打开后加载新主 Bundle。
