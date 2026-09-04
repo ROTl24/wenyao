@@ -59,7 +59,7 @@ test('custom model discovery reads a generic OpenAI-compatible catalog with an a
   assert.equal(request.options.headers.authorization, 'Bearer secret-key');
 });
 
-test('chat accepts OpenAI-compatible text content blocks without model-specific handling', async () => {
+test('chat accepts OpenAI-compatible text content blocks and omits unspecified generation limits', async () => {
   let requestBody;
   const client = createProviderClient({
     connection: {
@@ -82,6 +82,8 @@ test('chat accepts OpenAI-compatible text content blocks without model-specific 
     assert.equal((await client.chat({ messages: [{ role: 'user', content: '测试' }] })).content, '连接成功');
   });
   assert.equal(Object.hasOwn(requestBody, 'temperature'), false);
+  assert.equal(Object.hasOwn(requestBody, 'max_tokens'), false);
+  assert.equal(Object.hasOwn(requestBody, 'max_completion_tokens'), false);
 });
 
 test('chat distinguishes reasoning budget exhaustion from an incompatible response', async () => {

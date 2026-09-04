@@ -20,9 +20,9 @@ last_reviewed: 2026-09-04
 
 ## Current Goal
 
-- 目标版本：`G-011`
-- 目标：修复桌面端阿里云重排最小测试通过后仍被索引准备误判为缺少业务空间接口的问题，并保持真实缺失接口时失败关闭。
-- 来源：`user-confirmed` / `code-verified`，依据 2026-09-04 本地测试截图与离线 Runtime 回归。
+- 目标版本：`G-012`
+- 目标：正式 AI 解读与追问不设置应用侧输入或输出 Token 上限，避免推理模型在产生可展示正文前耗尽固定输出预算；最小连接测试继续使用有限单次预算。
+- 来源：`user-confirmed` / `code-verified`，依据 2026-09-04 DeepSeek 正式解读恰好在 8192 个输出 Token 终止的本地调用账本与跨运行时回归。
 
 ## Scope
 
@@ -48,6 +48,7 @@ last_reviewed: 2026-09-04
 | 网页古籍分类一致性 | `verified` | 网页统计、书内条目和 AI 检索均使用 495 规则、190 占例、578 义理分类 | 浏览器与 Worker 回归测试、全量测试、PWA 构建验证 |
 | 自定义 AI 地址规范化 | `verified` | 裸域名默认使用 `/v1`，显式路径和 DeepSeek 官方根地址保持原语义，界面显示实际规范化结果 | `shared/ai-setup-core.cjs`、共享核心与向导回归测试 |
 | OpenAI Chat 通用响应契约 | `verified` | 桌面端与 PWA 统一解析字符串及文本块正文，最小测试允许短推理并准确区分空正文原因 | `shared/chat-completion-core.cjs`、Provider、Runtime 与 Worker 回归测试 |
+| 正式生成不设应用 Token 上限 | `verified` | 桌面端与 PWA 的正式解读和追问不发送应用定义的输入限制、`max_tokens` 或 `max_completion_tokens`，最小测试仍显式使用 512 Token | 正式调用、Provider 与 Worker 请求体回归测试 |
 | PWA 模型目录域名确认 | `verified` | 模型名称为空时仍按规范化目录地址显示并确认 HTTPS origin，界面与 Worker 共用目录安全入口 | `src/lib/webAI/security.ts`、向导与 Worker 回归测试 |
 | Windows 稳定更新通道 | `verified` | 打包版启动及每六小时检查 GitHub Releases，用户确认后下载并在退出或重启时安装，正式 Release 同时发布 `latest.yml`、安装包与 blockmap | `electron/services/update-manager.cjs`、`scripts/verify-release.mjs`、`.github/workflows/release-desktop.yml` |
 | MIT 开源许可 | `verified` | 根许可证、包元数据、README 与项目知识记录一致声明 MIT，第三方许可边界保持独立 | `LICENSE`、`package.json`、`README.md`、Agent Note |
@@ -63,7 +64,7 @@ last_reviewed: 2026-09-04
 - Electron 主进程、PWA 渲染适配器和 Web AI Worker 均通过 `shared/corpus-knowledge.cjs` 合并正文与分类索引。
 - 网页状态、书内条目和检索证据已验证使用 495 条规则、190 条占例和 578 条义理。
 - Electron 与 PWA 共用自定义 AI 地址规范化：裸域名默认补全 `/v1`，失败后不会自动切换地址或重复请求。
-- Electron 与 PWA 共用 OpenAI Chat 响应解析；所有生成模型使用 512 Token 单次最小测试预算，未指定采样参数时不发送 `temperature`。
+- Electron 与 PWA 共用 OpenAI Chat 响应解析；正式解读和追问不发送应用定义的输入或输出 Token 限制，只有最小连接测试显式使用 512 Token 单次预算，未指定采样参数时不发送 `temperature`。
 - PWA 模型目录域名确认由规范化后的 `/models` 安全目标生成，不依赖尚未发现的模型名称。
 - GitHub Release 工作流支持手动候选构建，并仅在版本标签路径发布正式桌面产物；Windows 稳定 Release 的 `latest.yml` 驱动既有安装版发现更新。
 - macOS 免费发行版没有 Developer ID 与公证票据，`0.5.3` 客户端保持 GitHub Releases 手动更新，不能由后续版本远程改为自动更新。
@@ -97,3 +98,4 @@ last_reviewed: 2026-09-04
 | `G-009` | `verified` | 2026-09-01 | 完成态不再被流清理异常覆盖，Provider 回归、真实生成与历史自动保存验收完成 |
 | `G-010` | `verified` | 2026-09-01 | `0.5.6` 源码、Windows 安装包、macOS 通用 DMG 与 PWA 生产资源完成跨渠道验收 |
 | `G-011` | `verified` | 2026-09-04 | 阿里云重排端点在最小测试、索引激活和实际调用间使用同一表示契约，缺失端点继续失败关闭 |
+| `G-012` | `verified` | 2026-09-04 | 正式生成请求移除应用侧输入与输出 Token 上限，探测请求继续保持有限单次预算 |

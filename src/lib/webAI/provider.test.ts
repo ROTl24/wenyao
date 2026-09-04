@@ -196,7 +196,7 @@ describe('网页自定义 AI 模型发现', () => {
     expect(fetchMock).toHaveBeenCalledTimes(1);
   });
 
-  it('accepts OpenAI-compatible text content blocks and omits unspecified sampling options', async () => {
+  it('accepts OpenAI-compatible text content blocks and omits unspecified generation limits', async () => {
     const fetchMock = vi.fn().mockResolvedValue(new Response(JSON.stringify({
       choices: [{
         finish_reason: 'stop',
@@ -216,6 +216,8 @@ describe('网页自定义 AI 模型发现', () => {
     })).resolves.toMatchObject({ content: '连接成功' });
     const request = fetchMock.mock.calls[0][1] as RequestInit;
     expect(JSON.parse(String(request.body))).not.toHaveProperty('temperature');
+    expect(JSON.parse(String(request.body))).not.toHaveProperty('max_tokens');
+    expect(JSON.parse(String(request.body))).not.toHaveProperty('max_completion_tokens');
   });
 
   it('distinguishes a reasoning-only length stop without retrying the billable request', async () => {

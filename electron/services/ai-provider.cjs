@@ -136,7 +136,7 @@ function createProviderClient({ connection, apiKey = '', fetchImpl = fetch, usag
     return Array.isArray(json.data) ? json.data.map((item) => String(item.id || '')).filter(Boolean) : [];
   }
 
-  async function chat({ messages, signal, maxTokens = 8192, temperature, thinking }) {
+  async function chat({ messages, signal, maxTokens, temperature, thinking }) {
     const definition = connection.capabilities?.generation;
     if (!definition || definition.protocol !== 'openai-chat') throw new Error(`${label}未配置兼容的解读能力`);
     const json = await requestJson({
@@ -149,7 +149,7 @@ function createProviderClient({ connection, apiKey = '', fetchImpl = fetch, usag
         model: definition.model,
         messages,
         ...(temperature === undefined ? {} : { temperature }),
-        max_tokens: maxTokens,
+        ...(maxTokens === undefined ? {} : { max_tokens: maxTokens }),
         ...(thinking === undefined ? {} : { thinking: { type: thinking ? 'enabled' : 'disabled' } }),
       },
     });
@@ -171,7 +171,9 @@ function createProviderClient({ connection, apiKey = '', fetchImpl = fetch, usag
           ? 'AI_NON_TEXT_RESPONSE'
           : 'AI_INVALID_RESPONSE';
     error.publicNextAction = result.status === 'output_limit'
-      ? '请提高模型输出上限，或在服务商侧关闭强制思考后手动重试；问爻不会自动重试。'
+      ? maxTokens === undefined
+        ? '问爻未设置本次输出 Token 上限；请在服务商侧提高模型可用输出额度，或关闭强制思考后手动重试。问爻不会自动重试。'
+        : '请提高本次模型输出上限，或在服务商侧关闭强制思考后手动重试；问爻不会自动重试。'
       : result.status === 'reasoning_only'
         ? '请确认服务商会把最终答案放在 message.content；问爻不会把内部推理当作解读正文。'
         : result.status === 'non_text'

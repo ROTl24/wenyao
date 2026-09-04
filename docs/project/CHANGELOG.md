@@ -12,6 +12,16 @@ last_reviewed: 2026-09-04
 
 ## Entries
 
+### CHG-20260904-formal-generation-uncapped
+
+- 日期：2026-09-04
+- 结果：桌面端与 PWA 的正式 AI 解读和追问不再发送应用侧输入或输出 Token 限制；Provider 只在最小连接测试等调用方显式给出预算时发送 `max_tokens`。
+- 原因：本地正式解读输入 16639 Token 后，DeepSeek 输出恰好在问爻固定的 8192 Token 上限结束，推理阶段耗尽预算且没有产生可展示正文。
+- 验证：桌面正式生成、桌面 Provider 与网页 Provider 的请求体回归先稳定捕获 `max_tokens: 8192`，修复后均确认正式请求省略 Token 上限；显式 512 Token 推理耗尽用例和 Worker 最小测试继续通过。266 项 Renderer 测试、142 项 Electron 测试、类型检查、Renderer 构建与网页产物校验通过。
+- Git：实现、测试与知识记录位于同一本地提交，未推送、部署或执行新的真实模型请求。
+- Agent Note：[OpenAI Chat 探测与响应采用跨运行时共享契约](../../.agents/notes/implemented/bug-fix/2026-08-27-openai-chat-probe-response.md)。
+- 文档影响：PROJECT、PROJECT_CONTEXT、CHANGELOG、DECISIONS、LESSONS 与既有 OpenAI Chat Agent Note。
+
 ### CHG-20260904-alibaba-rerank-index-activation
 
 - 日期：2026-09-04

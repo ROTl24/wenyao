@@ -919,7 +919,7 @@ function assertCloudAnalysisConfigured({ chat }) {
 
 async function postChat({ chat, messages, signal }) {
   assertCloudAnalysisConfigured({ chat });
-  const { content } = await chat({ messages, signal, maxTokens: 8192, temperature: 0 });
+  const { content } = await chat({ messages, signal, temperature: 0 });
   return requireAIResponse(content);
 }
 

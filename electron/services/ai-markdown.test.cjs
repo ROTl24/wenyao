@@ -195,7 +195,7 @@ test('time casting prompts preserve the source boundary and never describe coin 
   }
 });
 
-test('postChat requests text output and returns the response verbatim without JSON parsing', async () => {
+test('postChat requests uncapped text output and returns the response verbatim without JSON parsing', async () => {
   let requestBody;
   const restore = mockDeepSeek(markdown, (_url, options) => {
     requestBody = JSON.parse(options.body);
@@ -212,6 +212,8 @@ test('postChat requests text output and returns the response verbatim without JS
 
     assert.equal(result, markdown);
     assert.equal(Object.hasOwn(requestBody, 'response_format'), false);
+    assert.equal(Object.hasOwn(requestBody, 'max_tokens'), false);
+    assert.equal(Object.hasOwn(requestBody, 'max_completion_tokens'), false);
   } finally {
     restore();
   }

@@ -13,6 +13,7 @@ last_reviewed: 2026-09-04
 | `LES-20260827-corpus-metadata-parity` | `active` | Electron、PWA、Worker 的内置语料边界 | 共享算法不等于共享输入语义，分类元数据必须在所有运行时统一装配 |
 | `LES-20260827-openai-html-response` | `active` | 自定义 AI Base URL 与能力接口 | HTTP 200 的管理页面 HTML 仍是错误接口，裸域名必须在请求前规范化 |
 | `LES-20260827-chat-visible-output` | `active` | OpenAI Chat 生成模型与最小测试 | HTTP 200 和推理输出不等于可展示正文，探测预算与空正文原因必须独立验证 |
+| `LES-20260904-formal-generation-uncapped` | `active` | Electron 与 PWA 正式解读和追问 | 探测预算不能变成正式生成上限，正式请求由服务商模型决定可用上下文与输出空间 |
 | `LES-20260827-model-catalog-before-model` | `active` | PWA 模型目录与出站域名确认 | 模型发现发生在模型选择之前，目录安全目标不能依赖模型名称 |
 | `LES-20260827-release-metadata-drives-update` | `active` | Windows 桌面在线更新与 GitHub Release | 代码和安装包上传不等于旧客户端可更新，稳定 Release 元数据与资产必须共同验证 |
 | `LES-20260831-paid-batch-recovery` | `active` | Electron、PWA 的远程向量建库 | 可续建不等于可盲目重试，失败恢复必须同时约束完整批次断点、服务状态验证与用户显式动作 |
@@ -20,6 +21,20 @@ last_reviewed: 2026-09-04
 | `LES-20260904-rerank-endpoint-parity` | `active` | 阿里云重排测试、激活与调用 | 同一规范化接口必须在所有阶段按同一契约解释 |
 
 ## Active Lessons
+
+### LES-20260904-formal-generation-uncapped
+
+- Status: `active`
+- Source: `user-confirmed` / `code-verified`
+- 适用范围：Electron 与 PWA 的 OpenAI Chat 正式解读、追问、Provider 请求体和最小连接测试。
+- 症状：DeepSeek 正式解读接收完整输入后输出恰好达到 8192 Token，`finish_reason` 为 `length`，推理内容耗尽预算但没有生成可展示正文。
+- 错误方向：自动重试、把内部推理当作正文或全局关闭 DeepSeek 思考；这些做法会重复计费、破坏可展示正文契约或改变正式解读质量。
+- 已验证根因：正式调用固定传入 `maxTokens: 8192`，桌面和网页 Provider 又无条件序列化为 `max_tokens`，把应用默认值变成了推理模型的硬输出预算。
+- 正确规则：正式解读和追问不设置应用侧输入或输出 Token 上限；Provider 只在调用方明确给出预算时发送 `max_tokens`。最小连接测试继续以 512 Token 单次预算控制费用，服务商自身限制继续如实报告。
+- 防线：桌面正式调用、桌面 Provider、网页 Provider 分别断言正式请求没有 `max_tokens` 或 `max_completion_tokens`，既有探测回归断言显式 512 Token 仍会发送且失败不会自动重试。
+- 不再适用：服务商要求正式请求必须显式提供输出预算，或产品新增用户可见且经过费用确认的正式生成预算配置时。
+- 证据：`electron/services/ai.cjs`、`electron/services/ai-provider.cjs`、`src/lib/webAI/provider.ts` 及对应回归测试。
+- 相关 Note：[OpenAI Chat 探测与响应采用跨运行时共享契约](../../.agents/notes/implemented/bug-fix/2026-08-27-openai-chat-probe-response.md)。
 
 ### LES-20260904-rerank-endpoint-parity
 

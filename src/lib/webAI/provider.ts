@@ -341,13 +341,13 @@ export function createWebProvider(
 
   return {
     origins: validated.origins,
-    async chat({ messages, signal, maxTokens = 8192, temperature, thinking }: { messages: Array<{ role: string; content: string }>; signal?: AbortSignal; maxTokens?: number; temperature?: number; thinking?: boolean }) {
+    async chat({ messages, signal, maxTokens, temperature, thinking }: { messages: Array<{ role: string; content: string }>; signal?: AbortSignal; maxTokens?: number; temperature?: number; thinking?: boolean }) {
       const definition = validated.connection.capabilities.generation!;
       const transport = await streamChatRequest(validated.endpoints.generation!, apiKey, {
         model: definition.model,
         messages,
         ...(temperature === undefined ? {} : { temperature }),
-        max_tokens: maxTokens,
+        ...(maxTokens === undefined ? {} : { max_tokens: maxTokens }),
         ...(thinking === undefined ? {} : { thinking: { type: thinking ? 'enabled' : 'disabled' } }),
         stream: true,
         stream_options: { include_usage: true },
@@ -357,7 +357,14 @@ export function createWebProvider(
       const result = inspectChatCompletion(json, { reasoningObserved: transport.reasoningObserved });
       if (result.status === 'content') return { content: result.content, raw: json };
       if (result.status === 'output_limit') {
-        throw new WebAIError({ code: 'WEB_AI_OUTPUT_LIMIT', message: '解读模型在生成可展示正文前耗尽了输出额度。', dataSafe: true, nextAction: '请提高模型输出上限，或在服务商侧关闭强制思考后手动重试；问爻不会自动重试。' });
+        throw new WebAIError({
+          code: 'WEB_AI_OUTPUT_LIMIT',
+          message: '解读模型在生成可展示正文前耗尽了输出额度。',
+          dataSafe: true,
+          nextAction: maxTokens === undefined
+            ? '问爻未设置本次输出 Token 上限；请在服务商侧提高模型可用输出额度，或关闭强制思考后手动重试。问爻不会自动重试。'
+            : '请提高本次模型输出上限，或在服务商侧关闭强制思考后手动重试；问爻不会自动重试。',
+        });
       }
       if (result.status === 'reasoning_only') {
         throw new WebAIError({ code: 'WEB_AI_NO_VISIBLE_CONTENT', message: '解读模型只返回了推理过程，没有返回可展示正文。', dataSafe: true, nextAction: '请确认服务商会把最终答案放在 message.content；问爻不会把内部推理当作解读正文。' });
