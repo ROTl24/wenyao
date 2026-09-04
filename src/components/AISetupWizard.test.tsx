@@ -241,6 +241,7 @@ describe('AI 能力三步向导', () => {
     render(<Harness initial={building} />);
     expect(screen.getByRole('heading', { name: '正在准备向量检索' })).toBeVisible();
     expect(screen.getByText(/50\.0%/)).toBeVisible();
+    expect(screen.getByText(/暂停后可手动继续；失败后需重新检测或改用关键词检索/)).toBeVisible();
   });
 
   it('建库失败后阻止原样重发，并提供重新测试或降级关键词检索', async () => {

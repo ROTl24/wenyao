@@ -13,6 +13,13 @@ const unavailableSecretStore = () => createSecretStore({
   provider: 'system',
 });
 
+const testSecretStore = () => ({
+  provider: 'test',
+  name: '测试安全存储',
+  encrypt: (value) => `encrypted:${value}`,
+  decrypt: (value) => String(value).replace(/^encrypted:/, ''),
+});
+
 class MemoryStore {
   constructor() { this.ai = emptyAIState(); }
   getRawAIState() { return structuredClone(this.ai); }
@@ -157,6 +164,58 @@ test('三项能力齐全时启用完整重排链路', async () => {
   assert.equal(calls.rerank, rerankBeforeSearch + 1);
 });
 
+test('阿里云重排最小测试通过后可完成向量索引准备', async () => {
+  const fixture = runtimeFixture({ secretStore: testSecretStore() });
+  await testCapability(fixture.runtime, 'generation');
+  await testCapability(fixture.runtime, 'embedding');
+
+  const rerankTest = await fixture.runtime.testCapability({
+    capability: 'rerank',
+    apiUrl: 'https://workspace-id.cn-beijing.maas.aliyuncs.com/compatible-api/v1/reranks',
+    model: 'qwen3-rerank',
+    apiKey: 'session-key',
+    consentAccepted: true,
+  });
+  assert.equal(rerankTest.ok, true, JSON.stringify(rerankTest));
+
+  const result = await fixture.runtime.completeSetup({
+    capabilities: ['generation', 'embedding', 'rerank'],
+    bulkEmbeddingAccepted: true,
+  });
+  assert.equal(result.ok, true, JSON.stringify(result));
+  assert.equal(result.status.status, 'ready');
+});
+
+test('阿里云重排没有显式接口时仍阻止启用', async () => {
+  const fixture = runtimeFixture({ secretStore: testSecretStore() });
+  await testCapability(fixture.runtime, 'generation');
+  await testCapability(fixture.runtime, 'embedding');
+  const rerankTest = await fixture.runtime.testCapability({
+    capability: 'rerank',
+    apiUrl: 'https://workspace-id.cn-beijing.maas.aliyuncs.com/compatible-api/v1/reranks',
+    model: 'qwen3-rerank',
+    apiKey: 'session-key',
+    consentAccepted: true,
+  });
+  assert.equal(rerankTest.ok, true, JSON.stringify(rerankTest));
+
+  const state = fixture.store.getRawAIState();
+  const rerankConnectionId = state.draft.pipeline.rerank.connectionId;
+  const rerankConnection = state.draft.connections.find((connection) => connection.id === rerankConnectionId);
+  delete rerankConnection.capabilities.rerank.path;
+  delete rerankConnection.capabilities.rerank.url;
+  fixture.store.saveAIState(state);
+
+  await assert.rejects(
+    () => fixture.runtime.completeSetup({
+      capabilities: ['generation', 'embedding', 'rerank'],
+      bulkEmbeddingAccepted: true,
+    }),
+    (error) => error.publicCode === 'AI_RERANK_ENDPOINT_REQUIRED',
+  );
+  assert.equal(fixture.calls.embedding, 1);
+});
+
 test('模型目录与最小测试严格分离，失败只请求一次且不覆盖旧活动方案', async () => {
   const { runtime, store, calls, failures } = runtimeFixture();
   await configure(runtime, ['generation']);
@@ -243,12 +302,7 @@ test('生成模型最小测试统一使用短推理预算，DeepSeek 官方适�
   let requestBody = null;
   let requests = 0;
   const { runtime } = runtimeFixture({
-    secretStore: {
-      provider: 'test',
-      name: '测试安全存储',
-      encrypt: (value) => `encrypted:${value}`,
-      decrypt: (value) => String(value).replace(/^encrypted:/, ''),
-    },
+    secretStore: testSecretStore(),
     fetchImpl: async (_url, options = {}) => {
       requests += 1;
       requestBody = JSON.parse(options.body || '{}');

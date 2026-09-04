@@ -258,7 +258,7 @@ export function AISetupWizard({ catalog, status, onStatus, onReady, onClose }: P
         </> : null}
 
         {step === 3 && !finished ? <>
-          <header><p>索引准备</p><h2 id="ai-setup-title">{status.draft?.pipeline.embedding ? '正在准备向量检索' : '正在切换配置'}</h2><span>新配置完全准备成功前，旧的活动方案不会被覆盖。失败后可手动继续，不会自动重试远程请求。</span></header>
+          <header><p>索引准备</p><h2 id="ai-setup-title">{status.draft?.pipeline.embedding ? '正在准备向量检索' : '正在切换配置'}</h2><span>新配置完全准备成功前，旧的活动方案不会被覆盖。暂停后可手动继续；失败后需重新检测或改用关键词检索，不会自动重试远程请求。</span></header>
           {status.draft?.pipeline.embedding ? <><div className="ai-build-progress"><span style={{ transform: `scaleX(${progress / 100})` }} /></div><p className="ai-build-progress-label">{progress.toFixed(1)}% · {status.draft?.indexTask?.completed || 0}/{status.draft?.indexTask?.total || status.corpusCount}</p></> : null}
           {notice || indexError ? <div className="ai-setup-error" role="alert">
             <span>{notice || errorText(indexError)}</span>

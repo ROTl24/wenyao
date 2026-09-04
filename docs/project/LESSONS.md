@@ -1,7 +1,7 @@
 ---
 project_docs_schema: 1
 document_type: lessons
-last_reviewed: 2026-09-01
+last_reviewed: 2026-09-04
 ---
 
 # 项目教训
@@ -17,8 +17,23 @@ last_reviewed: 2026-09-01
 | `LES-20260827-release-metadata-drives-update` | `active` | Windows 桌面在线更新与 GitHub Release | 代码和安装包上传不等于旧客户端可更新，稳定 Release 元数据与资产必须共同验证 |
 | `LES-20260831-paid-batch-recovery` | `active` | Electron、PWA 的远程向量建库 | 可续建不等于可盲目重试，失败恢复必须同时约束完整批次断点、服务状态验证与用户显式动作 |
 | `LES-20260901-web-ai-terminal-cleanup` | `active` | PWA OpenAI Chat 流式生成 | 协议完成态不能被底层流清理异常覆盖 |
+| `LES-20260904-rerank-endpoint-parity` | `active` | 阿里云重排测试、激活与调用 | 同一规范化接口必须在所有阶段按同一契约解释 |
 
 ## Active Lessons
+
+### LES-20260904-rerank-endpoint-parity
+
+- Status: `active`
+- Source: `user-confirmed` / `code-verified`
+- 适用范围：共享 AI 地址规范化、Electron 能力测试、方案激活与重排调用。
+- 症状：阿里云重排最小测试已经成功，点击完成配置后仍在 0/1263 处提示缺少北京地域业务空间接口。
+- 错误方向：要求用户重复填写业务空间 ID 或重复最小测试；地址已经成功调用过，重复远程请求不能修复内部字段判定不一致，还可能增加计费。
+- 已验证根因：完整重排地址被规范化为 `baseUrl + path`，Provider 按该组合完成了最小测试；桌面方案激活却只检查独立 `url` 字段，把同一份有效配置误判为缺少接口。
+- 正确规则：最小测试、方案激活与实际调用必须接受同一端点表示。`url` 或规范化后的 `path` 任一存在即表示接口已配置；两者都不存在的旧配置或损坏配置继续失败关闭。
+- 防线：离线 Runtime 回归从阿里云业务空间完整地址执行重排最小测试，再完成三项配置和本地模拟建库；配套反例验证没有 `url` 与 `path` 时不会发起建库请求。
+- 不再适用：能力定义统一为一种强制端点结构，并由解析层在保存前完成 Schema 校验后。
+- 证据：`shared/ai-setup-core.cjs`、`electron/services/ai-runtime.cjs`、`electron/services/ai-provider.cjs`、`electron/services/ai-runtime.test.cjs`。
+- 相关 Note：[阿里云业务空间地址按浏览器能力路由](../../.agents/notes/implemented/bug-fix/2026-08-24-alibaba-web-endpoint-routing.md)。
 
 ### LES-20260901-web-ai-terminal-cleanup
 

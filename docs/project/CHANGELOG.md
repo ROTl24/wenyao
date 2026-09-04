@@ -1,7 +1,7 @@
 ---
 project_docs_schema: 1
 document_type: changelog
-last_reviewed: 2026-09-01
+last_reviewed: 2026-09-04
 ---
 
 # 项目成果记录
@@ -11,6 +11,16 @@ last_reviewed: 2026-09-01
 - 当前记录周期：2026 年。
 
 ## Entries
+
+### CHG-20260904-alibaba-rerank-index-activation
+
+- 日期：2026-09-04
+- 结果：桌面端已通过最小测试的阿里云业务空间重排地址可以继续完成向量索引准备，不再停在 0/1263 并误报业务空间接口缺失；真正没有任何显式端点的配置仍会在远程建库前失败关闭。
+- 原因：完整重排地址保存为 `baseUrl + path`，Provider 使用该组合完成最小测试，方案激活却只把独立 `url` 字段视为有效接口。
+- 验证：离线回归先复现 `AI_RERANK_ENDPOINT_REQUIRED`，修复后同一用例完成三项配置与模拟建库；反例确认缺失 `url` 和 `path` 时不发起建库。266 项 Renderer 测试、142 项 Electron 测试、类型检查、Renderer 构建与网页产物校验通过。
+- Git：实现、测试与知识记录位于同一本地提交，未推送或发布。
+- Agent Note：[阿里云业务空间地址按浏览器能力路由](../../.agents/notes/implemented/bug-fix/2026-08-24-alibaba-web-endpoint-routing.md)。
+- 文档影响：PROJECT、PROJECT_CONTEXT、CHANGELOG、LESSONS 与既有阿里云端点 Agent Note。
 
 ### CHG-20260901-release-056
 

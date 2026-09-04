@@ -36,6 +36,11 @@ function isLocalUrl(value) {
   catch { return false; }
 }
 
+function hasConfiguredEndpoint(definition) {
+  return [definition?.url, definition?.path]
+    .some((value) => typeof value === 'string' && value.trim());
+}
+
 function uniqueConnections(resolved) {
   return [...new Map(Object.values(resolved).filter(Boolean).map((item) => [item.connection.id, item.connection])).values()];
 }
@@ -175,7 +180,7 @@ class AIRuntime {
         );
       }
       validateBaseUrl(connection.baseUrl);
-      if (capability === 'rerank' && definition.protocol === 'alibaba-rerank' && !definition.url) {
+      if (capability === 'rerank' && definition.protocol === 'alibaba-rerank' && !hasConfiguredEndpoint(definition)) {
         throw runtimeError('阿里云重排缺少业务空间接口', 'AI_RERANK_ENDPOINT_REQUIRED', '请填写北京地域业务空间 ID 后重新检测。');
       }
       const apiKey = this.#decryptSecret(connection);

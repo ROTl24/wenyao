@@ -1,7 +1,7 @@
 ---
 project_docs_schema: 1
 document_type: project
-last_reviewed: 2026-09-01
+last_reviewed: 2026-09-04
 ---
 
 # 项目状态
@@ -20,9 +20,9 @@ last_reviewed: 2026-09-01
 
 ## Current Goal
 
-- 目标版本：`G-010`
-- 目标：将 Windows 状态持久化和 PWA AI 流完成态修复作为 `0.5.6` 同步交付到 GitHub、Windows、macOS 与 Cloudflare Pages。
-- 来源：`user-confirmed`，2026-09-01 用户要求推送并保持安装包、网站和 GitHub 一致。
+- 目标版本：`G-011`
+- 目标：修复桌面端阿里云重排最小测试通过后仍被索引准备误判为缺少业务空间接口的问题，并保持真实缺失接口时失败关闭。
+- 来源：`user-confirmed` / `code-verified`，依据 2026-09-04 本地测试截图与离线 Runtime 回归。
 
 ## Scope
 
@@ -52,6 +52,7 @@ last_reviewed: 2026-09-01
 | Windows 稳定更新通道 | `verified` | 打包版启动及每六小时检查 GitHub Releases，用户确认后下载并在退出或重启时安装，正式 Release 同时发布 `latest.yml`、安装包与 blockmap | `electron/services/update-manager.cjs`、`scripts/verify-release.mjs`、`.github/workflows/release-desktop.yml` |
 | MIT 开源许可 | `verified` | 根许可证、包元数据、README 与项目知识记录一致声明 MIT，第三方许可边界保持独立 | `LICENSE`、`package.json`、`README.md`、Agent Note |
 | 远程向量建库可恢复性 | `verified` | 失败批次可诊断且不能原样续发，重新测试后从完整批次断点恢复，桌面与 PWA 共用向量文档契约 | Provider、Runtime、Worker 与向导回归测试 |
+| 阿里云重排端点激活一致性 | `verified` | 业务空间完整地址通过最小测试后可进入索引准备；没有 `url` 与 `path` 的配置仍在建库前失败关闭 | Runtime 正反例回归、完整测试与 Renderer 构建 |
 | `0.5.5` 跨渠道发布 | `verified` | GitHub `main` 包含发布实现与记录，`v0.5.5` 固定正式桌面源码，Cloudflare Pages 运行资源与标签源码构建一致 | `v0.5.5`、GitHub Actions `33402940402`、线上资源摘要校验 |
 | 网页 AI 流完成态可靠性 | `verified` | 收到协议终止标记后，底层流清理失败不能覆盖已完成报告；真实浏览器流程能够生成并自动保存解读 | Provider 回归测试、SiliconFlow 受控线上闭环、PWA 构建验证 |
 | `0.5.6` 跨渠道发布 | `verified` | GitHub 最新稳定 Release、Windows 更新资产、macOS 通用 DMG 与 Cloudflare Pages 运行资源均来自 `v0.5.6` 实现 | `v0.5.6`、GitHub Actions `33490650166`、远端资产与线上摘要校验 |
@@ -68,6 +69,7 @@ last_reviewed: 2026-09-01
 - macOS 免费发行版没有 Developer ID 与公证票据，`0.5.3` 客户端保持 GitHub Releases 手动更新，不能由后续版本远程改为自动更新。
 - 问爻原创源代码采用 MIT License；第三方依赖、字体、古籍和数据继续按各自许可分发，第三方 AI 服务费用不属于软件免费承诺。
 - 远程向量建库按完整批次保存断点；错误状态需要重新测试向量能力或显式降级为本地 BM25，PWA 同时保存当前 Worker 与 IndexedDB 批次断点。
+- 桌面端按与 Provider 相同的端点契约激活阿里云重排：规范化的 `baseUrl + path` 与独立 `url` 均可表示已测试接口，二者都缺失时不会启动向量建库。
 - Windows 桌面状态文件使用唯一临时文件和短时本地替换重试维持原子写入；该机制只处理本地瞬时占用，不会重发任何远程模型请求。
 - `v0.5.6` 正式 Release 提供 Windows NSIS、blockmap、`latest.yml`、macOS 通用 DMG 与 SHA-256 清单；Cloudflare Pages 的主 JS、CSS、AI Worker 和 manifest 与该版本本地构建摘要一致，Service Worker 预缓存同一运行资源。
 - PWA Chat 收到 `[DONE]` 后立即保留已完成正文；`ReadableStream` 取消或释放失败只影响资源清理，不能再把成功解读改判为网络失败，未完成的中断流仍按单次失败处理且不会自动重试。
@@ -94,3 +96,4 @@ last_reviewed: 2026-09-01
 | `G-008` | `verified` | 2026-08-31 | `0.5.5` 源码、Windows 安装包、macOS 通用安装包与 PWA 生产资源完成跨渠道验收 |
 | `G-009` | `verified` | 2026-09-01 | 完成态不再被流清理异常覆盖，Provider 回归、真实生成与历史自动保存验收完成 |
 | `G-010` | `verified` | 2026-09-01 | `0.5.6` 源码、Windows 安装包、macOS 通用 DMG 与 PWA 生产资源完成跨渠道验收 |
+| `G-011` | `verified` | 2026-09-04 | 阿里云重排端点在最小测试、索引激活和实际调用间使用同一表示契约，缺失端点继续失败关闭 |
