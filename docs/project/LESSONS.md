@@ -19,8 +19,23 @@ last_reviewed: 2026-09-04
 | `LES-20260831-paid-batch-recovery` | `active` | Electron、PWA 的远程向量建库 | 可续建不等于可盲目重试，失败恢复必须同时约束完整批次断点、服务状态验证与用户显式动作 |
 | `LES-20260901-web-ai-terminal-cleanup` | `active` | PWA OpenAI Chat 流式生成 | 协议完成态不能被底层流清理异常覆盖 |
 | `LES-20260904-rerank-endpoint-parity` | `active` | 阿里云重排测试、激活与调用 | 同一规范化接口必须在所有阶段按同一契约解释 |
+| `LES-20260904-desktop-generation-timeout` | `active` | Electron OpenAI Chat 正式解读与追问 | 固定总时限不能区分长推理与停滞连接，正文读取异常必须进入同一错误边界 |
 
 ## Active Lessons
+
+### LES-20260904-desktop-generation-timeout
+
+- Status: `active`
+- Source: `user-confirmed` / `code-verified`
+- 适用范围：Electron OpenAI Chat 正式解读、追问、Runtime 时限和 Provider 响应读取。
+- 症状：DeepSeek 正式解读在等待约 180 秒后显示 `The operation was aborted due to timeout`，已保存的排盘没有生成报告。
+- 错误方向：继续提高固定时限、恢复正式输出 Token 上限、关闭思考或自动重试；这些做法不能区分长推理和停滞连接，还可能截断正文、改变模型行为或重复计费。
+- 已验证根因：Electron Runtime 为正式解读和追问固定创建 180 秒 `AbortSignal`；Provider 只在建立请求阶段归类超时，正文读取阶段的中止会直接暴露底层英文异常。
+- 正确规则：桌面正式生成不设置应用侧固定总时限；探测、向量和重排按短请求目标保留时限。连接与正文读取共享同一错误归类边界，失败只报告一次并等待用户手动操作。
+- 防线：Runtime 故障注入确认正式解读和追问不创建总时限；Provider 故障注入确认正文读取超时返回中文 `AI_TIMEOUT` 且只调用一次。
+- 不再适用：桌面正式生成具备可靠的流活动、服务端任务状态或幂等取消能力，可以按实际停滞而非累计时长终止时。
+- 证据：`electron/services/ai-runtime.cjs`、`electron/services/ai-provider.cjs` 及对应回归测试。
+- 相关 Note：[桌面正式生成不设置固定总时限](../../.agents/notes/implemented/bug-fix/2026-09-04-desktop-ai-total-timeout.md)。
 
 ### LES-20260904-formal-generation-uncapped
 

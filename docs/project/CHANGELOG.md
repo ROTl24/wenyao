@@ -12,6 +12,16 @@ last_reviewed: 2026-09-04
 
 ## Entries
 
+### CHG-20260904-desktop-formal-generation-deadline
+
+- 日期：2026-09-04
+- 结果：Electron 正式解读和追问不再使用 180 秒应用总时限；模型探测、向量化和重排仍使用有限时限。Provider 对连接和正文读取阶段的中止统一返回中文 `AI_TIMEOUT`，不会自动重试。
+- 原因：移除正式输出 Token 上限后，DeepSeek 长推理仍被 Electron Runtime 在 180 秒处主动中止；正文读取阶段的异常没有经过超时归类，界面直接显示底层英文错误。
+- 验证：故障注入回归先稳定复现 `The operation was aborted due to timeout`，修复后确认正式解读与追问均不创建固定总时限；正文读取超时只发起一次请求并返回中文操作建议。266 项 Renderer 测试、144 项 Electron 测试、类型构建、Renderer 构建、PWA 静态产物、Windows 安装包与发布结构校验通过。
+- Git：实现、测试与知识记录位于同一本地提交，未推送或部署。安装后运行时复核期间，账本新增一次查询向量化和一次重排，未新增生成调用；调用图没有应用启动自动执行正式分析的路径，因此这两次检索不作为修复验收证据。
+- Agent Note：[桌面正式生成不设置固定总时限](../../.agents/notes/implemented/bug-fix/2026-09-04-desktop-ai-total-timeout.md)。
+- 文档影响：PROJECT、PROJECT_CONTEXT、CHANGELOG、DECISIONS、LESSONS 与新增桌面正式生成 Agent Note。
+
 ### CHG-20260904-formal-generation-uncapped
 
 - 日期：2026-09-04

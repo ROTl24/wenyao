@@ -45,6 +45,7 @@ function normalizeUsage(value) {
 
 async function requestJson({ url, apiKey, method = 'POST', body, signal, fetchImpl = fetch, label }) {
   let response;
+  let text;
   try {
     response = await fetchImpl(url, {
       method,
@@ -56,11 +57,14 @@ async function requestJson({ url, apiKey, method = 'POST', body, signal, fetchIm
       ...(body === undefined ? {} : { body: JSON.stringify(body) }),
       signal,
     });
+    text = await response.text();
   } catch (error) {
     if (error?.name === 'AbortError' || error?.name === 'TimeoutError') {
-      error.publicCode = 'AI_TIMEOUT';
-      error.publicNextAction = '请检查网络后重试；正式解读超时不会自动重复扣费。';
-      throw error;
+      const timeoutError = new Error(`${label || 'AI 服务'}请求超时`);
+      timeoutError.cause = error;
+      timeoutError.publicCode = 'AI_TIMEOUT';
+      timeoutError.publicNextAction = '请先到服务商控制台确认本次用量，再决定是否手动重试；问爻不会自动重试。';
+      throw timeoutError;
     }
     const networkError = new Error(`${label || 'AI 服务'}网络连接失败`);
     networkError.cause = error;
@@ -68,7 +72,6 @@ async function requestJson({ url, apiKey, method = 'POST', body, signal, fetchIm
     networkError.publicNextAction = '请检查网络、代理和服务地址后重试。';
     throw networkError;
   }
-  const text = await response.text();
   if (!response.ok) throw providerError(response, text, label);
   try { return text ? JSON.parse(text) : {}; }
   catch {

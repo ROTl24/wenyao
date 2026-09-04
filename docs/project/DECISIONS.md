@@ -18,6 +18,7 @@ last_reviewed: 2026-09-04
 | `ADR-20260827-desktop-update-release-contract` | `accepted` | 桌面稳定版本与 Windows 在线更新发布契约 | [Agent Note](../../.agents/notes/implemented/architecture/2026-08-27-desktop-update-release-contract.md) | 无 |
 | `ADR-20260830-mit-license` | `accepted` | 问爻原创源代码使用 MIT License | [Agent Note](../../.agents/notes/implemented/process/2026-08-30-mit-license.md) | 取代无明确许可证的源码公开状态 |
 | `ADR-20260831-plate-copy-return-direction` | `accepted` | 成卦变化与回头作用使用显式方向契约 | [Agent Note](../../.agents/notes/implemented/bug-fix/2026-08-31-plate-copy-return-direction.md) | 取代无标签箭头表达回头关系 |
+| `ADR-20260904-formal-generation-deadline` | `accepted` | 正式生成按运行时可观测活动设置时限 | [Agent Note](../../.agents/notes/implemented/bug-fix/2026-09-04-desktop-ai-total-timeout.md) | 取代 Electron 正式生成固定 180 秒总时限 |
 
 ## Active Decisions
 
@@ -92,3 +93,12 @@ last_reviewed: 2026-09-04
 - 权威 Note：[排盘复制显式区分成卦变化与回头作用](../../.agents/notes/implemented/bug-fix/2026-08-31-plate-copy-return-direction.md)。
 - 重新考虑：回头作用的领域模型、六合六冲范围或外部复制 Schema 发生变化时。
 - Supersedes：使用无标签箭头同时表达成卦变化和反向回头作用的复制表示。
+
+### ADR-20260904-formal-generation-deadline
+
+- Status: `accepted`
+- Source: `user-confirmed` / `code-verified`
+- 主题：Electron 正式解读和追问不设置应用侧固定总时限；PWA 流式生成使用首段与流中空闲时限，短时探测和检索保持有限时限，远程失败不自动重试。
+- 权威 Note：[桌面正式生成不设置固定总时限](../../.agents/notes/implemented/bug-fix/2026-09-04-desktop-ai-total-timeout.md)。
+- 重新考虑：桌面生成协议能提供可靠的流活动、任务状态或幂等取消能力时。
+- Supersedes：Electron 正式生成固定 180 秒总时限。

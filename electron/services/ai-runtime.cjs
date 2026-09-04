@@ -899,7 +899,6 @@ class AIRuntime {
     const report = await analyzeCloud({
       ...payload,
       chat: (request) => generationClient.chat(request),
-      signal: AbortSignal.timeout(180000),
     });
     report.provider = Object.fromEntries(CAPABILITIES.filter((capability) => resolved[capability]).map((capability) => [capability, {
       providerId: resolved[capability].connection.providerId,
@@ -915,7 +914,6 @@ class AIRuntime {
     const answer = await followUpCloud({
       ...payload,
       chat: (request) => generationClient.chat(request),
-      signal: AbortSignal.timeout(180000),
     });
     answer.provider = Object.fromEntries(CAPABILITIES.filter((capability) => resolved[capability]).map((capability) => [capability, {
       providerId: resolved[capability].connection.providerId,

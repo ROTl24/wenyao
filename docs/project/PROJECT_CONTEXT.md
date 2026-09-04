@@ -24,6 +24,7 @@ last_reviewed: 2026-09-04
 - 自定义 OpenAI 兼容服务只填写裸域名时默认使用 `/v1`；显式 Base Path 或完整能力地址具有最高优先级，地址失败不会触发自动重试。
 - OpenAI Chat 生成能力只把最终可展示文本作为成功；内部推理、工具调用和拒答不能替代 `message.content`，最小测试失败不会自动重试。
 - 正式 AI 解读与追问不发送应用定义的输入 Token 限制、`max_tokens` 或 `max_completion_tokens`；最小连接测试仍使用显式有限预算，服务商模型自身的上下文窗口和输出上限继续生效。
+- Electron 正式 AI 解读与追问不设置应用侧固定总时限；PWA 正式生成按首段和流中活动判断超时。模型探测、向量化和重排继续使用短请求时限，所有远程失败均只报告一次且不自动重试。
 - PWA 模型目录的确认域名由规范化后的目录地址确定，不得依赖尚未发现的模型名称或绕过 HTTPS 公网边界。
 - 同一 AI 能力的规范化接口必须在最小测试、方案激活与实际调用阶段按同一契约解释；独立 `url` 与 `baseUrl + path` 都是有效端点表示，没有任一显式端点时失败关闭。
 - Windows 正式版本通过 GitHub `latest` 稳定通道检查更新；正式 Release 必须同时提供与版本一致的 `latest.yml`、NSIS 安装包和 blockmap，下载仍由用户确认触发。
@@ -49,7 +50,7 @@ last_reviewed: 2026-09-04
 |---|---|---|---|
 | GitHub `ROTl24/wenyao` | 源码、Actions、桌面 Release | `config/public-links.json`、`.github/workflows/release-desktop.yml` | `external-verified`，`v0.5.6` 稳定 Release、四个发布任务与五项资产已核验 |
 | Cloudflare Pages | PWA 公开托管 | README 中的 `https://wenyao-9pu.pages.dev` | `external-verified`，生产主 JS、CSS、AI Worker、manifest 与 `0.5.6` 本地构建摘要一致，Service Worker 预缓存同一资源集合 |
-| OpenAI 兼容 AI 服务 | 生成、向量和重排 | `config/ai-providers.json`、Provider 实现 | `code-verified`，本次任务不调用 |
+| OpenAI 兼容 AI 服务 | 生成、向量和重排 | `config/ai-providers.json`、Provider 实现 | `code-verified`，真实调用由用户操作触发且失败不自动重试 |
 | 可选 Cloudflare Worker/D1 | 匿名反馈聚合 | `workers/feedback` | `code-verified`，部署状态未验证 |
 
 ## Environment Constraints
@@ -68,6 +69,7 @@ last_reviewed: 2026-09-04
 - 模型目录发生在模型选择之前；域名确认必须验证目录请求目标，不能复用要求模型名称非空的完整能力连接作为前置条件。
 - 阿里云业务空间重排完整地址会被规范化为 Base URL 和相对路径；内部没有独立 `url` 字段不代表业务空间 ID 缺失。
 - 正式请求省略 Token 上限只表示问爻不主动截断；服务商或具体模型仍可能因上下文窗口、账户策略或自身输出上限返回 `length`，并且更长输出会增加费用和等待时间。
+- 桌面正式生成没有应用侧固定总时限，只表示问爻不在仍可能完成时按累计时长中止；服务商和网络仍可终止请求，关闭应用也不能证明服务商已经取消处理。
 - 检索回归指标证明召回链稳定，不证明现实预测准确率。
 - 桌面端允许导入自有古籍，PWA 只浏览和检索内置古籍。
 
@@ -79,7 +81,7 @@ last_reviewed: 2026-09-04
 | 语料正文与分类 | `resources/corpus.json`、`resources/knowledge-index.json` | `code-verified` | 2026-08-27 |
 | 运行时能力边界 | `src/lib/desktop.ts`、`electron/main.cjs` | `code-verified` | 2026-08-27 |
 | 自定义 AI 地址规范化 | `shared/ai-setup-core.cjs` | `code-verified` | 2026-08-27 |
-| OpenAI Chat 响应与生成预算 | `shared/chat-completion-core.cjs`、`electron/services/ai-provider.cjs`、`src/lib/webAI/provider.ts` | `user-confirmed` / `code-verified` | 2026-09-04 |
+| OpenAI Chat 响应、生成预算与时限 | `shared/chat-completion-core.cjs`、`electron/services/ai-runtime.cjs`、`electron/services/ai-provider.cjs`、`src/lib/webAI/provider.ts` | `user-confirmed` / `code-verified` | 2026-09-04 |
 | 构建与测试入口 | `package.json`、`vite.config.ts` | `code-verified` | 2026-08-27 |
 | 桌面发布流程 | `.github/workflows/release-desktop.yml` | `code-verified` | 2026-08-27 |
 | Windows 在线更新 | `electron/services/update-manager.cjs`、`scripts/verify-release.mjs` | `code-verified` | 2026-08-27 |

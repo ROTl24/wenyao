@@ -4,6 +4,7 @@ const {
   createProviderClient,
   discoverModels,
   providerError,
+  requestJson,
   validateBaseUrl,
 } = require('./ai-provider.cjs');
 
@@ -150,6 +151,29 @@ test('provider errors are categorized without any automatic retry helper', () =>
   const auth = providerError({ status: 401 }, 'invalid key', '测试服务');
   assert.equal(unavailable.publicCode, 'AI_PROVIDER_UNAVAILABLE');
   assert.equal(auth.publicCode, 'AI_AUTH_FAILED');
+});
+
+test('response body timeout is localized and never retried automatically', async () => {
+  let requests = 0;
+  await assert.rejects(
+    () => requestJson({
+      url: 'https://api.deepseek.com/chat/completions',
+      label: 'DeepSeek 官方',
+      fetchImpl: async () => {
+        requests += 1;
+        return {
+          ok: true,
+          status: 200,
+          text: async () => { throw new DOMException('The operation was aborted due to timeout', 'TimeoutError'); },
+        };
+      },
+    }),
+    (error) => error.publicCode === 'AI_TIMEOUT'
+      && error.message === 'DeepSeek 官方请求超时'
+      && /确认本次用量/.test(error.publicNextAction)
+      && /不会自动重试/.test(error.publicNextAction),
+  );
+  assert.equal(requests, 1);
 });
 
 test('custom provider URL requires HTTPS except localhost', () => {

@@ -65,6 +65,7 @@ function mockProvider() {
   const calls = { generation: 0, embedding: 0, rerank: 0, models: 0 };
   const failures = { generation: false, embedding: false, rerank: false };
   const fetchImpl = async (url, options = {}) => {
+    if (options.signal?.aborted) throw options.signal.reason;
     const target = String(url);
     if (target.includes('/models')) {
       calls.models += 1;
@@ -140,6 +141,41 @@ test('仅主模型使用 BM25 检索并能生成报告，不调用向量或重�
   assert.equal(report.markdown, '## 模拟解读');
   assert.deepEqual(Object.keys(report.provider), ['generation']);
   assert.equal(calls.generation, 2);
+});
+
+test('正式解读和追问不设置固定总超时', async () => {
+  const { runtime } = runtimeFixture();
+  await configure(runtime, ['generation']);
+  const timeoutCalls = [];
+  const originalTimeout = AbortSignal.timeout;
+  AbortSignal.timeout = (milliseconds) => {
+    timeoutCalls.push(milliseconds);
+    const controller = new AbortController();
+    controller.abort(new DOMException('The operation was aborted due to timeout', 'TimeoutError'));
+    return controller.signal;
+  };
+
+  try {
+    const report = await runtime.analyze({
+      question: '事业是否顺利', category: 'career', castingMethod: 'manual', castingBasis: {},
+      plate: studyPlate(), evidence: [], retrievalDiagnostics: {},
+    });
+    assert.equal(report.markdown, '## 模拟解读');
+
+    const answer = await runtime.followUp({
+      question: '再说明应期',
+      session: {
+        question: '事业是否顺利', category: 'career', castingMethod: 'manual', castingBasis: {},
+        plate: studyPlate(), analysis: report, messages: [],
+      },
+      evidence: [],
+    });
+    assert.equal(answer.content, '## 模拟解读');
+  } finally {
+    AbortSignal.timeout = originalTimeout;
+  }
+
+  assert.deepEqual(timeoutCalls, []);
 });
 
 test('主模型加向量采用融合检索且不调用重排', async () => {
