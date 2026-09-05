@@ -1,5 +1,6 @@
 const { Solar } = require('lunar-javascript');
 const { sanitizeCastingBasis } = require('./ipc-payload.cjs');
+const { sanitizeSessionReview, sanitizeGenerationDraft } = require('../../shared/session-records.cjs');
 
 const CASTING_METHODS = new Set(['digital', 'physical', 'random', 'time']);
 const LINE_VALUES = new Set([6, 7, 8, 9]);
@@ -291,7 +292,10 @@ function validateSessionForSave(input, existing = null) {
     ))) throw new TypeError('时间起卦爻值与推导依据不一致');
   }
   if (input.status === 'complete' && !isRecord(input.plate)) throw new TypeError('完整会话缺少排盘');
-  return structuredClone(input);
+  const safe = structuredClone(input);
+  if (input.generationDraft !== undefined) safe.generationDraft = sanitizeGenerationDraft(input.generationDraft);
+  if (input.review !== undefined) safe.review = sanitizeSessionReview(input.review);
+  return safe;
 }
 
 module.exports = {

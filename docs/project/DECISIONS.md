@@ -1,7 +1,7 @@
 ---
 project_docs_schema: 1
 document_type: decisions
-last_reviewed: 2026-09-04
+last_reviewed: 2026-09-06
 ---
 
 # 项目决策
@@ -10,6 +10,10 @@ last_reviewed: 2026-09-04
 
 | 决策 | 状态 | 主题 | 权威 Note | 替代关系 |
 |---|---|---|---|---|
+| `ADR-20260906-generation-drafts-tasks` | `accepted` | 生成任务、停止与独立草稿 | [Agent Note](../../.agents/notes/implemented/feature/2026-09-06-generation-drafts-tasks.md) | 无 |
+| `ADR-20260906-offline-report-evaluation` | `accepted` | 离线诊断与人工报告评分分开 | [Agent Note](../../.agents/notes/implemented/process/2026-09-06-offline-report-evaluation.md) | 无 |
+| `ADR-20260906-session-archive-review` | `accepted` | 版本化占簿备份、整批恢复与独立复盘 | [Agent Note](../../.agents/notes/implemented/feature/2026-09-06-session-archive-review.md) | 无 |
+| `ADR-20260906-result-reading-onboarding` | `accepted` | 原文结论节选、新手入口与弹窗焦点管理 | [Agent Note](../../.agents/notes/implemented/feature/2026-09-06-result-reading-onboarding.md) | 无 |
 | `ADR-20260826-structured-plate-copy` | `accepted` | 三种排盘复制格式共用结构化事实文档 | [Agent Note](../../.agents/notes/implemented/feature/2026-08-26-structured-plate-copy.md) | 无 |
 | `ADR-20260827-shared-corpus-knowledge` | `accepted` | 跨运行时内置古籍分类装配 | [Agent Note](../../.agents/notes/implemented/bug-fix/2026-08-27-shared-corpus-knowledge.md) | 无 |
 | `ADR-20260827-openai-base-url-default` | `accepted` | 自定义 OpenAI 兼容服务裸域名默认使用 `/v1` | [Agent Note](../../.agents/notes/implemented/bug-fix/2026-08-27-openai-base-url-default.md) | 无 |
@@ -18,9 +22,45 @@ last_reviewed: 2026-09-04
 | `ADR-20260827-desktop-update-release-contract` | `accepted` | 桌面稳定版本与 Windows 在线更新发布契约 | [Agent Note](../../.agents/notes/implemented/architecture/2026-08-27-desktop-update-release-contract.md) | 无 |
 | `ADR-20260830-mit-license` | `accepted` | 问爻原创源代码使用 MIT License | [Agent Note](../../.agents/notes/implemented/process/2026-08-30-mit-license.md) | 取代无明确许可证的源码公开状态 |
 | `ADR-20260831-plate-copy-return-direction` | `accepted` | 成卦变化与回头作用使用显式方向契约 | [Agent Note](../../.agents/notes/implemented/bug-fix/2026-08-31-plate-copy-return-direction.md) | 取代无标签箭头表达回头关系 |
-| `ADR-20260904-formal-generation-deadline` | `accepted` | 正式生成按运行时可观测活动设置时限 | [Agent Note](../../.agents/notes/implemented/bug-fix/2026-09-04-desktop-ai-total-timeout.md) | 取代 Electron 正式生成固定 180 秒总时限 |
+| `ADR-20260904-formal-generation-deadline` | `accepted` | 内置正式生成按 SSE 活动设置时限并呈现阶段 | [Agent Note](../../.agents/notes/implemented/bug-fix/2026-09-04-desktop-ai-total-timeout.md) | 取代 Electron 正式生成固定 180 秒总时限与静态等待状态 |
 
 ## Active Decisions
+
+### ADR-20260906-generation-drafts-tasks
+
+- Status: `accepted`
+- Source: `user-confirmed` / `code-verified`
+- 主题：应用内任务支持逐段阅读与停止，未完成草稿及证据独立保存，迟到结果不能覆盖停止状态。
+- 权威 Note：[生成任务与草稿](../../.agents/notes/implemented/feature/2026-09-06-generation-drafts-tasks.md)。
+- 重新考虑：支持应用关闭后的任务恢复、跨实例共享或服务商任务取消接口时。
+- Supersedes：无，延续既有正式调用时限与单次请求契约。
+
+### ADR-20260906-offline-report-evaluation
+
+- Status: `accepted`
+- Source: `user-confirmed` / `code-verified`
+- 主题：离线自动诊断结构与引用，人工评分核对语义，并绑定报告、排盘和证据身份。
+- 权威 Note：[离线报告评测](../../.agents/notes/implemented/process/2026-09-06-offline-report-evaluation.md)。
+- 重新考虑：报告格式、评分维度或固定采样规范改变时。
+- Supersedes：无。
+
+### ADR-20260906-session-archive-review
+
+- Status: `accepted`
+- Source: `user-confirmed` / `code-verified`
+- 主题：备份仅承载占簿记录，整批校验后一次写入；独立复盘随记录保存并与异步报告合并。
+- 权威 Note：[版本化备份与独立复盘](../../.agents/notes/implemented/feature/2026-09-06-session-archive-review.md)。
+- 重新考虑：需要跨端云同步、大规模分块存储或新的备份版本时。
+- Supersedes：无。
+
+### ADR-20260906-result-reading-onboarding
+
+- Status: `accepted`
+- Source: `user-confirmed` / `code-verified`
+- 主题：节选完整报告原文并提供定位，明确检索阶段，统一弹窗焦点。
+- 权威 Note：[结果阅读与操作状态](../../.agents/notes/implemented/feature/2026-09-06-result-reading-onboarding.md)。
+- 重新考虑：正式报告章节契约或 UI 容器模型变化时。
+- Supersedes：无。
 
 ### ADR-20260905-ai-configuration-identity
 
@@ -107,7 +147,7 @@ last_reviewed: 2026-09-04
 
 - Status: `accepted`
 - Source: `user-confirmed` / `code-verified`
-- 主题：Electron 正式解读和追问不设置应用侧固定总时限；PWA 流式生成使用首段与流中空闲时限，短时探测和检索保持有限时限，远程失败不自动重试。
-- 权威 Note：[桌面正式生成不设置固定总时限](../../.agents/notes/implemented/bug-fix/2026-09-04-desktop-ai-total-timeout.md)。
-- 重新考虑：桌面生成协议能提供可靠的流活动、任务状态或幂等取消能力时。
+- 主题：Electron 内置生成服务与 PWA 使用单次 SSE 请求，以首段和流中空闲时限识别停滞，持续活跃流没有固定总时限；桌面结果页显示阶段与累计等待时间，自定义 JSON 服务保留原协议，远程失败不自动重试。
+- 权威 Note：[桌面正式生成按可观测流活动管理等待](../../.agents/notes/implemented/bug-fix/2026-09-04-desktop-ai-total-timeout.md)。
+- 重新考虑：自定义服务形成可持久化的 SSE 能力声明，或服务商提供可验证的任务状态与幂等取消能力时。
 - Supersedes：Electron 正式生成固定 180 秒总时限。

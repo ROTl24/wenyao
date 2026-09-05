@@ -1,6 +1,6 @@
 {
   "name": "liuyao-divination",
-  "version": "0.5.6",
+  "version": "0.5.7",
   "private": true,
   "license": "MIT",
   "author": "WenYao",
@@ -17,6 +17,7 @@
     "build:classics": "node scripts/build-classics.mjs",
     "build:corpus": "node scripts/build-corpus.mjs",
     "build:knowledge": "node scripts/build-knowledge.mjs",
+    "eval:reports": "node scripts/evaluate-reports.mjs",
     "eval:retrieval": "node scripts/evaluate-retrieval.cjs",
     "build:vectors": "node scripts/build-vectors.cjs",
     "verify:models": "node scripts/verify-stack.cjs",

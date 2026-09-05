@@ -51,9 +51,16 @@ const UPDATE_STATUSES = new Set([
   'error',
   'unsupported',
 ]);
+const ANALYSIS_PROGRESS_STAGES = new Set(['connected', 'reasoning', 'writing']);
+let analysisRequestSequence = 0;
 
 function safeText(value, fallback = '', maxLength = 200) {
   return typeof value === 'string' ? value.slice(0, maxLength) : fallback;
+}
+
+function sanitizeAnalysisProgress(value) {
+  if (!value || typeof value !== 'object' || !ANALYSIS_PROGRESS_STAGES.has(value.stage)) return null;
+  return { stage: value.stage, ...(typeof value.delta === 'string' ? { delta: value.delta } : {}) };
 }
 
 function sanitizeUpdateState(value) {
@@ -146,6 +153,8 @@ function sanitizeRendererSession(value) {
     session.castingBasis = sanitizeCastingBasis(value.castingBasis);
     if (Array.isArray(value.lines)) session.lines = value.lines.map(sanitizeLine);
     if (isRecord(value.currentLine)) session.currentLine = sanitizeCurrentLine(value.currentLine);
+    if (Object.hasOwn(value, 'generationDraft')) session.generationDraft = value.generationDraft === null ? null : pickOwn(value.generationDraft, ['requestId', 'kind', 'status', 'content', 'question', 'updatedAt', 'evidenceSnapshot']);
+    if (Object.hasOwn(value, 'review')) session.review = pickOwn(value.review, ['status', 'observedAt', 'note', 'tags', 'updatedAt']);
   }
   return session;
 }
@@ -194,6 +203,10 @@ contextBridge.exposeInMainWorld('wenyao', {
     get: (id) => ipcRenderer.invoke('sessions:get', id),
     save: (session) => ipcRenderer.invoke('sessions:save', sanitizeRendererSession(session)),
     delete: (id) => ipcRenderer.invoke('sessions:delete', id),
+    import: (payload) => ipcRenderer.invoke('sessions:import', {
+      sessions: Array.isArray(payload?.sessions) ? payload.sessions.map(sanitizeRendererSession) : null,
+      resolutions: payload?.resolutions,
+    }),
   },
   feedback: {
     getState: () => ipcRenderer.invoke('feedback:get-state'),
@@ -259,7 +272,21 @@ contextBridge.exposeInMainWorld('wenyao', {
     search: (payload) => ipcRenderer.invoke('retrieval:search', payload),
   },
   ai: {
-    analyze: (payload) => ipcRenderer.invoke('ai:analyze', payload),
-    followUp: (payload) => ipcRenderer.invoke('ai:follow-up', payload),
+    cancel: (requestId) => ipcRenderer.invoke('ai:cancel', safeText(requestId, '', 128)),
+    analyze: (payload, onProgress) => invokeGeneration('ai:analyze', payload, onProgress),
+    followUp: (payload, onProgress) => invokeGeneration('ai:follow-up', payload, onProgress),
   },
 });
+
+function invokeGeneration(channel, payload, onProgress) {
+  const requestId = payload?.requestId || `${Date.now()}-${++analysisRequestSequence}`;
+  const subscription = (_event, event) => {
+    if (event?.requestId !== requestId) return;
+    const progress = sanitizeAnalysisProgress(event);
+    if (!progress) return;
+    try { onProgress?.(progress); } catch {}
+  };
+  ipcRenderer.on('ai:analysis-progress', subscription);
+  return ipcRenderer.invoke(channel, { ...payload, requestId })
+    .finally(() => ipcRenderer.removeListener('ai:analysis-progress', subscription));
+}

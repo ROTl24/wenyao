@@ -1,7 +1,7 @@
 ---
 project_docs_schema: 1
 document_type: lessons
-last_reviewed: 2026-09-04
+last_reviewed: 2026-09-06
 ---
 
 # 项目教训
@@ -10,6 +10,8 @@ last_reviewed: 2026-09-04
 
 | 教训 | 状态 | 适用范围 | 摘要 |
 |---|---|---|---|
+| `LES-20260906-partial-output` | `active` | 正式生成完成态 | 出现正文不代表完成，输出额度截断和停止必须保留为草稿 |
+| `LES-20260906-evidence-state` | `active` | 结果页检索状态 | 空数组不能证明检索已经完成，阶段应独立建模 |
 | `LES-20260827-corpus-metadata-parity` | `active` | Electron、PWA、Worker 的内置语料边界 | 共享算法不等于共享输入语义，分类元数据必须在所有运行时统一装配 |
 | `LES-20260827-openai-html-response` | `active` | 自定义 AI Base URL 与能力接口 | HTTP 200 的管理页面 HTML 仍是错误接口，裸域名必须在请求前规范化 |
 | `LES-20260827-chat-visible-output` | `active` | OpenAI Chat 生成模型与最小测试 | HTTP 200 和推理输出不等于可展示正文，探测预算与空正文原因必须独立验证 |
@@ -19,23 +21,47 @@ last_reviewed: 2026-09-04
 | `LES-20260831-paid-batch-recovery` | `active` | Electron、PWA 的远程向量建库 | 可续建不等于可盲目重试，失败恢复必须同时约束完整批次断点、服务状态验证与用户显式动作 |
 | `LES-20260901-web-ai-terminal-cleanup` | `active` | PWA OpenAI Chat 流式生成 | 协议完成态不能被底层流清理异常覆盖 |
 | `LES-20260904-rerank-endpoint-parity` | `active` | 阿里云重排测试、激活与调用 | 同一规范化接口必须在所有阶段按同一契约解释 |
-| `LES-20260904-desktop-generation-timeout` | `active` | Electron OpenAI Chat 正式解读与追问 | 固定总时限不能区分长推理与停滞连接，正文读取异常必须进入同一错误边界 |
+| `LES-20260904-desktop-generation-timeout` | `active` | Electron OpenAI Chat 正式解读与追问 | 活跃长流不能按累计时长中止，静态等待也不能证明请求已经卡死 |
 
 ## Active Lessons
+
+### LES-20260906-partial-output
+
+- Status: `active`
+- Source: `code-verified`
+- 适用范围：OpenAI Chat 正文检查、应用任务完成态与草稿保存。
+- 症状：响应已有正文时，即便 finish_reason 为 length，也可能作为完整报告保存；停止后的迟到成功也可能覆盖用户选择。
+- 已验证根因：共享正文检查先判断 content 非空，再检查输出结束原因；生成完成与停止没有同一请求生命周期约束。
+- 正确规则：先排除输出额度截断；已接受的停止在请求结算前保持权威，失败正文只保存为草稿。
+- 防线：桌面与 PWA Provider 截断反例、共享生命周期迟到成功反例、App 草稿与本机保存重试回归。
+- 不再适用：服务商协议提供独立可验证的结果提交与幂等取消语义时。
+- 相关 Note：[生成任务与草稿](../../.agents/notes/implemented/feature/2026-09-06-generation-drafts-tasks.md)。
+
+### LES-20260906-evidence-state
+
+- Status: `active`
+- Source: `code-verified`
+- 适用范围：结果页、未配置 AI 和没有证据快照的历史报告。
+- 症状：尚未开始检索时，界面显示知识库没有找到足够证据。
+- 已验证根因：调用在 AI 未就绪时提前返回，界面却只根据空数组推断无命中。
+- 正确规则：记录检索阶段，只有成功完成的空结果才表示无命中；旧报告缺快照不推断当时检索情况。
+- 防线：Renderer 分别覆盖 idle、loading、empty、error；本地浏览器检查未配置入口。
+- 重新考虑：检索与报告生成完全解耦为独立任务时。
+- 相关 Note：[结果阅读与操作状态](../../.agents/notes/implemented/feature/2026-09-06-result-reading-onboarding.md)。
 
 ### LES-20260904-desktop-generation-timeout
 
 - Status: `active`
 - Source: `user-confirmed` / `code-verified`
 - 适用范围：Electron OpenAI Chat 正式解读、追问、Runtime 时限和 Provider 响应读取。
-- 症状：DeepSeek 正式解读在等待约 180 秒后显示 `The operation was aborted due to timeout`，已保存的排盘没有生成报告。
-- 错误方向：继续提高固定时限、恢复正式输出 Token 上限、关闭思考或自动重试；这些做法不能区分长推理和停滞连接，还可能截断正文、改变模型行为或重复计费。
-- 已验证根因：Electron Runtime 为正式解读和追问固定创建 180 秒 `AbortSignal`；Provider 只在建立请求阶段归类超时，正文读取阶段的中止会直接暴露底层英文异常。
-- 正确规则：桌面正式生成不设置应用侧固定总时限；探测、向量和重排按短请求目标保留时限。连接与正文读取共享同一错误归类边界，失败只报告一次并等待用户手动操作。
-- 防线：Runtime 故障注入确认正式解读和追问不创建总时限；Provider 故障注入确认正文读取超时返回中文 `AI_TIMEOUT` 且只调用一次。
-- 不再适用：桌面正式生成具备可靠的流活动、服务端任务状态或幂等取消能力，可以按实际停滞而非累计时长终止时。
+- 症状：移除 180 秒总时限后，DeepSeek 正式解读在静态转圈界面停留约 4 分 28 秒，用户无法判断请求仍在推理；该请求最终生成 17990 输出 Token 并自动保存，并非死锁。
+- 错误方向：继续提高固定时限、只修改转圈文案、恢复正式输出 Token 上限、关闭思考或自动重试；这些做法不能同时证明请求活动并安全处理停滞，还可能截断正文、改变模型行为或重复计费。
+- 已验证根因：Electron 内置生成服务读取完整 JSON，模型完成前没有流活动信号；结果页也没有累计等待时间。此前固定总时限还会把合法长推理误判为超时。
+- 正确规则：已知支持 SSE 的内置服务使用单次流式请求，以 3 分钟首段和 90 秒流中空闲作为停滞边界，持续活跃流没有固定总时限；界面只显示阶段和耗时，不展示内部推理。自定义 JSON 服务不强制改变协议。
+- 防线：Provider 覆盖长活跃流、停滞流、未完成中断、正文聚合、用量和单次请求；Renderer 与应用集成覆盖等待计时和阶段传递。
+- 不再适用：生成协议不再提供 SSE，或服务商提供更可靠的任务状态与幂等取消能力时。
 - 证据：`electron/services/ai-runtime.cjs`、`electron/services/ai-provider.cjs` 及对应回归测试。
-- 相关 Note：[桌面正式生成不设置固定总时限](../../.agents/notes/implemented/bug-fix/2026-09-04-desktop-ai-total-timeout.md)。
+- 相关 Note：[桌面正式生成按可观测流活动管理等待](../../.agents/notes/implemented/bug-fix/2026-09-04-desktop-ai-total-timeout.md)。
 
 ### LES-20260904-formal-generation-uncapped
 

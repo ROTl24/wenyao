@@ -4,6 +4,7 @@ import rawCorpus from '../../../resources/corpus.json';
 import vectorMetadata from '../../../resources/corpus-vectors.json';
 import corpusManifest from '../../../resources/corpus-manifest.json';
 import knowledgeIndex from '../../../resources/knowledge-index.json';
+import generationCore from '../../../shared/generation-requests.cjs';
 import aiCore from '../../../electron/services/ai.cjs';
 import retrievalCore from '../../../shared/retrieval-core.cjs';
 import setupCore from '../../../shared/ai-setup-core.cjs';
@@ -15,6 +16,7 @@ import { createWebProvider, discoverWebModels } from './provider';
 import type { TestCapabilityPayload, WebAIRequest, WebAIResponse, WebAIStatusEvent } from './protocol';
 import { assertConfirmedOrigins, toDesktopError, usesBundledVectorPack, validateWebConnection, validateWebModelCatalog, type WebSecurityConfirmation, WebAIError } from './security';
 
+const generationRequests = generationCore.createGenerationRequests();
 const workerScope = self as unknown as DedicatedWorkerGlobalScope;
 const capabilities = ['generation', 'embedding', 'rerank'] as const;
 const { capabilityConnection, capabilityUrl, rankModels, generationProbeOptions, normalizeCapabilityLocation, normalizeApiKey } = setupCore as {
@@ -542,25 +544,30 @@ function providerSnapshot(active: ReturnType<typeof activePipeline>) {
   }));
 }
 
-async function analyze(payload: Parameters<DesktopApi['ai']['analyze']>[0]) {
-  return withPaidOperation('AI 解读', async () => {
+async function generate(kind: 'analyze' | 'followUp', payload: Parameters<DesktopApi['ai']['analyze']>[0] | Parameters<DesktopApi['ai']['followUp']>[0]) {
+  return withPaidOperation('AI 生成', async () => {
     try {
-      const active = activePipeline();
-      const report = await aiCore.analyzeCloud({ ...payload, chat: provider(active.connections.generation).chat });
-      report.provider = providerSnapshot(active);
-      return { ok: true, report };
-    } catch (error) { return { ok: false, error: toDesktopError(error, 'WEB_AI_ANALYSIS_FAILED') }; }
-  });
-}
-
-async function followUp(payload: Parameters<DesktopApi['ai']['followUp']>[0]) {
-  return withPaidOperation('AI 追问', async () => {
-    try {
-      const active = activePipeline();
-      const answer = await aiCore.followUpCloud({ ...payload, chat: provider(active.connections.generation).chat });
-      answer.provider = providerSnapshot(active);
-      return { ok: true, answer };
-    } catch (error) { return { ok: false, error: toDesktopError(error, 'WEB_AI_FOLLOW_UP_FAILED') }; }
+      const result = await generationRequests.run('worker', payload.requestId, async (signal: AbortSignal) => {
+        const active = activePipeline();
+        const client = provider(active.connections.generation);
+        const { requestId, ...input } = payload;
+        const chat = (request: Parameters<typeof client.chat>[0]) => client.chat({
+          ...request, signal,
+          onProgress: (progress) => {
+            if (requestId && !signal.aborted) workerScope.postMessage({ event: 'generation', requestId, progress });
+          },
+        });
+        const value = await (kind === 'analyze' ? aiCore.analyzeCloud : aiCore.followUpCloud)({ ...input, chat, signal });
+        value.provider = providerSnapshot(active);
+        return value;
+      });
+      return { ok: true, [kind === 'analyze' ? 'report' : 'answer']: result };
+    } catch (error) {
+      if ((error as { publicCode?: string })?.publicCode === 'AI_GENERATION_STOPPED') {
+        return { ok: false, error: { code: 'AI_GENERATION_STOPPED', message: (error as Error).message, dataSafe: true, nextAction: '服务商可能仍在处理或计费；问爻不会自动重发请求。' } };
+      }
+      return { ok: false, error: toDesktopError(error, 'WEB_AI_GENERATION_FAILED') };
+    }
   });
 }
 
@@ -605,6 +612,7 @@ function cancelSetup(): AIConfigStatus {
 }
 
 function clear(): void {
+  generationRequests.cancelOwner('worker');
   keys.clear(); confirmedOrigins.clear(); vectors = null; vectorCheckpoint = null; status = structuredClone(initialStatus); buildControl = null; emitStatus();
 }
 
@@ -623,8 +631,9 @@ workerScope.addEventListener('message', (event: MessageEvent<WebAIRequest>) => {
         case 'resumeBuild': value = await resumeBuild(); break;
         case 'cancelBuild': value = cancelBuild(); break;
         case 'search': value = await search(payload as Parameters<DesktopApi['retrieval']['search']>[0]); break;
-        case 'analyze': value = await analyze(payload as Parameters<DesktopApi['ai']['analyze']>[0]); break;
-        case 'followUp': value = await followUp(payload as Parameters<DesktopApi['ai']['followUp']>[0]); break;
+        case 'analyze': value = await generate('analyze', payload as Parameters<DesktopApi['ai']['analyze']>[0]); break;
+        case 'followUp': value = await generate('followUp', payload as Parameters<DesktopApi['ai']['followUp']>[0]); break;
+        case 'cancelGeneration': value = { stopped: generationRequests.cancel('worker', payload) }; break;
         case 'clear': clear(); value = true; break;
         default: throw new Error('未知的网页 AI 命令。');
       }

@@ -1,6 +1,8 @@
 const crypto = require('node:crypto');
 const fs = require('node:fs');
 const path = require('node:path');
+const { mergeSessionImport } = require('../../shared/session-records.cjs');
+const { sanitizeRendererSession } = require('./ipc-payload.cjs');
 const {
   migrateLegacySettings,
   normalizeAIState,
@@ -101,6 +103,15 @@ class JsonStore {
     this.state.sessions = this.state.sessions.filter((item) => item.id !== id);
     this.#write();
     return true;
+  }
+
+  importSessions(payload) {
+    const sessions = mergeSessionImport(this.state.sessions, payload, (session, current) => validateSessionForSave(sanitizeRendererSession(session), current));
+    const previous = this.state;
+    this.state = { ...this.state, sessions };
+    try { this.#write(); }
+    catch (error) { this.state = previous; throw error; }
+    return this.listSessions();
   }
 
   getRawAIState() {

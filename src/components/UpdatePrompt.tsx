@@ -1,5 +1,6 @@
 import { Download, RefreshCw, RotateCw, X } from 'lucide-react';
 import type { UpdateState } from '../types/desktop';
+import { useModalDialog } from '../lib/useModalDialog';
 
 export type PromptUpdateState = Extract<
   UpdateState,
@@ -20,11 +21,12 @@ export function UpdatePrompt({
   onDismiss,
 }: Props) {
   const version = state.availableVersion || '新版本';
+  const dialogRef = useModalDialog<HTMLElement>(onDismiss);
   const isDownloadError = state.status === 'error' && state.operation === 'download';
 
   return (
     <div className="update-overlay" role="presentation">
-      <section className="update-dialog" role="dialog" aria-modal="true" aria-labelledby="update-dialog-title">
+      <section ref={dialogRef} tabIndex={-1} className="update-dialog" role="dialog" aria-modal="true" aria-labelledby="update-dialog-title">
         <button className="update-dialog__close" type="button" aria-label="关闭更新提示" onClick={onDismiss}>
           <X size={18} />
         </button>

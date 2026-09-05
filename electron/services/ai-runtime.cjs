@@ -896,11 +896,12 @@ class AIRuntime {
   }
 
   async analyze(payload) {
+    const { onProgress, ...analysisPayload } = payload;
     const { resolved } = this.#activeRuntime();
     const generationClient = this.#client(resolved.generation.connection, resolved.generation.apiKey);
     const report = await analyzeCloud({
-      ...payload,
-      chat: (request) => generationClient.chat(request),
+      ...analysisPayload,
+      chat: (request) => generationClient.chat({ ...request, onProgress }),
     });
     report.provider = Object.fromEntries(CAPABILITIES.filter((capability) => resolved[capability]).map((capability) => [capability, {
       providerId: resolved[capability].connection.providerId,
@@ -911,11 +912,12 @@ class AIRuntime {
   }
 
   async followUp(payload) {
+    const { onProgress, ...followUpPayload } = payload;
     const { resolved } = this.#activeRuntime();
     const generationClient = this.#client(resolved.generation.connection, resolved.generation.apiKey);
     const answer = await followUpCloud({
-      ...payload,
-      chat: (request) => generationClient.chat(request),
+      ...followUpPayload,
+      chat: (request) => generationClient.chat({ ...request, onProgress }),
     });
     answer.provider = Object.fromEntries(CAPABILITIES.filter((capability) => resolved[capability]).map((capability) => [capability, {
       providerId: resolved[capability].connection.providerId,

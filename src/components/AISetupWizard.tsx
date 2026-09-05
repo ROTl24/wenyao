@@ -1,5 +1,6 @@
 import { ArrowLeft, Check, KeyRound, Link2, Pause, Play, Search, ShieldCheck, X } from 'lucide-react';
 import { useMemo, useState } from 'react';
+import { useModalDialog } from '../lib/useModalDialog';
 import setupCore from '../../shared/ai-setup-core.cjs';
 import { desktop } from '../lib/desktop';
 import { usesBundledVectorPack, validateWebConnection, validateWebModelCatalog } from '../lib/webAI/security';
@@ -69,6 +70,7 @@ export function AISetupWizard({ catalog, status, onStatus, onReady, onClose }: P
   const [step, setStep] = useState(status.draft?.indexTask ? 3 : 0);
   const [finished, setFinished] = useState(false);
   const [busy, setBusy] = useState(false);
+  const dialogRef = useModalDialog<HTMLElement>(onClose, busy);
   const [consent, setConsent] = useState(Boolean(status.consentAcceptedAt));
   const [bulkConsent, setBulkConsent] = useState(Boolean(status.draft?.bulkEmbeddingAccepted));
   const [notice, setNotice] = useState('');
@@ -227,7 +229,7 @@ export function AISetupWizard({ catalog, status, onStatus, onReady, onClose }: P
 
   return (
     <div className="ai-setup-overlay" role="presentation">
-      <section className="ai-setup-dialog" role="dialog" aria-modal="true" aria-labelledby="ai-setup-title">
+      <section ref={dialogRef} tabIndex={-1} className="ai-setup-dialog" role="dialog" aria-modal="true" aria-labelledby="ai-setup-title">
         <button className="ai-setup-close" type="button" disabled={busy} aria-label="关闭 AI 连接向导" onClick={onClose}><X /></button>
         <div className="ai-setup-steps" aria-label="配置步骤">
           {['主模型', '向量模型', '重排模型', '完成'].map((label, index) => <span key={label} className={index <= step ? 'is-active' : ''}>{index + 1}<small>{label}</small></span>)}
@@ -239,6 +241,7 @@ export function AISetupWizard({ catalog, status, onStatus, onReady, onClose }: P
             <h2 id="ai-setup-title">{labels[currentCapability]}{step ? '（可选）' : ''}</h2>
             <span>{descriptions[currentCapability]}</span>
           </header>
+          {step === 0 ? <p className="ai-quick-start">选择下方服务商，填入密钥并测试，即可使用主模型完成配置。检索增强可稍后设置。</p> : null}
 
           <div className="ai-capability-examples">
             {pageExamples.map((example) => (
@@ -252,6 +255,8 @@ export function AISetupWizard({ catalog, status, onStatus, onReady, onClose }: P
             <Link2 size={15} />沿用{step === 1 ? '主模型' : '向量模型'}的地址与密钥
           </button> : null}
 
+          <details className="ai-advanced-settings" key={currentCapability}>
+          <summary>自定义接口与高级设置</summary>
           <label className="ai-setup-field">API 调用地址
             <input value={form.apiUrl} onChange={(event) => updateForm(currentCapability, { apiUrl: event.target.value, models: [] })} onBlur={normalizeApiUrl} placeholder="https://api.example.com/v1" />
           </label>
@@ -262,6 +267,7 @@ export function AISetupWizard({ catalog, status, onStatus, onReady, onClose }: P
             </select>
           </label>
           <small className="ai-field-help">自动模式下，自定义服务仅填写域名时自动补全 /v1。非标准路径请选择“完整接口地址”。主模型需兼容 OpenAI Chat Completions 协议。</small>
+          </details>
           {location.displayUrl ? <small className="ai-field-help ai-endpoint-preview">实际调用地址：<code>{location.displayUrl}</code></small> : null}
           {location.error ? <p className="ai-setup-error">{location.error}</p> : null}
           <label className="ai-setup-field">API Key
@@ -292,7 +298,7 @@ export function AISetupWizard({ catalog, status, onStatus, onReady, onClose }: P
             {step === 1 ? <button type="button" disabled={busy} onClick={() => void complete(['generation'])}>跳过向量并完成</button> : null}
             {step === 2 ? <button type="button" disabled={busy} onClick={() => void complete(['generation', 'embedding'])}>跳过重排并完成</button> : null}
             <button type="button" disabled={busy || !canTest || !consent} onClick={() => void testCapability()}><KeyRound size={15} />{busy ? '测试中…' : testPassed ? '重新最小测试' : '最小测试'}</button>
-            {step === 0 ? <><button type="button" disabled={!testPassed} onClick={() => void complete(['generation'])}>仅用主模型并完成</button><button className="primary" type="button" disabled={!testPassed} onClick={() => { setNotice(''); setStep(1); }}>下一步</button></> : null}
+            {step === 0 ? <><button className="primary" type="button" disabled={!testPassed} onClick={() => void complete(['generation'])}>仅用主模型并完成</button><button type="button" disabled={!testPassed} onClick={() => { setNotice(''); setStep(1); }}>下一步</button></> : null}
             {step === 1 ? <button className="primary" type="button" disabled={!testPassed || (needsBulk && !bulkConsent)} onClick={() => { setNotice(''); setStep(2); }}>下一步</button> : null}
             {step === 2 ? <button className="primary" type="button" disabled={!testPassed} onClick={() => void complete(['generation', 'embedding', 'rerank'])}>完成配置</button> : null}
           </div>

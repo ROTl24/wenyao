@@ -58,6 +58,8 @@ function sanitizeRendererSession(value) {
     session.castingBasis = sanitizeCastingBasis(value.castingBasis);
     if (Array.isArray(value.lines)) session.lines = value.lines.map(sanitizeLine);
     if (isRecord(value.currentLine)) session.currentLine = sanitizeCurrentLine(value.currentLine);
+    if (value.generationDraft !== undefined) session.generationDraft = require('../../shared/session-records.cjs').sanitizeGenerationDraft(value.generationDraft);
+    if (value.review !== undefined) session.review = require('../../shared/session-records.cjs').sanitizeSessionReview(value.review);
   }
   return session;
 }

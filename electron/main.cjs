@@ -30,6 +30,7 @@ const runtimeProfile = createRuntimeProfile({
   isPackaged: app.isPackaged,
 });
 const rendererRuntimeArgument = runtimeProfileArgument(runtimeProfile);
+const ANALYSIS_PROGRESS_STAGES = new Set(['connected', 'reasoning', 'writing']);
 
 const oneTimeSiliconFlowKey = process.argv.includes('--configure-api-keys-env')
   ? String(process.env.WENYAO_SILICONFLOW_KEY || '')
@@ -177,6 +178,7 @@ function registerIpc() {
   ipcMain.handle('sessions:get', (_event, id) => store.getSession(id));
   ipcMain.handle('sessions:save', (_event, session) => store.saveSession(sanitizeRendererSession(session)));
   ipcMain.handle('sessions:delete', (_event, id) => store.deleteSession(id));
+  ipcMain.handle('sessions:import', (_event, payload) => store.importSessions(payload));
 
   ipcMain.handle('feedback:get-state', () => feedbackService.getState());
   ipcMain.handle('feedback:submit', (_event, payload) => feedbackService.submit(payload));
@@ -287,20 +289,32 @@ function registerIpc() {
   ipcMain.handle('corpus:rebuild-vectors', () => aiRuntime.rebuildActiveIndex());
 
   ipcMain.handle('retrieval:search', async (_event, payload) => aiRuntime.search(payload));
-  ipcMain.handle('ai:analyze', async (_event, payload) => {
-    try {
-      const evidence = aiRuntime.filterEvidence(payload.evidence);
-      return { ok: true, report: await aiRuntime.analyze({ ...payload, evidence }) };
-    }
-    catch (error) { return { ok: false, error: structuredProviderError(error, 'AI_ANALYSIS_FAILED') }; }
-  });
-  ipcMain.handle('ai:follow-up', async (_event, payload) => {
-    try {
-      const evidence = aiRuntime.filterEvidence(payload.evidence);
-      return { ok: true, answer: await aiRuntime.followUp({ ...payload, evidence }) };
-    }
-    catch (error) { return { ok: false, error: structuredProviderError(error, 'AI_FOLLOW_UP_FAILED') }; }
-  });
+  const { createGenerationRequests } = require('../shared/generation-requests.cjs');
+  const generationRequests = createGenerationRequests();
+  ipcMain.handle('ai:cancel', (event, requestId) => ({ stopped: generationRequests.cancel(event.sender.id, requestId) }));
+  for (const [channel, method, resultKey] of [['ai:analyze', 'analyze', 'report'], ['ai:follow-up', 'followUp', 'answer']]) {
+    ipcMain.handle(channel, async (event, payload) => {
+      const owner = event.sender.id;
+      const onDestroyed = () => generationRequests.cancelOwner(owner);
+      event.sender.once('destroyed', onDestroyed);
+      try {
+        const { requestId, ...input } = payload && typeof payload === 'object' ? payload : {};
+        const result = await generationRequests.run(owner, requestId, async (signal) => {
+          const evidence = aiRuntime.filterEvidence(input.evidence);
+          const onProgress = requestId ? (progress) => {
+            if (signal.aborted || !ANALYSIS_PROGRESS_STAGES.has(progress?.stage) || event.sender.isDestroyed()) return;
+            event.sender.send('ai:analysis-progress', {
+              requestId, stage: progress.stage,
+              ...(typeof progress.delta === 'string' ? { delta: progress.delta } : {}),
+            });
+          } : undefined;
+          return aiRuntime[method]({ ...input, evidence, onProgress, signal });
+        });
+        return { ok: true, [resultKey]: result };
+      } catch (error) { return { ok: false, error: structuredProviderError(error, 'AI_GENERATION_FAILED') }; }
+      finally { event.sender.removeListener('destroyed', onDestroyed); }
+    });
+  }
 }
 
 async function runCommandMode() {

@@ -1,31 +1,43 @@
+import { GenerationDraftView } from './GenerationDraftView';
+import { ReadingPosition } from './ReadingPosition';
+import { taskIsRunning, type GenerationTask } from '../lib/useGenerationTasks';
 import { ArrowLeft, ArrowRight, RefreshCw, Send, Sparkles } from 'lucide-react';
-import { Fragment, useMemo, useState } from 'react';
+import { Fragment, useEffect, useMemo, useState } from 'react';
 import type { ActionEffect, ActiveActionFact, HexagramDynamics, PlateLine, ShenSha, TransformationReturnFact } from '../lib/divination';
 import { isAIUsable } from '../lib/aiStatus';
 import type { EvidenceEntry, RetrievalDiagnostics } from '../lib/retrieval';
 import type { DivinationSession } from '../lib/session';
-import type { AIConfigStatus } from '../types/desktop';
+import type { AIAnalysisProgress, AIConfigStatus } from '../types/desktop';
 import { CASTING_METHOD_LABELS } from '../lib/session';
 import { formatShanghaiDateTime } from '../lib/shanghaiTime';
 import { returnEffectLabels } from '../lib/relationLabels';
 import { HexagramLines } from './HexagramLines';
 import { CastingBasisSummary } from './CastingBasisSummary';
 import { MarkdownContent } from './MarkdownContent';
+import { DivinationGlossary } from './DivinationGlossary';
 import { desktop } from '../lib/desktop';
 import './ResultScreen.css';
 import { StemBranchText } from './StemBranchText';
 import { FeedbackControl } from './FeedbackControl';
 import { PlateCopyControl } from './PlateCopyControl';
+import { navigateToResult, reportOutline } from '../lib/reportOutline';
+
+export type EvidenceState = 'idle' | 'loading' | 'ready' | 'empty' | 'error';
 
 interface Props {
   session: DivinationSession;
   evidence: EvidenceEntry[];
   retrievalDiagnostics: RetrievalDiagnostics | null;
+  evidenceState?: EvidenceState;
   aiStatus: AIConfigStatus;
   aiAvailable: boolean;
   sessionSaveStatus: 'idle' | 'saving' | 'saved' | 'error';
   sessionSaveError: string;
+  generationTask?: GenerationTask;
+  onStopGeneration?(): void;
+  onRetryGenerationSave?(): void;
   analyzing: boolean;
+  analysisProgress?: (AIAnalysisProgress & { startedAt: number }) | null;
   analysisError: string;
   analysisSaveStatus: 'idle' | 'saving' | 'saved' | 'error';
   analysisSaveError: string;
@@ -38,8 +50,35 @@ interface Props {
   onBack(): void;
 }
 
-export function ResultScreen({ session, evidence, retrievalDiagnostics, aiStatus, aiAvailable, sessionSaveStatus, sessionSaveError, analyzing, analysisError, analysisSaveStatus, analysisSaveError, chatting, chatError, onRetrySessionSave, onAnalyze, onRetryAnalysisSave, onFollowUp, onBack }: Props) {
+const ANALYSIS_STAGE_LABELS: Record<AIAnalysisProgress['stage'], string> = {
+  retrieving: '正在检索古籍证据…',
+  connecting: '古籍证据已就绪，正在连接解读模型…',
+  connected: '模型已连接，正在等待首段输出…',
+  reasoning: '模型正在推理，请继续等待…',
+  writing: '模型正在生成完整解读…',
+};
+
+function elapsedLabel(totalSeconds: number): string {
+  if (totalSeconds < 60) return `${totalSeconds} 秒`;
+  const minutes = Math.floor(totalSeconds / 60);
+  const seconds = totalSeconds % 60;
+  return `${minutes} 分 ${seconds} 秒`;
+}
+
+export function ResultScreen({ generationTask, onStopGeneration, onRetryGenerationSave, session, evidence, retrievalDiagnostics, evidenceState, aiStatus, aiAvailable, sessionSaveStatus, sessionSaveError, analyzing, analysisProgress, analysisError, analysisSaveStatus, analysisSaveError, chatting, chatError, onRetrySessionSave, onAnalyze, onRetryAnalysisSave, onFollowUp, onBack }: Props) {
   const [followUp, setFollowUp] = useState('');
+  const [analysisElapsedSeconds, setAnalysisElapsedSeconds] = useState(0);
+  useEffect(() => {
+    if (!analyzing) {
+      setAnalysisElapsedSeconds(0);
+      return undefined;
+    }
+    const startedAt = analysisProgress?.startedAt ?? Date.now();
+    const updateElapsed = () => setAnalysisElapsedSeconds(Math.max(0, Math.floor((Date.now() - startedAt) / 1000)));
+    updateElapsed();
+    const timer = window.setInterval(updateElapsed, 1000);
+    return () => window.clearInterval(timer);
+  }, [analyzing, analysisProgress?.startedAt]);
   const plate = session.plate!;
   const evidenceSourceCount = useMemo(() => new Set(evidence.map((item) => item.source)).size, [evidence]);
   const fuShenByLine = useMemo(() => new Map(plate.fuShen.map((item) => [item.lineIndex, item])), [plate.fuShen]);
@@ -53,6 +92,12 @@ export function ResultScreen({ session, evidence, retrievalDiagnostics, aiStatus
     ? session.analysis
     : null;
   const legacyAnalysis = Boolean(session.analysis && !markdownAnalysis);
+  const outline = useMemo(() => reportOutline(markdownAnalysis?.markdown || ''), [markdownAnalysis?.markdown]);
+  const evidencePhase = evidenceState ?? (retrievalDiagnostics ? evidence.length ? 'ready' : 'empty' : 'idle');
+  const emptyEvidenceText = evidencePhase === 'loading' ? '正在检索古籍依据…'
+    : evidencePhase === 'error' ? '古籍检索未完成，请查看解读区的错误说明。'
+      : evidencePhase === 'empty' ? '本次检索没有找到可用古籍证据。'
+        : '尚未检索古籍依据；开始解读后会在这里展示来源。';
   const sessionReady = sessionSaveStatus !== 'saving' && sessionSaveStatus !== 'error';
   const aiReady = aiAvailable && isAIUsable(aiStatus);
   const aiPreparing = aiAvailable && !aiReady && (aiStatus.status === 'testing' || aiStatus.status === 'building' || aiStatus.status === 'paused');
@@ -73,13 +118,13 @@ export function ResultScreen({ session, evidence, retrievalDiagnostics, aiStatus
         : aiStatus.activeCapabilities?.embedding ? 'BM25（向量暂不可用）' : 'BM25 关键词检索'
     : '';
   const submit = () => {
-    if (!aiAvailable || !followUp.trim() || chatting || !sessionReady || !aiReady) return;
+    if (!aiAvailable || !followUp.trim() || chatting || analyzing || generationTask?.status === 'save-error' || !sessionReady || !aiReady) return;
     onFollowUp(followUp.trim());
     setFollowUp('');
   };
 
   return (
-    <main className="result-screen">
+    <ReadingPosition sessionId={session.id} requestId={generationTask?.requestId}><main className="result-screen">
       <div className="result-codex">
         <header
           aria-label="成卦卷首"
@@ -141,6 +186,15 @@ export function ResultScreen({ session, evidence, retrievalDiagnostics, aiStatus
           <CastingBasisSummary basis={session.castingBasis} />
         </header>
 
+        <nav className="result-navigation" aria-label="结果导航">
+          {[
+            ['analysis-heading', markdownAnalysis ? '结论与解读' : '解读'],
+            ['plate-heading', '排盘'],
+            ['evidence-heading', '古籍依据'],
+            ...(aiAvailable || session.messages.length ? [['follow-up-heading', '追问']] : []),
+          ].map(([id, label]) => <a key={id} href={`#${id}`} onClick={(event) => { event.preventDefault(); navigateToResult(id); }}>{label}</a>)}
+        </nav>
+
         <div className="result-workspace">
           <section
             aria-labelledby="analysis-heading"
@@ -150,7 +204,7 @@ export function ResultScreen({ session, evidence, retrievalDiagnostics, aiStatus
             <div className="analysis-heading">
               <h2 className="section-title" id="analysis-heading"><i aria-hidden="true" />{aiAvailable || markdownAnalysis || legacyAnalysis ? 'AI 解读' : '本地模式'}</h2>
               {aiAvailable && markdownAnalysis ? (
-                <button className="analysis-reanalyze" type="button" onClick={onAnalyze} disabled={analyzing || !sessionReady}>
+                <button className="analysis-reanalyze" type="button" onClick={onAnalyze} disabled={analyzing || chatting || generationTask?.status === 'save-error' || !sessionReady}>
                   <RefreshCw className={analyzing ? 'is-spinning' : undefined} size={15} aria-hidden="true" />
                   {analyzing ? '解析中' : aiReady ? '重新解析' : '连接 AI 服务'}
                 </button>
@@ -169,18 +223,28 @@ export function ResultScreen({ session, evidence, retrievalDiagnostics, aiStatus
                 {analysisSaveStatus === 'error' ? <><div><strong>解读已生成，但自动保存失败</strong><p>{analysisSaveError || '写入历史记录失败。'}</p></div><button type="button" onClick={onRetryAnalysisSave}><RefreshCw size={15} />重试保存</button></> : null}
               </div>
             ) : null}
-            {aiAvailable && analyzing ? <div className="analysis-loading"><span className="ink-loader" /><strong>正在检索古籍并组织解读…</strong><p>排盘事实已经锁定，AI 只能依据当前卦象与证据解释。</p></div> : null}
-            {aiAvailable && !analyzing && analysisError ? <div className="analysis-error" role="alert"><strong>AI 分析暂时失败</strong><p>{analysisError}</p><button type="button" onClick={onAnalyze} disabled={!sessionReady}><RefreshCw size={16} />重新分析</button></div> : null}
+            {aiAvailable && analyzing ? <div className={`analysis-loading${generationTask?.content ? ' analysis-loading--streaming' : ''}`} role="status"><span className="ink-loader" /><strong>{ANALYSIS_STAGE_LABELS[analysisProgress?.stage ?? 'connecting']}</strong><p><span aria-hidden="true">已等待 {elapsedLabel(analysisElapsedSeconds)}。</span> 请求仍在进行，不会自动重试；完成后会自动保存。</p><small>排盘事实已经锁定，AI 只能依据当前卦象与证据解释。</small></div> : null}
+            {(generationTask?.kind === 'analysis' || session.generationDraft?.kind === 'analysis') ? <GenerationDraftView task={generationTask?.kind === 'analysis' ? generationTask : undefined} draft={session.generationDraft?.kind === 'analysis' && !taskIsRunning(generationTask) ? session.generationDraft : undefined} onStop={onStopGeneration} onRetrySave={onRetryGenerationSave} /> : null}
+            {aiAvailable && !analyzing && analysisError ? <div className="analysis-error" role="alert"><strong>AI 分析暂时失败</strong><p>{analysisError}</p><button type="button" onClick={onAnalyze} disabled={!sessionReady || chatting || analyzing || generationTask?.status === 'save-error'}><RefreshCw size={16} />重新分析</button></div> : null}
             {legacyAnalysis && (!aiAvailable || (!analyzing && !analysisError)) ? (
-              <div className="analysis-error"><strong>这份历史解读不是当前 Markdown 格式</strong><p>{aiAvailable ? '旧版结构化结果不再解析，请重新分析生成 Markdown 解读。' : '旧版结构化结果无法在网页版展示。'}</p>{aiAvailable ? <button type="button" onClick={onAnalyze} disabled={!sessionReady}><RefreshCw size={16} />重新分析</button> : null}</div>
+              <div className="analysis-error"><strong>这份历史解读不是当前 Markdown 格式</strong><p>{aiAvailable ? '旧版结构化结果不再解析，请重新分析生成 Markdown 解读。' : '旧版结构化结果无法在网页版展示。'}</p>{aiAvailable ? <button type="button" onClick={onAnalyze} disabled={!sessionReady || chatting || analyzing || generationTask?.status === 'save-error'}><RefreshCw size={16} />重新分析</button> : null}</div>
             ) : null}
             {!aiAvailable && !markdownAnalysis && !legacyAnalysis ? <div className="analysis-error"><strong>网页版提供本地排盘</strong><p>起卦、排盘、历史记录和内置古籍均可在当前设备使用；此版本不提供 AI 解读。</p></div> : null}
             {aiAvailable && !analyzing && !markdownAnalysis && !legacyAnalysis && !analysisError ? (
-              <div className="analysis-error"><strong>{!sessionReady ? '排盘保存完成后才能开始解读' : aiReady ? '这条历史记录没有已保存的 AI 解读' : aiPreparing ? 'AI 服务正在准备中' : '需要先连接 AI 服务'}</strong><p>{!sessionReady ? '请等待自动保存完成，或先重试保存本次排盘。' : aiReady ? '打开历史记录不会自动发起新的 AI 请求，如需解读请手动开始。' : aiPreparing ? `向量索引当前完成 ${aiProgress.toFixed(1)}%，新方案完成后即可生成解读。` : '连接向导先配置必填的主模型；向量和重排模型均可跳过。'}</p><button type="button" onClick={onAnalyze} disabled={!sessionReady || aiPreparing}><Sparkles size={16} />{aiReady ? '开始解读' : aiPreparing ? '准备中' : '连接 AI 服务'}</button></div>
+              <div className="analysis-error"><strong>{!sessionReady ? '排盘保存完成后才能开始解读' : aiReady ? '这条历史记录没有已保存的 AI 解读' : aiPreparing ? 'AI 服务正在准备中' : '需要先连接 AI 服务'}</strong><p>{!sessionReady ? '请等待自动保存完成，或先重试保存本次排盘。' : aiReady ? '打开历史记录不会自动发起新的 AI 请求，如需解读请手动开始。' : aiPreparing ? `向量索引当前完成 ${aiProgress.toFixed(1)}%，新方案完成后即可生成解读。` : '连接向导先配置必填的主模型；向量和重排模型均可跳过。'}</p><button type="button" onClick={onAnalyze} disabled={!sessionReady || aiPreparing || chatting || generationTask?.status === 'save-error'}><Sparkles size={16} />{aiReady ? '开始解读' : aiPreparing ? '准备中' : '连接 AI 服务'}</button></div>
             ) : null}
             {markdownAnalysis && (!aiAvailable || !analyzing) ? (
               <article className="analysis-report">
-                <div className="analysis-mode"><Sparkles size={15} />云端 AI · Markdown 解读</div>
+                <div className="analysis-mode"><Sparkles size={15} />古籍与排盘解读</div>
+                {outline.summary ? <section className="report-summary" aria-label="结论速览">
+                  <h3>先看结论与条件</h3>
+                  <p className="summary-source">以下保留原报告的综合结论、应期与最终结论；其他前提和限制请结合完整解读核对。</p>
+                  <MarkdownContent markdown={outline.summary} allowExternalLinks={desktop.runtime.kind === 'electron'} />
+                </section> : null}
+                {outline.sections.length ? <details className="report-outline">
+                  <summary>解读目录 · {outline.sections.length} 节</summary>
+                  <nav aria-label="解读章节">{outline.sections.map((section) => <a key={section.id} href={`#${section.id}`} onClick={(event) => { event.preventDefault(); navigateToResult(section.id); }}>{section.title}</a>)}</nav>
+                </details> : null}
                 {markdownAnalysis.pipeline ? (
                   <div className="pipeline-trace">
                     <span>排盘事实锁定</span>
@@ -188,9 +252,9 @@ export function ResultScreen({ session, evidence, retrievalDiagnostics, aiStatus
                     <span>{pipelineRetrievalLabel}</span>
                   </div>
                 ) : null}
-                <MarkdownContent markdown={markdownAnalysis.markdown} allowExternalLinks={desktop.runtime.kind === 'electron'} />
+                <MarkdownContent className="analysis-body" markdown={markdownAnalysis.markdown} reportHeadings allowExternalLinks={desktop.runtime.kind === 'electron'} />
                 {markdownAnalysis.analysisId && markdownAnalysis.evidenceSnapshot ? <FeedbackControl sessionId={session.id} targetType="analysis" targetId={markdownAnalysis.analysisId} report={markdownAnalysis} snapshot={markdownAnalysis.evidenceSnapshot} question={session.question} answer={markdownAnalysis.markdown} /> : null}
-                {evidence.length === 0 ? <p className="uncertainty">当前未检索到可用古籍证据；以上依据全部来自程序锁定的排盘事实。</p> : null}
+                {evidence.length === 0 ? <p className="uncertainty">{evidencePhase === 'empty' ? '本次检索未命中古籍依据，请结合排盘事实阅读解读。' : '当前没有可展示的古籍依据快照，无法从此页核对原引用。'}</p> : null}
               </article>
             ) : null}
           </section>
@@ -218,6 +282,7 @@ export function ResultScreen({ session, evidence, retrievalDiagnostics, aiStatus
                 {plate.pillars.map((pillar) => <span aria-label={`${pillar.label}旬空`} key={pillar.label}><StemBranchText value={pillar.voidBranches.join('、')} /></span>)}
               </div>
             </div>
+            <DivinationGlossary />
             <div className="plate-facts" id="plate-facts" tabIndex={-1}>
               <div className="shen-sha-line">
                 <strong>日辰神煞</strong>
@@ -291,9 +356,9 @@ export function ResultScreen({ session, evidence, retrievalDiagnostics, aiStatus
           <section className="evidence-rail" aria-labelledby="evidence-heading">
               <div className="evidence-heading">
                 <h2 className="section-title" id="evidence-heading"><i aria-hidden="true" />古籍依据</h2>
-                <small>{evidence.length ? `命中 ${evidence.length} 条依据，涉及 ${evidenceSourceCount} 个古籍来源` : '当前知识库未找到足够证据'}</small>
+                <small>{evidence.length ? `命中 ${evidence.length} 条依据，涉及 ${evidenceSourceCount} 个古籍来源` : evidencePhase === 'empty' ? '本次检索没有命中' : evidencePhase === 'error' ? '检索未完成' : evidencePhase === 'loading' ? '检索进行中' : '尚未检索'}</small>
               </div>
-              {retrievalDiagnostics ? <div className={`retrieval-status retrieval-status--${retrievalDiagnostics.mode}`}><strong>{retrievalStatusLabel}</strong><span>BM25 候选 {retrievalDiagnostics.lexicalCandidates} · 向量候选 {retrievalDiagnostics.vectorCandidates} · 最终 {retrievalDiagnostics.selectedCandidates ?? evidence.length}</span>{retrievalDiagnostics.warnings.map((warning) => <small key={warning}>{warning}</small>)}{aiAvailable && retrievalDiagnostics.warnings.length ? <button type="button" onClick={onAnalyze} disabled={analyzing || !sessionReady}><RefreshCw size={14} />重新检索并解读</button> : null}</div> : null}
+              {retrievalDiagnostics ? <div className={`retrieval-status retrieval-status--${retrievalDiagnostics.mode}`}><strong>{retrievalStatusLabel}</strong><span>BM25 候选 {retrievalDiagnostics.lexicalCandidates} · 向量候选 {retrievalDiagnostics.vectorCandidates} · 最终 {retrievalDiagnostics.selectedCandidates ?? evidence.length}</span>{retrievalDiagnostics.warnings.map((warning) => <small key={warning}>{warning}</small>)}{aiAvailable && retrievalDiagnostics.warnings.length ? <button type="button" onClick={onAnalyze} disabled={analyzing || chatting || generationTask?.status === 'save-error' || !sessionReady}><RefreshCw size={14} />重新检索并解读</button> : null}</div> : null}
               <div className="evidence-list">
                 {evidence.length ? evidence.map((item, index) => (
                   <article
@@ -313,7 +378,7 @@ export function ResultScreen({ session, evidence, retrievalDiagnostics, aiStatus
                       <p className="evidence-text">{item.text}</p>
                     </div>
                   </article>
-                )) : <p className="empty-evidence">当前知识库没有找到足够证据，因此不会编造古籍引用。</p>}
+                )) : <p className="empty-evidence" role="status">{emptyEvidenceText}</p>}
               </div>
           </section>
 
@@ -350,6 +415,8 @@ export function ResultScreen({ session, evidence, retrievalDiagnostics, aiStatus
               })}
             </div>
           ) : null}
+          {(generationTask?.kind === 'followUp' || session.generationDraft?.kind === 'followUp') ? <GenerationDraftView task={generationTask?.kind === 'followUp' ? generationTask : undefined} draft={session.generationDraft?.kind === 'followUp' && !taskIsRunning(generationTask) ? session.generationDraft : undefined} onStop={onStopGeneration} onRetrySave={onRetryGenerationSave} /> : null}
+          {session.generationDraft?.kind === 'followUp' && !taskIsRunning(generationTask) ? <button type="button" disabled={!aiReady || generationTask?.status === 'save-error'} onClick={() => onFollowUp(session.generationDraft!.question)}>重新发送这次追问</button> : null}
           {aiAvailable && chatError ? (
             <div className="analysis-save-status analysis-save-status--error" role="alert">
               <div><strong>追问未完成</strong><p>{chatError}</p></div>
@@ -359,13 +426,13 @@ export function ResultScreen({ session, evidence, retrievalDiagnostics, aiStatus
             <label className="chat-composer-label" htmlFor="follow-up">你的追问</label>
             <div className="chat-input">
               <input id="follow-up" aria-describedby="follow-up-hint" value={followUp} disabled={!sessionReady || !aiReady} onChange={(event) => setFollowUp(event.target.value)} onKeyDown={(event) => { if (event.key === 'Enter' && !event.nativeEvent.isComposing) submit(); }} placeholder={aiReady ? '基于本次卦象，继续问一个相关问题…' : '连接并准备好 AI 服务后可以继续追问'} />
-              <button type="button" onClick={submit} disabled={!followUp.trim() || chatting || !sessionReady || !aiReady}>{chatting ? <span className="small-loader" /> : <Send size={17} />}<span>继续追问</span></button>
+              <button type="button" onClick={submit} disabled={!followUp.trim() || chatting || analyzing || generationTask?.status === 'save-error' || !sessionReady || !aiReady}>{chatting ? <span className="small-loader" /> : <Send size={17} />}<span>继续追问</span></button>
             </div>
             <p id="follow-up-hint">{aiReady ? '按 Enter 发送，回答会继续沿用本次排盘。' : 'AI 解读主模型就绪后即可发送。'}</p>
           </div> : null}
         </section> : null}
       </div>
-    </main>
+    </main></ReadingPosition>
   );
 }
 

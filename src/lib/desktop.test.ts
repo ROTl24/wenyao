@@ -55,6 +55,32 @@ beforeEach(() => {
 
 afterEach(() => vi.restoreAllMocks());
 
+describe('浏览器占簿恢复', () => {
+  it('writes once after validating the entire batch and leaves storage unchanged on quota failure', async () => {
+    const original = completedDigitalSession();
+    await desktop.sessions.save(original);
+    const before = localStorage.getItem(STORAGE_KEY);
+    await expect(desktop.sessions.import({ sessions: [completedDigitalSession('new'), { ...original, id: 'invalid', lines: [] }], resolutions: {} })).rejects.toThrow();
+    expect(localStorage.getItem(STORAGE_KEY)).toBe(before);
+    const write = vi.spyOn(Storage.prototype, 'setItem').mockImplementation(() => { throw new DOMException('空间已满', 'QuotaExceededError'); });
+    await expect(desktop.sessions.import({ sessions: [completedDigitalSession('new')], resolutions: {} })).rejects.toThrow('空间已满');
+    expect(write).toHaveBeenCalledTimes(1);
+    expect(localStorage.getItem(STORAGE_KEY)).toBe(before);
+  });
+  it('requires an explicit fresh resolution and supports skip, replace and independent copies', async () => {
+    const original = completedDigitalSession();
+    await desktop.sessions.save(original);
+    const incoming = { ...original, question: '备份的问题' };
+    await expect(desktop.sessions.import({ sessions: [incoming], resolutions: {} })).rejects.toThrow(/预览后/);
+    await desktop.sessions.import({ sessions: [incoming], resolutions: { [original.id]: { action: 'skip', expectedUpdatedAt: original.updatedAt } } });
+    expect((await desktop.sessions.get(original.id))?.question).toBe(original.question);
+    await desktop.sessions.import({ sessions: [incoming], resolutions: { [original.id]: { action: 'copy', expectedUpdatedAt: original.updatedAt, newId: 'copy' } } });
+    expect((await desktop.sessions.get('copy'))?.messages[0].id).not.toBe(original.messages[0].id);
+    await desktop.sessions.import({ sessions: [incoming], resolutions: { [original.id]: { action: 'replace', expectedUpdatedAt: original.updatedAt } } });
+    expect((await desktop.sessions.get(original.id))?.question).toBe(incoming.question);
+  });
+});
+
 describe('浏览器公共外链', () => {
   it('opens predefined links in a safe new tab and reports popup blocking', async () => {
     const open = vi.spyOn(window, 'open').mockReturnValue({} as Window);

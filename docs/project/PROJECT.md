@@ -1,7 +1,7 @@
 ---
 project_docs_schema: 1
 document_type: project
-last_reviewed: 2026-09-04
+last_reviewed: 2026-09-06
 ---
 
 # 项目状态
@@ -20,9 +20,9 @@ last_reviewed: 2026-09-04
 
 ## Current Goal
 
-- 目标版本：`G-015`
-- 目标：自定义 AI 配置允许完整接口与任意兼容模型 ID，密钥引用清晰，测试与实际生效配置一致。
-- 来源：`user-confirmed` / `code-verified`，依据 API 地址、密钥与模型配置体验问题及跨运行时回归。
+- 目标版本：`G-019`
+- 目标：将体验改进与既有 AI 修复发布为 0.5.7，同步 GitHub 源码、Windows/macOS 安装包与 Cloudflare Pages。
+- 来源：`user-confirmed`，用户明确要求更新安装包、GitHub 和网站。
 
 ## Scope
 
@@ -44,6 +44,10 @@ last_reviewed: 2026-09-04
 | 里程碑 | 状态 | 验收标准 | 证据 |
 |---|---|---|---|
 | 自定义 AI 配置一致性 | `verified` | 完整路径、任意模型 ID、密钥引用、修改后重新测试及向量配置切换在桌面与 PWA 中保持一致 | 共享核心、向导、Runtime 与 Worker 回归 |
+| `0.5.7` 跨渠道发布 | `in_progress` | GitHub 源码、稳定 Release 五项资产与网站资源来自同一发布实现 | 当前发布核验 |
+| 长解读连续阅读 | `verified` | 超过 6 万字符真实本机 SSE 提前可读，分块渲染与完成切换保持当前段落，完整保存逐字一致 | 生成任务 Agent Note、HTTP 长流回归、桌面与手机 68,108 字符合成验收 |
+| 体验改进第二批 | `verified` | 正文提前可读，停止及截断不进入完成态，切页可返回，草稿与证据可备份，离线诊断和人工评分分开 | 生成任务与离线评测 Agent Notes、跨运行时回归与合成页面验收 |
+| 体验改进第一批 | `verified` | 原文结论、章节导航、记录恢复、复盘保存与弹窗键盘操作通过本地验证 | 结果阅读与占簿备份 Agent Notes、跨运行时回归及浏览器验收 |
 | 跨平台本地优先应用 | `verified` | Electron 与 PWA 构建入口存在，四种起卦和排盘具备自动化测试 | `package.json`、`vite.config.ts`、`src/lib/*.test.ts` |
 | 五书混合检索 | `verified` | 1263 条语料可经共享检索核心检索，分类索引覆盖全部语料 ID | `resources/corpus.json`、`resources/knowledge-index.json`、`shared/retrieval-core.cjs` |
 | 网页古籍分类一致性 | `verified` | 网页统计、书内条目和 AI 检索均使用 495 规则、190 占例、578 义理分类 | 浏览器与 Worker 回归测试、全量测试、PWA 构建验证 |
@@ -51,6 +55,7 @@ last_reviewed: 2026-09-04
 | OpenAI Chat 通用响应契约 | `verified` | 桌面端与 PWA 统一解析字符串及文本块正文，最小测试允许短推理并准确区分空正文原因 | `shared/chat-completion-core.cjs`、Provider、Runtime 与 Worker 回归测试 |
 | 正式生成不设应用 Token 上限 | `verified` | 桌面端与 PWA 的正式解读和追问不发送应用定义的输入限制、`max_tokens` 或 `max_completion_tokens`，最小测试仍显式使用 512 Token | 正式调用、Provider 与 Worker 请求体回归测试 |
 | 正式生成不设固定总时限 | `verified` | Electron 正式解读和追问不创建应用侧总超时；探测、向量和重排短请求仍有时限，正文读取超时返回中文错误且不会自动重试 | Runtime 与 Provider 故障注入回归、完整测试与构建校验 |
+| 桌面长解读可观测 | `verified` | 内置生成服务的单次 SSE 请求显示连接、推理、正文生成阶段和累计等待时间；持续活跃流不受累计时长限制，停滞或中断不自动重试 | Provider 流式边界、Renderer 计时与应用阶段传递回归 |
 | PWA 模型目录域名确认 | `verified` | 模型名称为空时仍按规范化目录地址显示并确认 HTTPS origin，界面与 Worker 共用目录安全入口 | `src/lib/webAI/security.ts`、向导与 Worker 回归测试 |
 | Windows 稳定更新通道 | `verified` | 打包版启动及每六小时检查 GitHub Releases，用户确认后下载并在退出或重启时安装，正式 Release 同时发布 `latest.yml`、安装包与 blockmap | `electron/services/update-manager.cjs`、`scripts/verify-release.mjs`、`.github/workflows/release-desktop.yml` |
 | MIT 开源许可 | `verified` | 根许可证、包元数据、README 与项目知识记录一致声明 MIT，第三方许可边界保持独立 | `LICENSE`、`package.json`、`README.md`、Agent Note |
@@ -62,14 +67,20 @@ last_reviewed: 2026-09-04
 
 ## Current State
 
+- 长文持续追加复用已完成 Markdown 块，完成时保留可见段落；真实本机 SSE 与两种屏幕的 68,108 字符合成验收通过，当前合计 471 项测试通过。
+- 正式正文与追问可逐段阅读；生成任务保留应用内切页状态，停止/失败草稿与完整报告分开保存，草稿带独立证据定位。
+- 完整报告离线评测读取占簿备份，提供章节/引用诊断与绑定材料身份的人工评分；自动诊断不等于模型质量或现实预测准确率。
+- 本地结果页提供原文结论节选、目录、固定导航和术语解释；未检索与无命中明确区分，弹窗共用焦点管理。
+- 占簿支持搜索及复盘状态筛选导出、备份预览与一次恢复、重复记录处理；复盘保留实际结果、日期和标签，不进入反馈上传。
+- 当前已获准发布 0.5.7，正在验证安装包与发布渠道；不含真实付费模型调用或本机静默安装。
 - 自定义 AI 接口支持自动补全和完整地址两种用法，并预览实际请求目标；模型列表保留手填值，修改后的配置必须重新测试，主模型可直接完成配置。
 
-- `package.json` 当前版本为 `0.5.6`；桌面正式构建从同一提交打包当前 Renderer、Electron 服务、共享 AI 核心与古籍数据。
+- `package.json` 当前版本为 `0.5.7`；桌面正式构建从同一提交打包当前 Renderer、Electron 服务、共享 AI 核心与古籍数据。
 - Electron 主进程、PWA 渲染适配器和 Web AI Worker 均通过 `shared/corpus-knowledge.cjs` 合并正文与分类索引。
 - 网页状态、书内条目和检索证据已验证使用 495 条规则、190 条占例和 578 条义理。
 - Electron 与 PWA 共用自定义 AI 地址规范化：裸域名默认补全 `/v1`，失败后不会自动切换地址或重复请求。
 - Electron 与 PWA 共用 OpenAI Chat 响应解析；正式解读和追问不发送应用定义的输入或输出 Token 限制，只有最小连接测试显式使用 512 Token 单次预算，未指定采样参数时不发送 `temperature`。
-- Electron 正式解读和追问不设置应用侧固定总时限；短时模型探测、向量化和重排仍有独立时限。Provider 对连接和响应正文阶段的超时统一返回中文错误，只报告单次失败并等待用户手动操作。
+- Electron 内置生成服务使用单次 SSE 请求：最多等待 3 分钟收到首段数据，开始接收后以连续 90 秒无活动判定停滞，持续活跃的流没有固定总时限。结果页显示检索、连接、推理、正文生成阶段和累计等待时间；自定义 JSON 服务保留原协议且所有失败都不自动重试。
 - PWA 模型目录域名确认由规范化后的 `/models` 安全目标生成，不依赖尚未发现的模型名称。
 - GitHub Release 工作流支持手动候选构建，并仅在版本标签路径发布正式桌面产物；Windows 稳定 Release 的 `latest.yml` 驱动既有安装版发现更新。
 - macOS 免费发行版没有 Developer ID 与公证票据，`0.5.3` 客户端保持 GitHub Releases 手动更新，不能由后续版本远程改为自动更新。
@@ -86,7 +97,7 @@ last_reviewed: 2026-09-04
 
 ## Next Actions
 
-- 无已确认后续动作。
+- 完成 0.5.7 发布及跨渠道核验；真实模型质量基线仍需获准样本，不包含付费调用。
 
 ## Goal History
 
@@ -105,4 +116,9 @@ last_reviewed: 2026-09-04
 | `G-011` | `verified` | 2026-09-04 | 阿里云重排端点在最小测试、索引激活和实际调用间使用同一表示契约，缺失端点继续失败关闭 |
 | `G-012` | `verified` | 2026-09-04 | 正式生成请求移除应用侧输入与输出 Token 上限，探测请求继续保持有限单次预算 |
 | `G-013` | `verified` | 2026-09-04 | Electron 正式生成移除 180 秒固定总时限，响应正文超时统一归类且远程请求不自动重试 |
+| `G-014` | `verified` | 2026-09-04 | Electron 内置生成服务改为可观测 SSE，长请求显示阶段与耗时，活跃流无固定总时限且停滞流不自动重试 |
 | `G-015` | `verified` | 2026-09-05 | 完整接口、自定义模型、密钥与测试状态实现一致，跨运行时离线回归及本地浏览器检查通过 |
+| `G-016` | `verified` | 2026-09-06 | 结果阅读、占簿备份、新手引导与复盘在本地通过自动化和浏览器验证，未发布 |
+| `G-017` | `verified` | 2026-09-06 | 流式正文、停止、草稿、后台任务与离线评测完成本地验证；未执行付费模型验证或发布 |
+| `G-018` | `verified` | 2026-09-06 | 6 万余字符的真实本机 SSE、Markdown 分块等价与桌面/手机连续阅读验收通过，未执行付费模型调用或发布 |
+| `G-019` | `in_progress` | 2026-09-06 | 用户授权同步安装包、GitHub 和网站，发布验证进行中 |

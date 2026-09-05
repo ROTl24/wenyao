@@ -1,7 +1,7 @@
 ---
 project_docs_schema: 1
 document_type: changelog
-last_reviewed: 2026-09-04
+last_reviewed: 2026-09-06
 ---
 
 # 项目成果记录
@@ -11,6 +11,38 @@ last_reviewed: 2026-09-04
 - 当前记录周期：2026 年。
 
 ## Entries
+
+### CHG-20260906-long-report-reading
+
+- 日期：2026-09-06
+- 结果：长解读复用已稳定的 Markdown 段落，完成时按原文偏移保留正在阅读的位置，结论速览插入不再影响当前段落。
+- 验证：306 项 Renderer、165 项 Electron 测试，类型/Renderer 构建与 PWA 校验通过；真实本机 HTTP 长流覆盖中文网络分片、提前显示、完整聚合及中止。桌面与手机以 68,108 字符通过持续阅读、完成保存及位置保持验收。
+- 边界：合成服务只验证本机链路与阅读行为；不证明真实模型速度、内容质量或取消计费。原有付费调用与发布边界不变。
+- Git：相关实现与知识记录保留在当前未提交工作区，未推送、部署或更新已有安装版。
+- Agent Note：[生成任务与草稿](../../.agents/notes/implemented/feature/2026-09-06-generation-drafts-tasks.md)。
+- 文档影响：PROJECT、PROJECT_CONTEXT、CHANGELOG 与既有生成任务 Note；沿用已有决策归属，无新增独立决策或事故教训。
+
+### CHG-20260906-experience-second-batch
+
+- 日期：2026-09-06
+- 结果：正式正文与追问支持流式阅读和停止接收，应用内切页可返回任务；停止/失败草稿独立保存并带证据快照，备份保留草稿。增加完整报告离线诊断及人工评分模板。
+- 修复：输出额度截断不再因已有正文被判定为成功；接受停止后拒绝迟到结果；保存失败只重试本机写入。
+- 验证：302 项 Renderer 与 164 项 Electron 测试通过；类型检查、Renderer 构建、PWA 产物与 Electron 入口语法校验通过。1280×800、390×844 合成页面验证正文、引用、停止、后台完成与追问草稿，无横向溢出和控制台错误；离线评测 CLI 用合成占簿完成文件输出。
+- 边界：未执行真实模型调用、真实报告人工质量基线、应用关闭后的任务恢复或公开发布。自动诊断不是预测准确率。
+- Git：实现与相关知识记录在同一工作区保留，尚未提交；保护任务开始时已有修改，未推送或部署。
+- Agent Note：[生成任务与草稿](../../.agents/notes/implemented/feature/2026-09-06-generation-drafts-tasks.md)、[离线评测](../../.agents/notes/implemented/process/2026-09-06-offline-report-evaluation.md)。
+- 文档影响：PROJECT、PROJECT_CONTEXT、DECISIONS、LESSONS、CHANGELOG 与评测使用说明；新增两份 Note，更新既有流式与备份 Note。
+
+### CHG-20260906-experience-first-batch
+
+- 日期：2026-09-06
+- 结果：结果页提前展示综合结论、应期和最终结论原文，提供目录与固定导航；占簿支持完整备份、预览恢复、重复处理及独立复盘；首页提供事项示例，配置收拢高级接口选项，盘面增加术语说明。
+- 修复：尚未检索与无命中不再混淆；通用弹窗支持焦点移入、Tab 循环、Esc 退出与焦点恢复。
+- 验证：跨运行时自动化测试、类型/Renderer 构建与 PWA 产物验证；1280×720、390×844 本地浏览器用虚构记录完成完整恢复、复盘刷新、筛选、复制、实际下载与再解析，未调用真实 AI 服务。
+- Git：实现、回归与相关知识记录保留在同一工作区，尚未提交；进入任务时已有的未提交修改完整保留，未推送或部署。
+- Agent Note：[占簿备份与复盘](../../.agents/notes/implemented/feature/2026-09-06-session-archive-review.md)、[结果阅读与新手入口](../../.agents/notes/implemented/feature/2026-09-06-result-reading-onboarding.md)。
+- 后续：正文逐段显示/停止、后台任务管理和完整解读离线质量评测属于下一批，不作为本条成果。
+- 文档影响：PROJECT、PROJECT_CONTEXT、DECISIONS、LESSONS、CHANGELOG；新增两份功能 Agent Note。
 
 ### CHG-20260905-ai-configuration-consistency
 
@@ -22,6 +54,16 @@ last_reviewed: 2026-09-04
 - Agent Note：[AI 能力采用逐项配置与可选检索链路](../../.agents/notes/implemented/architecture/2026-08-26-optional-ai-capability-pipeline.md)、[自定义 AI 地址规范化](../../.agents/notes/implemented/bug-fix/2026-08-27-openai-base-url-default.md)。
 - 文档影响：PROJECT、PROJECT_CONTEXT、CHANGELOG、DECISIONS 与已有能力配置、地址规范化 Note。
 
+### CHG-20260904-desktop-analysis-stream-progress
+
+- 日期：2026-09-04
+- 结果：Electron 内置生成服务改为单次 SSE 请求，结果页持续显示检索、连接、推理、正文生成阶段和累计等待时间。首段最多等待 3 分钟，流开始后连续 90 秒无活动才失败；活跃长流没有固定总时限，失败不会自动重试。
+- 原因：一次 DeepSeek 正式解读在检索后约 4 分 28 秒成功完成并自动保存，说明请求不是死锁；桌面端完整 JSON 响应和静态转圈界面在模型完成前没有任何活动证据，使正常长推理看起来已经卡死。
+- 验证：SSE 解析失败与静态等待回归先在旧实现上失败；修复后覆盖超过连接期限的活跃流、90 秒停滞、未完成中断、用量、阶段传递和 65 秒等待计时。268 项 Renderer 测试、148 项 Electron 测试、类型构建、Renderer 构建、PWA 静态产物、Windows 安装包与发布结构校验通过。
+- Git：实现、测试与知识记录位于同一本地提交，未推送或部署。
+- Agent Note：[桌面正式生成按可观测流活动管理等待](../../.agents/notes/implemented/bug-fix/2026-09-04-desktop-ai-total-timeout.md)。
+- 文档影响：PROJECT、PROJECT_CONTEXT、CHANGELOG、DECISIONS、LESSONS 与既有桌面正式生成 Agent Note。
+
 ### CHG-20260904-desktop-formal-generation-deadline
 
 - 日期：2026-09-04
@@ -29,7 +71,7 @@ last_reviewed: 2026-09-04
 - 原因：移除正式输出 Token 上限后，DeepSeek 长推理仍被 Electron Runtime 在 180 秒处主动中止；正文读取阶段的异常没有经过超时归类，界面直接显示底层英文错误。
 - 验证：故障注入回归先稳定复现 `The operation was aborted due to timeout`，修复后确认正式解读与追问均不创建固定总时限；正文读取超时只发起一次请求并返回中文操作建议。266 项 Renderer 测试、144 项 Electron 测试、类型构建、Renderer 构建、PWA 静态产物、Windows 安装包与发布结构校验通过。
 - Git：实现、测试与知识记录位于同一本地提交，未推送或部署。安装后运行时复核期间，账本新增一次查询向量化和一次重排，未新增生成调用；调用图没有应用启动自动执行正式分析的路径，因此这两次检索不作为修复验收证据。
-- Agent Note：[桌面正式生成不设置固定总时限](../../.agents/notes/implemented/bug-fix/2026-09-04-desktop-ai-total-timeout.md)。
+- Agent Note：[桌面正式生成按可观测流活动管理等待](../../.agents/notes/implemented/bug-fix/2026-09-04-desktop-ai-total-timeout.md)。
 - 文档影响：PROJECT、PROJECT_CONTEXT、CHANGELOG、DECISIONS、LESSONS 与新增桌面正式生成 Agent Note。
 
 ### CHG-20260904-formal-generation-uncapped

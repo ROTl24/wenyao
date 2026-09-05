@@ -1,6 +1,7 @@
 import { RefreshCw, Trash2, X } from 'lucide-react';
 import { useEffect, useState } from 'react';
 import { desktop } from '../lib/desktop';
+import { useModalDialog } from '../lib/useModalDialog';
 import { FEEDBACK_REASONS, type FeedbackReason, type FeedbackRecord, type FeedbackState } from '../lib/feedback';
 
 interface Props { onClose(): void }
@@ -10,6 +11,7 @@ const STATUS_LABELS: Record<FeedbackRecord['uploadStatus'], string> = {
 };
 
 export function FeedbackPanel({ onClose }: Props) {
+  const dialogRef = useModalDialog<HTMLElement>(onClose);
   const [state, setState] = useState<FeedbackState | null>(null);
   const [busy, setBusy] = useState('');
   const [error, setError] = useState('');
@@ -76,7 +78,7 @@ export function FeedbackPanel({ onClose }: Props) {
 
   return (
     <div className="overlay" role="presentation">
-      <aside className="side-panel feedback-panel" aria-label="反馈管理">
+      <aside ref={dialogRef} tabIndex={-1} className="side-panel feedback-panel" aria-label="反馈管理" role="dialog" aria-modal="true">
         <header><div><h2>反馈管理</h2><p>反馈按不可变的解读或追问 ID 保存。</p></div><button aria-label="关闭反馈管理" type="button" onClick={onClose}><X /></button></header>
         {state ? <>
           <section className="feedback-privacy">

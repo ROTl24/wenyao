@@ -1,7 +1,7 @@
 ---
 project_docs_schema: 1
 document_type: project_context
-last_reviewed: 2026-09-04
+last_reviewed: 2026-09-06
 ---
 
 # 项目长期上下文
@@ -15,6 +15,13 @@ last_reviewed: 2026-09-04
 
 ## Invariants
 
+- 长文追加与草稿切换为完整报告时保留当前可见段落；分块排版必须保留 Markdown 跨片段语法和后置引用定义。
+- 最终正文片段可以提前显示，但停止、响应中断或输出额度截断不能写成完整报告；未完成草稿及其证据独立保存。
+- 任务取消按调用方与请求标识隔离，迟到成功不能覆盖已接受的停止；本机停止不代表服务商停止处理或计费。
+- 生成任务支持当前应用会话内切页，关闭/刷新后的远程恢复不在能力范围内。离线评测只读取本机备份，不增加运行时模型调用或生成门禁。
+- 结论节选直接复用完整原文章节，不额外请求模型；没有检索与完成无命中是不同状态。
+- 占簿恢复先整批校验与预览，再一次写入；重复记录处理按全部本机记录核对版本，副本具有独立报告和追问标识。
+- 复盘是本机事件记录，不属于回答评价；异步报告保存必须保留较新的复盘。
 - AI 模型目录仅作候选提示，用户填写的模型 ID 优先；测试通过只对应当时的地址、模型与密钥，编辑后必须重新测试。
 - 已保存密钥仅通过显式引用在同一 origin 下沿用；服务地址跨域变更时重新填写密钥。
 - 完整接口模式保留显式路径与非敏感查询参数，模型协议仍需兼容当前能力。向量接口或模型变化后重新探测维度，缓存身份区分实际接口。
@@ -28,7 +35,8 @@ last_reviewed: 2026-09-04
 - 自定义 OpenAI 兼容服务只填写裸域名时默认使用 `/v1`；显式 Base Path 或完整能力地址具有最高优先级，地址失败不会触发自动重试。
 - OpenAI Chat 生成能力只把最终可展示文本作为成功；内部推理、工具调用和拒答不能替代 `message.content`，最小测试失败不会自动重试。
 - 正式 AI 解读与追问不发送应用定义的输入 Token 限制、`max_tokens` 或 `max_completion_tokens`；最小连接测试仍使用显式有限预算，服务商模型自身的上下文窗口和输出上限继续生效。
-- Electron 正式 AI 解读与追问不设置应用侧固定总时限；PWA 正式生成按首段和流中活动判断超时。模型探测、向量化和重排继续使用短请求时限，所有远程失败均只报告一次且不自动重试。
+- Electron 内置生成服务和 PWA 正式生成按 SSE 首段与流中活动判断超时：首段最多等待 3 分钟，开始后连续 90 秒无活动才失败，持续活跃的流没有固定总时限。桌面自定义 JSON 服务不强制改变协议；所有远程失败均只报告一次且不自动重试。
+- 正式解读等待界面必须显示累计时间；内置服务还必须显示已连接、推理中和正文生成中的可观测阶段，不得展示内部推理内容。
 - PWA 模型目录的确认域名由规范化后的目录地址确定，不得依赖尚未发现的模型名称或绕过 HTTPS 公网边界。
 - 同一 AI 能力的规范化接口必须在最小测试、方案激活与实际调用阶段按同一契约解释；独立 `url` 与 `baseUrl + path` 都是有效端点表示，没有任一显式端点时失败关闭。
 - Windows 正式版本通过 GitHub `latest` 稳定通道检查更新；正式 Release 必须同时提供与版本一致的 `latest.yml`、NSIS 安装包和 blockmap，下载仍由用户确认触发。
@@ -44,6 +52,7 @@ last_reviewed: 2026-09-04
 
 ## Data and Privacy Boundaries
 
+- 占簿备份为包含问题、报告、追问、证据和复盘的普通 JSON；不包含 API 密钥、应用设置、反馈上传授权或整座用户古籍书库。导入不触发 AI 请求。
 - 不在项目文档、日志或测试夹具中保存 API Key、Cookie、个人信息或生产数据。
 - 浏览器会话和 IndexedDB 属于本机站点数据；清除站点数据会移除本机历史或索引缓存。
 - 用户导入古籍只由桌面端处理；是否发送片段给向量服务受独立确认约束。
@@ -73,7 +82,7 @@ last_reviewed: 2026-09-04
 - 模型目录发生在模型选择之前；域名确认必须验证目录请求目标，不能复用要求模型名称非空的完整能力连接作为前置条件。
 - 阿里云业务空间重排完整地址会被规范化为 Base URL 和相对路径；内部没有独立 `url` 字段不代表业务空间 ID 缺失。
 - 正式请求省略 Token 上限只表示问爻不主动截断；服务商或具体模型仍可能因上下文窗口、账户策略或自身输出上限返回 `length`，并且更长输出会增加费用和等待时间。
-- 桌面正式生成没有应用侧固定总时限，只表示问爻不在仍可能完成时按累计时长中止；服务商和网络仍可终止请求，关闭应用也不能证明服务商已经取消处理。
+- 桌面正式生成没有应用侧固定总时限，只表示问爻不在仍可能完成时按累计时长中止；内置服务的 90 秒边界从最后一次流活动计算。服务商和网络仍可终止请求，关闭应用也不能证明服务商已经取消处理。
 - 检索回归指标证明召回链稳定，不证明现实预测准确率。
 - 桌面端允许导入自有古籍，PWA 只浏览和检索内置古籍。
 
@@ -87,6 +96,10 @@ last_reviewed: 2026-09-04
 | 自定义 AI 地址规范化 | `shared/ai-setup-core.cjs` | `code-verified` | 2026-08-27 |
 | OpenAI Chat 响应、生成预算与时限 | `shared/chat-completion-core.cjs`、`electron/services/ai-runtime.cjs`、`electron/services/ai-provider.cjs`、`src/lib/webAI/provider.ts` | `user-confirmed` / `code-verified` | 2026-09-04 |
 | 构建与测试入口 | `package.json`、`vite.config.ts` | `code-verified` | 2026-08-27 |
+| 生成任务与未完成草稿 | [Agent Note](../../.agents/notes/implemented/feature/2026-09-06-generation-drafts-tasks.md) | `user-confirmed` / `code-verified` | 2026-09-06 |
+| 完整报告离线评测 | [Agent Note](../../.agents/notes/implemented/process/2026-09-06-offline-report-evaluation.md) | `user-confirmed` / `code-verified` | 2026-09-06 |
+| 占簿备份与复盘 | [Agent Note](../../.agents/notes/implemented/feature/2026-09-06-session-archive-review.md) | `user-confirmed` / `code-verified` | 2026-09-06 |
+| 结果阅读与新手入口 | [Agent Note](../../.agents/notes/implemented/feature/2026-09-06-result-reading-onboarding.md) | `user-confirmed` / `code-verified` | 2026-09-06 |
 | 桌面发布流程 | `.github/workflows/release-desktop.yml` | `code-verified` | 2026-08-27 |
 | Windows 在线更新 | `electron/services/update-manager.cjs`、`scripts/verify-release.mjs` | `code-verified` | 2026-08-27 |
 | 开源许可 | `LICENSE`、`package.json`、`README.md` | `user-confirmed` / `code-verified` | 2026-08-30 |

@@ -26,6 +26,7 @@ import {
   validateSessionForSave,
 } from './sessionValidation';
 import corpusKnowledge from '../../shared/corpus-knowledge.cjs';
+import sessionRecords from '../../shared/session-records.cjs';
 
 const corpus = corpusKnowledge.hydrateCorpusKnowledge(rawCorpus, knowledgeIndex) as EvidenceEntry[];
 const browserKnowledgeCounts = corpusKnowledge.countKnowledgeKinds(corpus) as Pick<CorpusStatus, 'ruleCount' | 'caseCount' | 'doctrineCount'>;
@@ -154,6 +155,11 @@ const browserFallback: DesktopApi = {
     onState() { return () => {}; },
   },
   sessions: {
+    async import(payload) {
+      const next = sessionRecords.mergeSessionImport(storedBrowserSessions(), payload, (session: unknown, existing: unknown) => validateSessionForSave(sanitizeRendererSession(session), existing)) as DivinationSession[];
+      localStorage.setItem(STORAGE_KEY, JSON.stringify(next));
+      return next.map(normalizeStoredSession).sort((a, b) => b.updatedAt.localeCompare(a.updatedAt));
+    },
     async list() { return browserSessions().sort((a, b) => b.updatedAt.localeCompare(a.updatedAt)); },
     async get(id) { return browserSessions().find((item) => item.id === id) || null; },
     async save(session) {
@@ -240,8 +246,9 @@ const browserFallback: DesktopApi = {
   },
   feedback: browserFeedback,
   ai: {
-    async analyze(payload) { return webAI ? webAI.analyze(payload) : { ok: false, error: { code: 'WEB_AI_ORIGIN_DISABLED', message: '此域名不发送 AI 请求。', dataSafe: true, nextAction: '请使用问爻正式发布地址。' } }; },
-    async followUp(payload) { return webAI ? webAI.followUp(payload) : { ok: false, error: { code: 'WEB_AI_ORIGIN_DISABLED', message: '此域名不发送 AI 请求。', dataSafe: true, nextAction: '请使用问爻正式发布地址。' } }; },
+    async cancel(requestId) { return webAI ? webAI.cancel(requestId) : { stopped: false }; },
+    async analyze(payload, onProgress) { return webAI ? webAI.analyze(payload, onProgress) : { ok: false, error: { code: 'WEB_AI_ORIGIN_DISABLED', message: '此域名不发送 AI 请求。', dataSafe: true, nextAction: '请使用问爻正式发布地址。' } }; },
+    async followUp(payload, onProgress) { return webAI ? webAI.followUp(payload, onProgress) : { ok: false, error: { code: 'WEB_AI_ORIGIN_DISABLED', message: '此域名不发送 AI 请求。', dataSafe: true, nextAction: '请使用问爻正式发布地址。' } }; },
   },
 };
 

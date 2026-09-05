@@ -1,4 +1,4 @@
-import type { AIConfigStatus, DesktopApi, DesktopError } from '../../types/desktop';
+import type { AIAnalysisProgress, AIConfigStatus, DesktopApi, DesktopError } from '../../types/desktop';
 
 export type WebAICommand =
   | 'getStatus'
@@ -12,6 +12,7 @@ export type WebAICommand =
   | 'search'
   | 'analyze'
   | 'followUp'
+  | 'cancelGeneration'
   | 'clear';
 
 export interface WebAIRequest {
@@ -32,6 +33,6 @@ export interface WebAIStatusEvent {
   status: AIConfigStatus;
 }
 
-export type WebAIWorkerMessage = WebAIResponse | WebAIStatusEvent;
+export type WebAIWorkerMessage = WebAIResponse | WebAIStatusEvent | { event: 'generation'; requestId: string; progress: AIAnalysisProgress };
 
 export type TestCapabilityPayload = Parameters<DesktopApi['aiConfig']['testCapability']>[0];

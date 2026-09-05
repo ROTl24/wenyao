@@ -1,6 +1,7 @@
 import { AlertCircle, CheckCircle2, Database, Loader2, X } from 'lucide-react';
 import { useMemo, useState } from 'react';
 import { desktop } from '../lib/desktop';
+import { useModalDialog } from '../lib/useModalDialog';
 import type { AIConfigStatus, CorpusImportBatch } from '../types/desktop';
 
 interface Props {
@@ -24,6 +25,7 @@ export function CorpusImportDialog({ batch, aiStatus, onClose, onCommitted }: Pr
   const [metadata, setMetadata] = useState(() => initialMetadata(batch));
   const [sendForIndex, setSendForIndex] = useState(false);
   const [submitting, setSubmitting] = useState(false);
+  const dialogRef = useModalDialog<HTMLElement>(onClose, submitting);
   const [error, setError] = useState('');
   const [results, setResults] = useState<Array<{ draftId: string; ok: boolean; error?: { message: string } }> | null>(null);
   const valid = batch.previews.filter((preview) => !preview.error);
@@ -57,10 +59,10 @@ export function CorpusImportDialog({ batch, aiStatus, onClose, onCommitted }: Pr
 
   return (
     <div className="corpus-modal-layer" role="presentation">
-      <section className="corpus-import-dialog" aria-labelledby="corpus-import-title" aria-modal="true" role="dialog">
+      <section ref={dialogRef} tabIndex={-1} className="corpus-import-dialog" aria-labelledby="corpus-import-title" aria-modal="true" role="dialog">
         <header>
           <div><span className="corpus-kicker">IMPORT REVIEW</span><h2 id="corpus-import-title">确认导入古籍</h2><p>每个文件作为一本书，确认后原子写入本地书库。</p></div>
-          <button type="button" aria-label="关闭导入确认" onClick={onClose}><X /></button>
+          <button type="button" aria-label="关闭导入确认" disabled={submitting} onClick={onClose}><X /></button>
         </header>
 
         <div className="corpus-import-scroll">

@@ -10,6 +10,7 @@ import { BeijingDateTimeField } from './BeijingDateTimeField';
 import { CreatorLinks } from './CreatorLinks';
 import { PwaInstallPrompt } from './PwaInstallPrompt';
 import { desktop } from '../lib/desktop';
+import { QUESTION_TEMPLATES } from '../lib/questionTemplates';
 
 const categories: Array<{ id: SessionCategory; mark: string }> = [
   { id: 'career', mark: '事' },
@@ -96,6 +97,9 @@ export function HomeScreen({
               </button>
             ))}
           </div>
+          {category ? <div className="question-template"><p>{QUESTION_TEMPLATES[category]}</p><button type="button" disabled={starting} onClick={() => {
+            if (!question.trim() || window.confirm('使用此示例替换当前问题？你可以继续编辑。')) onQuestionChange(QUESTION_TEMPLATES[category]);
+          }}>使用此示例</button><small>补全你的情况和时间范围后再起卦。</small></div> : null}
         </div>
         <div className="casting-method-field">
           <div className="field-label" id="casting-method-label">选择起卦方式</div>

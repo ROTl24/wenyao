@@ -187,6 +187,7 @@ describe('AI 能力三步向导', () => {
 
   it('自定义服务只填写裸域名时在界面补全 v1', () => {
     render(<Harness />);
+    fireEvent.click(screen.getByText('自定义接口与高级设置'));
     const apiUrl = screen.getByLabelText('API 调用地址');
     fireEvent.change(apiUrl, { target: { value: 'https://api.shuaiapi.com/' } });
     fireEvent.blur(apiUrl);

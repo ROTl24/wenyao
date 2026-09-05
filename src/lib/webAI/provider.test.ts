@@ -303,4 +303,21 @@ describe('网页自定义 AI 模型发现', () => {
     await expect(captured).resolves.toMatchObject({ name: 'TimeoutError' });
     expect(fetchMock).toHaveBeenCalledTimes(1);
   });
+  it('streams visible deltas before completion and rejects a provider-truncated draft without retry', async () => {
+    let stream: ReadableStreamDefaultController<Uint8Array>;
+    const encoder = new TextEncoder();
+    const events: Array<{ stage: string; delta?: string }> = [];
+    const fetchMock = vi.fn().mockResolvedValue(new Response(new ReadableStream<Uint8Array>({ start(controller) { stream = controller; } }), { headers: { 'content-type': 'text/event-stream' } }));
+    vi.stubGlobal('fetch', fetchMock);
+    const connection: AIConnection = { id: 'custom', providerId: 'custom', presetId: null, label: '测试', region: '', baseUrl: 'https://api.example.com/v1', fields: {}, hasApiKey: true, capabilities: { generation: { protocol: 'openai-chat', model: 'chat-model' } }, createdAt: '', updatedAt: '' };
+    const pending = createWebProvider(connection, 'secret').chat({ messages: [], onProgress: (event) => events.push(event) }).catch((error) => error);
+    await vi.waitFor(() => expect(events).toContainEqual({ stage: 'connected' }));
+    stream!.enqueue(encoder.encode('data: {"choices":[{"delta":{"reasoning_content":"PRIVATE REASONING"}}]}\n\ndata: {"choices":[{"delta":{"content":"尚未完成的正文"}}]}\n\n'));
+    await vi.waitFor(() => expect(events.some((event) => event.delta === '尚未完成的正文')).toBe(true));
+    expect(JSON.stringify(events)).not.toContain('PRIVATE REASONING');
+    stream!.enqueue(encoder.encode('data: {"choices":[{"delta":{},"finish_reason":"length"}]}\n\ndata: [DONE]\n\n'));
+    await expect(pending).resolves.toMatchObject({ detail: { code: 'WEB_AI_OUTPUT_LIMIT' } });
+    expect(fetchMock).toHaveBeenCalledOnce();
+  });
+
 });

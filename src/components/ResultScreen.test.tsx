@@ -1,10 +1,10 @@
-import { fireEvent, render, screen, within } from '@testing-library/react';
-import { describe, expect, it, vi } from 'vitest';
+import { act, fireEvent, render, screen, within } from '@testing-library/react';
+import { afterEach, describe, expect, it, vi } from 'vitest';
 import { buildPlate } from '../lib/divination';
 import type { EvidenceEntry } from '../lib/retrieval';
 import type { DivinationSession } from '../lib/session';
 import type { AIConfigStatus } from '../types/desktop';
-import { ResultScreen } from './ResultScreen';
+import { ResultScreen, type EvidenceState } from './ResultScreen';
 
 const castAt = new Date('2026-07-13T08:00:00.000Z');
 
@@ -63,12 +63,15 @@ const readyAIStatus: AIConfigStatus = {
   usage: [],
 };
 
+afterEach(() => vi.useRealTimers());
+
 function renderResult(
   targetSession: DivinationSession = session,
   {
     analyzing = false,
     onAnalyze = vi.fn(),
     targetEvidence = evidence,
+    evidenceState = 'ready',
     sessionSaveStatus = 'saved',
     sessionSaveError = '',
     analysisSaveStatus = targetSession.analysis ? 'saved' : 'idle',
@@ -81,6 +84,7 @@ function renderResult(
     analyzing?: boolean;
     onAnalyze?: () => void;
     targetEvidence?: EvidenceEntry[];
+    evidenceState?: EvidenceState;
     sessionSaveStatus?: 'idle' | 'saving' | 'saved' | 'error';
     sessionSaveError?: string;
     analysisSaveStatus?: 'idle' | 'saving' | 'saved' | 'error';
@@ -97,6 +101,7 @@ function renderResult(
       aiStatus={targetAIStatus}
       aiAvailable={aiAvailable}
       evidence={targetEvidence}
+      evidenceState={evidenceState}
       retrievalDiagnostics={null}
       sessionSaveStatus={sessionSaveStatus}
       sessionSaveError={sessionSaveError}
@@ -164,6 +169,16 @@ describe('ResultScreen Markdown 解读', () => {
     });
     expect(screen.getByRole('button', { name: '开始解读' })).toBeEnabled();
     expect(screen.getByRole('textbox', { name: '你的追问' })).toBeEnabled();
+  });
+
+  it('makes a long-running analysis visibly active instead of leaving a static spinner', () => {
+    vi.useFakeTimers();
+    renderResult(session, { analyzing: true });
+
+    expect(screen.getByRole('status')).toHaveTextContent('已等待 0 秒');
+    expect(screen.getByRole('status')).toHaveTextContent('请求仍在进行，不会自动重试');
+    act(() => vi.advanceTimersByTime(65_000));
+    expect(screen.getByRole('status')).toHaveTextContent('已等待 1 分 5 秒');
   });
 
   it('presents a static cast as a single-hexagram opening and keeps analysis, plate and evidence in reading order', () => {
@@ -419,10 +434,12 @@ describe('ResultScreen Markdown 解读', () => {
     expect(onAnalyze).not.toHaveBeenCalled();
   });
 
-  it('states clearly when no traceable evidence is available', () => {
-    renderResult(session, { targetEvidence: [] });
-
-    expect(screen.getByText('当前知识库没有找到足够证据，因此不会编造古籍引用。')).toBeVisible();
+  it.each([
+    ['idle', '尚未检索'], ['loading', '正在检索'], ['empty', '没有找到'], ['error', '检索未完成'],
+  ] as const)('distinguishes evidence state %s', (evidenceState, text) => {
+    renderResult(session, { targetEvidence: [], evidenceState });
+    expect(screen.getByText(new RegExp(text), { selector: 'p' })).toBeVisible();
+    if (evidenceState !== 'empty') expect(screen.queryByText(/没有找到足够证据/)).not.toBeInTheDocument();
   });
 
   it('renders follow-up Markdown and rejects legacy structured messages', () => {

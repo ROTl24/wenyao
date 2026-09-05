@@ -96,6 +96,7 @@ test('sanitizer retains an explicitly supplied physical visualSeed so validation
 test('sandboxed preload exposes the desktop bridge and independently sanitizes session payloads', async () => {
   const calls = [];
   const listeners = new Map();
+  let resolveAnalysis;
   let exposed;
   const electron = {
     contextBridge: {
@@ -107,6 +108,9 @@ test('sandboxed preload exposes the desktop bridge and independently sanitizes s
     ipcRenderer: {
       invoke(channel, ...args) {
         calls.push({ channel, args });
+        if (channel === 'ai:analyze') {
+          return new Promise((resolve) => { resolveAnalysis = resolve; });
+        }
         if (channel === 'updates:get-state') {
           return Promise.resolve({
             status: 'error',
@@ -196,6 +200,11 @@ test('sandboxed preload exposes the desktop bridge and independently sanitizes s
     args: [{ capability: 'generation', apiUrl: 'https://api.example.com/v1', apiKey: 'secret' }],
   });
 
+  const review = { status: 'happened', observedAt: '2026-09-06', note: '本地复盘', tags: ['项目'], updatedAt: '2026-09-06T00:00:00.000Z' };
+  await exposed.sessions.import({ sessions: [{ id: 'restored', lines: [], messages: [], review: { ...review, secret: 'drop-me' }, secret: 'drop-me' }], resolutions: { restored: { action: 'skip', expectedUpdatedAt: review.updatedAt } }, settings: { secret: 'drop-me' } });
+  assert.deepEqual(calls.at(-1), { channel: 'sessions:import', args: [{ sessions: [{ id: 'restored', castingBasis: {}, lines: [], messages: [], review }], resolutions: { restored: { action: 'skip', expectedUpdatedAt: review.updatedAt } } }] });
+  assert.throws(() => sanitizeRendererSession({ review: { ...review, observedAt: '2026-02-30' } }), /日期/);
+
   assert.equal(await exposed.externalLinks.open('repository'), true);
   assert.deepEqual(calls.at(-1), {
     channel: 'external-links:open',
@@ -204,6 +213,30 @@ test('sandboxed preload exposes the desktop bridge and independently sanitizes s
 
   assert.equal(exposed.runtime.kind, 'electron');
   assert.equal(exposed.runtime.platform, process.platform);
+
+  const analysisProgress = [];
+  const analysisPromise = exposed.ai.analyze(
+    { question: '问题', evidence: [] },
+    (progress) => analysisProgress.push(progress),
+  );
+  const analysisCall = calls.at(-1);
+  assert.equal(analysisCall.channel, 'ai:analyze');
+  assert.equal(typeof analysisCall.args[0].requestId, 'string');
+  assert.equal(analysisCall.args[0].question, '问题');
+  const requestId = analysisCall.args[0].requestId;
+  const analysisProgressListener = listeners.get('ai:analysis-progress');
+  assert.equal(typeof analysisProgressListener, 'function');
+  analysisProgressListener({}, { requestId: 'another-request', stage: 'writing' });
+  analysisProgressListener({}, { requestId, stage: 'unsupported' });
+  analysisProgressListener({}, { requestId, stage: 'reasoning', detail: 'must-not-cross-preload' });
+  analysisProgressListener({}, { requestId, stage: 'writing', delta: '可展示正文', reasoning_content: 'private', apiKey: 'private' });
+  assert.deepEqual(analysisProgress, [{ stage: 'reasoning' }, { stage: 'writing', delta: '可展示正文' }]);
+  await exposed.ai.cancel(requestId);
+  assert.deepEqual(calls.at(-1), { channel: 'ai:cancel', args: [requestId] });
+  resolveAnalysis({ markdown: '# 解读' });
+  assert.deepEqual(await analysisPromise, { markdown: '# 解读' });
+  assert.equal(listeners.has('ai:analysis-progress'), false);
+
   let settingsOpenCount = 0;
   const unsubscribeSettings = exposed.application.onOpenSettings(() => { settingsOpenCount += 1; });
   listeners.get('application:open-settings')();

@@ -5,6 +5,7 @@ import {
   type DivinationSession,
 } from './session';
 import { deriveTimeCasting } from './timeCasting';
+import sessionRecords from '../../shared/session-records.cjs';
 
 type UnknownRecord = Record<string, unknown>;
 
@@ -99,6 +100,8 @@ export function sanitizeRendererSession(value: unknown): unknown {
     session.castingBasis = sanitizeCastingBasis(value.castingBasis);
     if (Array.isArray(value.lines)) session.lines = value.lines.map(sanitizeLine);
     if (isRecord(value.currentLine)) session.currentLine = sanitizeCurrentLine(value.currentLine);
+    if (value.generationDraft !== undefined) session.generationDraft = sessionRecords.sanitizeGenerationDraft(value.generationDraft);
+    if (value.review !== undefined) session.review = sessionRecords.sanitizeSessionReview(value.review);
   }
   return session;
 }
@@ -251,5 +254,8 @@ export function validateSessionForSave(
   }
   if (session.status === 'complete' && !isRecord(session.plate)) throw new TypeError('完整会话缺少排盘');
 
-  return structuredClone(value) as unknown as DivinationSession;
+  const safe = structuredClone(value) as unknown as DivinationSession;
+  if (value.generationDraft !== undefined) safe.generationDraft = sessionRecords.sanitizeGenerationDraft(value.generationDraft);
+  if (value.review !== undefined) safe.review = sessionRecords.sanitizeSessionReview(value.review);
+  return safe;
 }

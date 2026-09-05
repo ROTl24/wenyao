@@ -107,6 +107,26 @@ afterEach(() => {
 });
 
 describe('问爻桌面体验', () => {
+  it('keeps a saved outcome review when an already running analysis finishes later', async () => {
+    const original = completedHistorySession('复盘不会被稍后完成的解读覆盖');
+    localStorage.setItem('wenyao-browser-sessions', JSON.stringify([original]));
+    let finish: (value: Awaited<ReturnType<typeof desktop.ai.analyze>>) => void = () => {};
+    vi.spyOn(desktop.ai, 'analyze').mockImplementation(() => new Promise((resolve) => { finish = resolve; }));
+    render(<App />);
+    fireEvent.click(screen.getByRole('button', { name: '历史记录' }));
+    fireEvent.click((await screen.findByText(original.question)).closest('button')!);
+    fireEvent.click(screen.getByRole('button', { name: '开始解读' }));
+    await waitFor(() => expect(desktop.ai.analyze).toHaveBeenCalledTimes(1));
+    fireEvent.click(screen.getByRole('button', { name: '历史记录' }));
+    fireEvent.click(screen.getByRole('button', { name: `复盘：${original.question}` }));
+    fireEvent.change(screen.getByRole('combobox', { name: '验证状态' }), { target: { value: 'happened' } });
+    fireEvent.change(screen.getByRole('textbox', { name: '实际结果与个人备注' }), { target: { value: '实际进展已记录。' } });
+    fireEvent.click(screen.getByRole('button', { name: '保存复盘' }));
+    await waitFor(() => expect(screen.queryByRole('dialog', { name: '占后复盘' })).not.toBeInTheDocument());
+    await act(async () => finish({ ok: true, report: { mode: 'cloud', markdown: '## 9. 综合结论\n\n条件仍需确认。', generatedAt: new Date().toISOString() } }));
+    await waitFor(async () => expect((await desktop.sessions.get(original.id))?.analysis?.markdown).toContain('条件仍需确认'));
+    expect((await desktop.sessions.get(original.id))?.review).toMatchObject({ status: 'happened', note: '实际进展已记录。' });
+  });
   it('accepts a three-character question then enters the first casting line', async () => {
     render(<App />);
     const start = screen.getByRole('button', { name: '开始起卦' });
@@ -322,6 +342,30 @@ describe('问爻桌面体验', () => {
     expect(retrieve).not.toHaveBeenCalled();
   });
 
+  it('shows provider progress while one long analysis request remains in flight', async () => {
+    const savedSession = completedHistorySession('长解读需要持续显示进度');
+    localStorage.setItem('wenyao-browser-sessions', JSON.stringify([savedSession]));
+    let reportProgress: Parameters<typeof desktop.ai.analyze>[1];
+    vi.spyOn(desktop.ai, 'analyze').mockImplementation((_payload, onProgress) => {
+      reportProgress = onProgress;
+      return new Promise(() => {});
+    });
+
+    render(<App />);
+    fireEvent.click(screen.getByRole('button', { name: '历史记录' }));
+    fireEvent.click((await screen.findByText('长解读需要持续显示进度')).closest('button')!);
+    fireEvent.click(await screen.findByRole('button', { name: '开始解读' }));
+
+    await waitFor(() => expect(reportProgress).toBeTypeOf('function'));
+    expect(screen.getByText(/古籍证据已就绪，正在连接解读模型/)).toBeVisible();
+
+    act(() => reportProgress?.({ stage: 'reasoning' }));
+    await waitFor(() => expect(screen.getByText(/模型正在推理/)).toBeVisible());
+
+    act(() => reportProgress?.({ stage: 'writing' }));
+    await waitFor(() => expect(screen.getByText(/模型正在生成完整解读/)).toBeVisible());
+  });
+
   it('shows an explicit AI error without creating a local substitute report', async () => {
     const savedSession = completedHistorySession('没有密钥时不生成替代解读');
     localStorage.setItem('wenyao-browser-sessions', JSON.stringify([savedSession]));
@@ -417,55 +461,28 @@ describe('问爻桌面体验', () => {
     expect(JSON.parse(localStorage.getItem('wenyao-browser-sessions') || '[]')).toEqual([]);
   });
 
-  it('merges an analysis and a concurrent follow-up without losing either result', async () => {
-    const savedSession = completedHistorySession('并发解读与追问都要保留');
+  it('waits for a complete report before allowing a follow-up on the same session', async () => {
+    const savedSession = completedHistorySession('主报告完成后再追问');
     localStorage.setItem('wenyao-browser-sessions', JSON.stringify([savedSession]));
-    let resolveAnalysis: ((value: Awaited<ReturnType<typeof desktop.ai.analyze>>) => void) | undefined;
-    let resolveFollowUp: ((value: Awaited<ReturnType<typeof desktop.ai.followUp>>) => void) | undefined;
-    vi.spyOn(desktop.ai, 'analyze').mockImplementation(() => (
-      new Promise((resolve) => {
-        resolveAnalysis = resolve;
-      })
-    ));
-    vi.spyOn(desktop.ai, 'followUp').mockImplementation(() => (
-      new Promise((resolve) => {
-        resolveFollowUp = resolve;
-      })
-    ));
-
+    let finish: ((value: Awaited<ReturnType<typeof desktop.ai.analyze>>) => void) | undefined;
+    vi.spyOn(desktop.ai, 'analyze').mockImplementation(() => new Promise((resolve) => { finish = resolve; }));
+    const follow = vi.spyOn(desktop.ai, 'followUp').mockResolvedValue({ ok: true, answer: { content: '### 追问答复\n\n保留追问结果。' } });
     render(<App />);
     fireEvent.click(screen.getByRole('button', { name: '历史记录' }));
-    fireEvent.click((await screen.findByText('并发解读与追问都要保留')).closest('button')!);
+    fireEvent.click((await screen.findByText('主报告完成后再追问')).closest('button')!);
     fireEvent.click(await screen.findByRole('button', { name: '开始解读' }));
-    fireEvent.change(screen.getByRole('textbox', { name: '你的追问' }), {
-      target: { value: '下一步该注意什么？' },
-    });
+    fireEvent.change(screen.getByRole('textbox', { name: '你的追问' }), { target: { value: '下一步该注意什么？' } });
+    expect(screen.getByRole('button', { name: '继续追问' })).toBeDisabled();
+    await waitFor(() => expect(finish).toBeTypeOf('function'));
+    await act(async () => { finish?.({ ok: true, report: { mode: 'cloud', markdown: '## 主报告\n\n完整正文。', generatedAt: new Date().toISOString() } }); });
+    await waitFor(() => expect(screen.getByRole('button', { name: '继续追问' })).toBeEnabled());
     fireEvent.click(screen.getByRole('button', { name: '继续追问' }));
-    await waitFor(() => expect(resolveFollowUp).toBeTypeOf('function'));
-
-    await act(async () => {
-      resolveAnalysis?.({
-        ok: true,
-        report: {
-          mode: 'cloud',
-          markdown: '## 并发主报告\n\n主报告正文。',
-          generatedAt: new Date().toISOString(),
-        },
-      });
-      await Promise.resolve();
-      resolveFollowUp?.({
-        ok: true,
-        answer: { content: '### 追问答复\n\n保留追问结果。' },
-      });
-    });
-
-    await waitFor(() => {
-      const [stored] = JSON.parse(localStorage.getItem('wenyao-browser-sessions') || '[]') as DivinationSession[];
-      expect(stored.analysis?.markdown).toContain('并发主报告');
-      expect(stored.messages).toHaveLength(2);
-    });
-    expect(await screen.findByRole('heading', { name: '并发主报告' })).toBeVisible();
-    expect(screen.getByRole('heading', { name: '追问答复' })).toBeVisible();
+    await waitFor(() => expect(follow).toHaveBeenCalledOnce());
+    expect(follow.mock.calls[0][0].session.analysis?.markdown).toContain('完整正文');
+    expect(await screen.findByRole('heading', { name: '追问答复' })).toBeVisible();
+    const [stored] = JSON.parse(localStorage.getItem('wenyao-browser-sessions') || '[]');
+    expect(stored.analysis.markdown).toContain('主报告');
+    expect(stored.messages).toHaveLength(2);
   });
 
   it('reuses the latest evidence snapshot for clarification and runs full retrieval for a new concern', async () => {
@@ -683,4 +700,56 @@ describe('问爻桌面体验', () => {
     expect(screen.getByRole('button', { name: '开始起卦' })).toBeDisabled();
     expect(save).not.toHaveBeenCalled();
   });
+});
+
+it('keeps streamed text across navigation and saves a stopped draft instead of a late report', async () => {
+  const saved = completedHistorySession('切页后继续阅读这次解读');
+  localStorage.setItem('wenyao-browser-sessions', JSON.stringify([saved]));
+  let progress: Parameters<typeof desktop.ai.analyze>[1];
+  let finish: ((value: Awaited<ReturnType<typeof desktop.ai.analyze>>) => void) | undefined;
+  const analyze = vi.spyOn(desktop.ai, 'analyze').mockImplementation((_payload, onProgress) => {
+    progress = onProgress;
+    return new Promise((resolve) => { finish = resolve; });
+  });
+  const cancel = vi.spyOn(desktop.ai, 'cancel').mockResolvedValue({ stopped: true });
+  render(<App />);
+  fireEvent.click(screen.getByRole('button', { name: '历史记录' }));
+  fireEvent.click((await within(await screen.findByRole('dialog', { name: '问爻占簿' })).findByText(saved.question)).closest('button')!);
+  fireEvent.click(await screen.findByRole('button', { name: '开始解读' }));
+  await waitFor(() => expect(progress).toBeTypeOf('function'));
+  act(() => progress?.({ stage: 'writing', delta: '## 第一段\n条件仍待补充。' }));
+  expect(await screen.findByText(/条件仍待补充/)).toBeVisible();
+  fireEvent.click(screen.getByRole('button', { name: '返回问事' }));
+  fireEvent.click(screen.getByRole('button', { name: '历史记录' }));
+  fireEvent.click((await within(await screen.findByRole('dialog', { name: '问爻占簿' })).findByText(saved.question)).closest('button')!);
+  expect(await screen.findByText(/条件仍待补充/)).toBeVisible();
+  expect(screen.queryByRole('button', { name: '开始解读' })).not.toBeInTheDocument();
+  fireEvent.click(within(screen.getByRole('region', { name: '未完成正文' })).getByRole('button', { name: '停止接收' }));
+  expect(cancel).toHaveBeenCalledWith(analyze.mock.calls[0][0].requestId);
+  await act(async () => {
+    progress?.({ stage: 'writing', delta: '停止后的迟到片段' });
+    finish?.({ ok: true, report: { mode: 'cloud', markdown: '迟到完整报告', generatedAt: new Date().toISOString() } });
+  });
+  expect(await screen.findByText('已停止 · 未完成草稿')).toBeVisible();
+  const [stored] = JSON.parse(localStorage.getItem('wenyao-browser-sessions') || '[]');
+  expect(stored.analysis).toBeUndefined();
+  expect(stored.generationDraft).toMatchObject({ status: 'stopped', content: '## 第一段\n条件仍待补充。' });
+  expect(analyze).toHaveBeenCalledOnce();
+});
+
+it('stopping during retrieval prevents a later paid generation', async () => {
+  const saved = completedHistorySession('检索中停止');
+  localStorage.setItem('wenyao-browser-sessions', JSON.stringify([saved]));
+  let finish: ((value: Awaited<ReturnType<typeof desktop.retrieval.search>>) => void) | undefined;
+  vi.spyOn(desktop.retrieval, 'search').mockImplementation(() => new Promise((resolve) => { finish = resolve; }));
+  const analyze = vi.spyOn(desktop.ai, 'analyze');
+  vi.spyOn(desktop.ai, 'cancel').mockResolvedValue({ stopped: false });
+  render(<App />);
+  fireEvent.click(screen.getByRole('button', { name: '历史记录' }));
+  fireEvent.click((await within(await screen.findByRole('dialog', { name: '问爻占簿' })).findByText(saved.question)).closest('button')!);
+  fireEvent.click(await screen.findByRole('button', { name: '开始解读' }));
+  fireEvent.click(within(screen.getByRole('region', { name: '未完成正文' })).getByRole('button', { name: '停止接收' }));
+  await act(async () => { finish?.({ evidence: [], diagnostics: { mode: 'lexical-fallback', lexicalCandidates: 0, vectorCandidates: 0, fusedCandidates: 0, rerankedCandidates: 0, vectorUsed: false, rerankUsed: false, stages: [], warnings: [] } }); });
+  expect(await screen.findByText('已停止 · 未完成草稿')).toBeVisible();
+  expect(analyze).not.toHaveBeenCalled();
 });

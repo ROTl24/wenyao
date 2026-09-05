@@ -24,6 +24,24 @@ export {
 export type SessionCategory = 'career' | 'wealth' | 'relationship' | 'health' | 'study' | 'lost_item' | 'travel' | 'other';
 export type SessionStatus = 'casting' | 'complete';
 
+export interface SessionReview {
+  status: 'pending' | 'happened' | 'unclear';
+  observedAt: string;
+  note: string;
+  tags: string[];
+  updatedAt: string;
+}
+
+export interface GenerationDraft {
+  requestId: string;
+  kind: 'analysis' | 'followUp';
+  evidenceSnapshot?: AnalysisEvidenceSnapshot;
+  status: 'stopped' | 'failed';
+  content: string;
+  question: string;
+  updatedAt: string;
+}
+
 export interface ChatMessage {
   id: string;
   role: 'user' | 'assistant';
@@ -49,6 +67,8 @@ export interface DivinationSession {
   plate?: DivinationPlate;
   analysis?: AnalysisReport;
   messages: ChatMessage[];
+  review?: SessionReview;
+  generationDraft?: GenerationDraft | null;
 }
 
 const LINE_VALUES = new Set<LineValue>([6, 7, 8, 9]);

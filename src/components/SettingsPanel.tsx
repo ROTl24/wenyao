@@ -4,6 +4,7 @@ import { desktop } from '../lib/desktop';
 import type { AIConfigStatus, AIProviderCatalog, CorpusStatus, UpdateState } from '../types/desktop';
 import { AIStatusCard } from './AIStatusCard';
 import { CreatorLinks } from './CreatorLinks';
+import { useModalDialog } from '../lib/useModalDialog';
 
 interface Props {
   updateState: UpdateState;
@@ -40,6 +41,7 @@ export function SettingsPanel({
   onClose,
 }: Props) {
   const runtime = desktop.runtime;
+  const dialogRef = useModalDialog<HTMLElement>(onClose);
   const { capabilities } = runtime;
   const secureStorageText = runtime.secureStorage === 'keychain'
     ? '访问密钥由 macOS 钥匙串保护，历史、语料和向量索引保存在当前用户的 Application Support 中。'
@@ -54,7 +56,7 @@ export function SettingsPanel({
 
   return (
     <div className="overlay" role="presentation" onMouseDown={(event) => { if (event.target === event.currentTarget) onClose(); }}>
-      <aside className="side-panel settings-panel" aria-modal="true" role="dialog">
+      <aside ref={dialogRef} tabIndex={-1} className="side-panel settings-panel" aria-modal="true" role="dialog" aria-label="应用设置">
         <header><div><h2>应用设置</h2><p>{capabilities.ai ? (runtime.kind === 'web' ? '会话级 AI 服务与本地知识库' : '软件更新、AI 服务与本地知识库') : '本地排盘、历史记录与内置古籍'}</p></div><button type="button" aria-label="关闭设置" onClick={onClose}><X /></button></header>
 
         <section className="settings-section">

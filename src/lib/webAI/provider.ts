@@ -1,15 +1,24 @@
+import type { AIAnalysisProgress } from '../../types/desktop';
 import type { AICapability, AIConnection } from '../../types/desktop';
 import { normalizeHttpsUrl, toDesktopError, validateWebConnection, WebAIError } from './security';
 import chatCompletionCore from '../../../shared/chat-completion-core.cjs';
 import providerResponseCore from '../../../shared/provider-response-core.cjs';
 
-const { hasReasoning, inspectChatCompletion, textValue } = chatCompletionCore as {
-  hasReasoning: (value: unknown) => boolean;
+const {
+  chatCompletionFromStreamState,
+  consumeChatStreamEvent,
+  createChatStreamSignal,
+  createChatStreamState,
+  inspectChatCompletion,
+} = chatCompletionCore as {
+  chatCompletionFromStreamState: (state: StreamedChatState) => ChatTransportResult & { complete: boolean };
+  consumeChatStreamEvent: (event: string, state: StreamedChatState) => 'reasoning' | 'writing' | null;
+  createChatStreamSignal: (outer?: AbortSignal) => { signal: AbortSignal; receivedChunk(): void; dispose(): void };
+  createChatStreamState: () => StreamedChatState;
   inspectChatCompletion: (
     response: Record<string, any>,
     options?: { reasoningObserved?: boolean },
   ) => { status: 'content' | 'output_limit' | 'reasoning_only' | 'non_text' | 'invalid'; content: string; finishReason: string };
-  textValue: (value: unknown) => string;
 };
 const { classifyProviderFailure } = providerResponseCore as {
   classifyProviderFailure(input: { status: number; headers?: Headers; body?: string; label?: string; codePrefix?: string; includeProviderMessage?: boolean }): import('../../types/desktop').DesktopError;
@@ -25,8 +34,6 @@ interface UsageRecord {
 
 const MAX_RESPONSE_BYTES = 4 * 1024 * 1024;
 const JSON_REQUEST_TIMEOUT_MS = 90_000;
-const STREAM_CONNECT_TIMEOUT_MS = 3 * 60_000;
-const STREAM_IDLE_TIMEOUT_MS = 90_000;
 
 function usage(value: unknown): Omit<UsageRecord, 'capability' | 'model'> | null {
   if (!value || typeof value !== 'object') return null;
@@ -93,32 +100,9 @@ function combinedSignal(outer?: AbortSignal): { signal: AbortSignal; dispose(): 
   };
 }
 
-function streamSignal(outer?: AbortSignal): { signal: AbortSignal; receivedChunk(): void; dispose(): void } {
-  const controller = new AbortController();
-  const timeout = (message: string) => controller.abort(new DOMException(message, 'TimeoutError'));
-  const connectTimer = setTimeout(() => timeout('AI stream did not start in time'), STREAM_CONNECT_TIMEOUT_MS);
-  let idleTimer: ReturnType<typeof setTimeout> | null = null;
-  const abort = () => controller.abort(outer?.reason);
-  if (outer?.aborted) abort();
-  else outer?.addEventListener('abort', abort, { once: true });
-  return {
-    signal: controller.signal,
-    receivedChunk() {
-      clearTimeout(connectTimer);
-      if (idleTimer) clearTimeout(idleTimer);
-      idleTimer = setTimeout(() => timeout('AI stream stopped producing data'), STREAM_IDLE_TIMEOUT_MS);
-    },
-    dispose() {
-      clearTimeout(connectTimer);
-      if (idleTimer) clearTimeout(idleTimer);
-      outer?.removeEventListener('abort', abort);
-    },
-  };
-}
-
 interface StreamedChatState {
   content: string;
-  usageValue?: unknown;
+  usage: unknown;
   completed: boolean;
   finishReason: string;
   reasoningObserved: boolean;
@@ -129,57 +113,42 @@ interface ChatTransportResult {
   reasoningObserved: boolean;
 }
 
-function consumeStreamEvent(event: string, state: StreamedChatState): void {
-  const data = event.replace(/\r\n/g, '\n').split('\n')
-    .filter((line) => line.startsWith('data:'))
-    .map((line) => line.slice(5).trimStart())
-    .join('\n')
-    .trim();
-  if (!data) return;
-  if (data === '[DONE]') {
-    state.completed = true;
-    return;
-  }
-  let chunk: Record<string, any>;
+function consumeStreamEvent(event: string, state: StreamedChatState, onProgress?: (progress: AIAnalysisProgress) => void): void {
   try {
-    chunk = JSON.parse(data) as Record<string, any>;
-  } catch {
+    const offset = state.content.length;
+    const stage = consumeChatStreamEvent(event, state);
+    if (stage) {
+      const delta = state.content.slice(offset);
+      try { onProgress?.({ stage, ...(delta ? { delta } : {}) }); } catch { /* Observers do not affect the request. */ }
+    }
+  }
+  catch (error) {
+    if ((error as { code?: string }).code !== 'CHAT_STREAM_INVALID_EVENT') throw error;
     throw new WebAIError({ code: 'WEB_AI_INVALID_RESPONSE', message: 'AI 服务返回了无法解析的流式数据。', dataSafe: true, nextAction: '请确认自定义服务兼容 OpenAI Chat 流式协议。' });
   }
-  const choice = chunk.choices?.[0];
-  const delta = choice?.delta;
-  state.content += textValue(delta?.content);
-  if (hasReasoning(delta?.reasoning_content)) state.reasoningObserved = true;
-  if (typeof choice?.finish_reason === 'string' && choice.finish_reason) state.finishReason = choice.finish_reason;
-  if (chunk.usage) state.usageValue = chunk.usage;
 }
 
 function streamedChatResult(state: StreamedChatState): ChatTransportResult {
-  if (!state.completed && !state.finishReason) {
+  const result = chatCompletionFromStreamState(state);
+  if (!result.complete) {
     throw new WebAIError({ code: 'WEB_AI_STREAM_INCOMPLETE', message: 'AI 服务在解读完成前中断了流式响应。', dataSafe: true, nextAction: '请先到服务商控制台确认用量，再决定是否手动重试；问爻不会自动重试。' });
   }
-  return {
-    json: {
-      choices: [{ message: { content: state.content }, finish_reason: state.finishReason || null }],
-      ...(state.usageValue ? { usage: state.usageValue } : {}),
-    },
-    reasoningObserved: state.reasoningObserved,
-  };
+  return { json: result.json, reasoningObserved: result.reasoningObserved };
 }
 
-function parseStreamedChat(text: string): ChatTransportResult {
-  const state: StreamedChatState = { content: '', completed: false, finishReason: '', reasoningObserved: false };
-  text.replace(/\r\n/g, '\n').split(/\n\n+/).forEach((event) => consumeStreamEvent(event, state));
+function parseStreamedChat(text: string, onProgress?: (progress: AIAnalysisProgress) => void): ChatTransportResult {
+  const state = createChatStreamState();
+  text.replace(/\r\n/g, '\n').split(/\n\n+/).forEach((event) => consumeStreamEvent(event, state, onProgress));
   return streamedChatResult(state);
 }
 
-async function readStreamedChat(response: Response, onChunk: () => void): Promise<ChatTransportResult> {
+async function readStreamedChat(response: Response, onChunk: () => void, onProgress?: (progress: AIAnalysisProgress) => void): Promise<ChatTransportResult> {
   const declared = Number(response.headers.get('content-length') || 0);
   if (declared > MAX_RESPONSE_BYTES) throw new Error('AI 服务响应超过 4 MB 安全上限。');
-  if (!response.body) return parseStreamedChat(await response.text());
+  if (!response.body) return parseStreamedChat(await response.text(), onProgress);
   const reader = response.body.getReader();
   const decoder = new TextDecoder();
-  const state: StreamedChatState = { content: '', completed: false, finishReason: '', reasoningObserved: false };
+  const state = createChatStreamState();
   let buffer = '';
   let received = 0;
   while (true) {
@@ -198,7 +167,7 @@ async function readStreamedChat(response: Response, onChunk: () => void): Promis
       if (!boundary || boundary.index === undefined) break;
       const event = buffer.slice(0, boundary.index);
       buffer = buffer.slice(boundary.index + boundary[0].length);
-      consumeStreamEvent(event, state);
+      consumeStreamEvent(event, state, onProgress);
       if (state.completed) {
         void reader.cancel().catch(() => undefined);
         return streamedChatResult(state);
@@ -206,7 +175,7 @@ async function readStreamedChat(response: Response, onChunk: () => void): Promis
     }
   }
   buffer += decoder.decode();
-  if (buffer.trim()) consumeStreamEvent(buffer, state);
+  if (buffer.trim()) consumeStreamEvent(buffer, state, onProgress);
   return streamedChatResult(state);
 }
 
@@ -214,9 +183,9 @@ async function streamChatRequest(
   url: string,
   apiKey: string,
   body: unknown,
-  options: { signal?: AbortSignal; fetchImpl?: typeof fetch } = {},
+  options: { signal?: AbortSignal; fetchImpl?: typeof fetch; onProgress?: (progress: AIAnalysisProgress) => void } = {},
 ): Promise<ChatTransportResult> {
-  const timeout = streamSignal(options.signal);
+  const timeout = createChatStreamSignal(options.signal);
   try {
     const response = await (options.fetchImpl || fetch)(url, {
       method: 'POST',
@@ -237,13 +206,17 @@ async function streamChatRequest(
       const text = await boundedText(response, timeout.receivedChunk);
       throw providerFailure(response, text);
     }
+    try { options.onProgress?.({ stage: 'connected' }); } catch { /* Observer only. */ }
     if (response.headers.get('content-type')?.includes('text/event-stream')) {
-      return await readStreamedChat(response, timeout.receivedChunk);
+      return await readStreamedChat(response, timeout.receivedChunk, options.onProgress);
     }
     const text = await boundedText(response, timeout.receivedChunk);
-    if (text.trimStart().startsWith('data:')) return parseStreamedChat(text);
+    if (text.trimStart().startsWith('data:')) return parseStreamedChat(text, options.onProgress);
     try {
-      return { json: text ? JSON.parse(text) as Record<string, any> : {}, reasoningObserved: false };
+      const json = text ? JSON.parse(text) as Record<string, any> : {};
+      const visible = inspectChatCompletion(json).content;
+      if (visible) { try { options.onProgress?.({ stage: 'writing', delta: visible }); } catch { /* Observer only. */ } }
+      return { json, reasoningObserved: false };
     } catch {
       throw new WebAIError({ code: 'WEB_AI_INVALID_RESPONSE', message: 'AI 服务返回了无法解析的数据。', dataSafe: true, nextAction: '请确认自定义服务兼容所选协议。' });
     }
@@ -341,7 +314,7 @@ export function createWebProvider(
 
   return {
     origins: validated.origins,
-    async chat({ messages, signal, maxTokens, temperature, thinking }: { messages: Array<{ role: string; content: string }>; signal?: AbortSignal; maxTokens?: number; temperature?: number; thinking?: boolean }) {
+    async chat({ messages, signal, maxTokens, temperature, thinking, onProgress }: { messages: Array<{ role: string; content: string }>; signal?: AbortSignal; maxTokens?: number; temperature?: number; thinking?: boolean; onProgress?: (progress: AIAnalysisProgress) => void }) {
       const definition = validated.connection.capabilities.generation!;
       const transport = await streamChatRequest(validated.endpoints.generation!, apiKey, {
         model: definition.model,
@@ -351,7 +324,7 @@ export function createWebProvider(
         ...(thinking === undefined ? {} : { thinking: { type: thinking ? 'enabled' : 'disabled' } }),
         stream: true,
         stream_options: { include_usage: true },
-      }, { signal });
+      }, { signal, onProgress });
       const { json } = transport;
       recordUsage('generation', definition.model, json);
       const result = inspectChatCompletion(json, { reasoningObserved: transport.reasoningObserved });
@@ -359,7 +332,7 @@ export function createWebProvider(
       if (result.status === 'output_limit') {
         throw new WebAIError({
           code: 'WEB_AI_OUTPUT_LIMIT',
-          message: '解读模型在生成可展示正文前耗尽了输出额度。',
+          message: '解读模型达到服务商输出额度，正文可能尚未完成。',
           dataSafe: true,
           nextAction: maxTokens === undefined
             ? '问爻未设置本次输出 Token 上限；请在服务商侧提高模型可用输出额度，或关闭强制思考后手动重试。问爻不会自动重试。'

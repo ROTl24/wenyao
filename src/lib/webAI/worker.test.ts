@@ -1,3 +1,4 @@
+import { buildPlate } from '../divination';
 // @vitest-environment jsdom
 
 import { beforeAll, beforeEach, describe, expect, it, vi } from 'vitest';
@@ -228,4 +229,28 @@ describe('PWA 隔离 Worker 的可选能力链路', () => {
     expect(recovered.ok).toBe(true);
     expect((embeddingBodies[0].input as string[])[0]).toBe(failedBatchFirstDocument);
   });
+  it('emits visible progress and stops one in-flight generation through the Worker command', async () => {
+    await testCapability('generation');
+    await call('completeSetup', { capabilities: ['generation'] });
+    let controller: ReadableStreamDefaultController<Uint8Array>;
+    let transportSignal: AbortSignal | undefined;
+    vi.mocked(fetch).mockImplementationOnce(async (_input, init) => {
+      transportSignal = init?.signal as AbortSignal;
+      return new Response(new ReadableStream<Uint8Array>({ start(stream) {
+        controller = stream;
+        transportSignal?.addEventListener('abort', () => stream.error(new DOMException('Stopped', 'AbortError')));
+      } }), { headers: { 'content-type': 'text/event-stream' } });
+    });
+    const before = vi.mocked(fetch).mock.calls.length;
+    const pending = call<{ ok: boolean; error?: { code: string } }>('analyze', { requestId: 'worker-report', question: '离线测试', category: 'career', plate: buildPlate([7, 8, 7, 8, 7, 8], new Date('2026-09-06T00:00:00.000Z')), evidence: [] });
+    await vi.waitFor(() => expect(transportSignal).toBeDefined());
+    controller!.enqueue(new TextEncoder().encode('data: {"choices":[{"delta":{"reasoning_content":"PRIVATE REASONING"}}]}\n\ndata: {"choices":[{"delta":{"content":"第一段正文"}}]}\n\n'));
+    await vi.waitFor(() => expect(posted.some((event) => JSON.stringify(event).includes('第一段正文'))).toBe(true));
+    expect(JSON.stringify(posted)).not.toContain('PRIVATE REASONING');
+    expect(await call('cancelGeneration', 'worker-report')).toEqual({ stopped: true });
+    expect(transportSignal!.aborted).toBe(true);
+    expect(await pending).toMatchObject({ ok: false, error: { code: 'AI_GENERATION_STOPPED' } });
+    expect(vi.mocked(fetch).mock.calls.length - before).toBe(1);
+  });
+
 });

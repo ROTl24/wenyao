@@ -1,3 +1,5 @@
+import { GenerationTasks } from './components/GenerationTasks';
+import { taskIsRunning, useGenerationTasks, type GenerationTask } from './lib/useGenerationTasks';
 import { BookOpen, CalendarDays, History, MessageSquareHeart, Settings2 } from 'lucide-react';
 import { useEffect, useMemo, useRef, useState } from 'react';
 import packageInfo from '../package.json';
@@ -8,7 +10,7 @@ import { HistoryPanel } from './components/HistoryPanel';
 import { HomeScreen } from './components/HomeScreen';
 import { PhysicalCastingScreen } from './components/PhysicalCastingScreen';
 import { PhysicalReviewScreen } from './components/PhysicalReviewScreen';
-import { ResultScreen } from './components/ResultScreen';
+import { ResultScreen, type EvidenceState } from './components/ResultScreen';
 import { RitualScreen } from './components/RitualScreen';
 import { SettingsPanel } from './components/SettingsPanel';
 import { FeedbackPanel } from './components/FeedbackPanel';
@@ -27,6 +29,7 @@ import {
   type RetrievalDiagnostics,
 } from './lib/retrieval';
 import type { AnalysisEvidenceSnapshot } from './lib/types';
+import type { SessionImportRequest } from './lib/sessionArchive';
 import {
   appendPhysicalCastLine,
   createPhysicalCastDraft,
@@ -119,9 +122,12 @@ function mergeCompleteSessionState(
   current: DivinationSession | undefined,
   incoming: DivinationSession,
 ): DivinationSession {
-  if (!current || current.id !== incoming.id || current.status !== 'complete' || incoming.status !== 'complete') {
+  if (!current || current.id !== incoming.id) {
     return incoming;
   }
+  const review = current.review && (!incoming.review || current.review.updatedAt > incoming.review.updatedAt) ? current.review : incoming.review;
+  const updatedAt = incoming.updatedAt >= current.updatedAt ? incoming.updatedAt : current.updatedAt;
+  if (current.status !== 'complete' || incoming.status !== 'complete') return { ...incoming, review, updatedAt };
 
   const messages = [...current.messages];
   const messageIndexes = new Map(messages.map((message, index) => [message.id, index]));
@@ -137,13 +143,16 @@ function mergeCompleteSessionState(
 
   return {
     ...incoming,
-    analysis: incoming.analysis ?? current.analysis,
+    analysis: current.analysis && (!incoming.analysis || current.analysis.generatedAt > incoming.analysis.generatedAt) ? current.analysis : incoming.analysis,
+    generationDraft: current.updatedAt > incoming.updatedAt ? current.generationDraft : incoming.generationDraft,
+    review,
     messages,
-    updatedAt: incoming.updatedAt >= current.updatedAt ? incoming.updatedAt : current.updatedAt,
+    updatedAt,
   };
 }
 
 export function App() {
+  const generation = useGenerationTasks();
   const [screen, setScreen] = useState<Screen>('home');
   const [question, setQuestion] = useState('');
   const [category, setCategory] = useState<SessionCategory | null>(null);
@@ -161,6 +170,7 @@ export function App() {
   const [sessionSaveError, setSessionSaveError] = useState('');
   const [history, setHistory] = useState<DivinationSession[]>([]);
   const [evidence, setEvidence] = useState<EvidenceEntry[]>([]);
+  const [evidenceState, setEvidenceState] = useState<EvidenceState>('idle');
   const [retrievalDiagnostics, setRetrievalDiagnostics] = useState<RetrievalDiagnostics | null>(null);
   const [historyOpen, setHistoryOpen] = useState(false);
   const [libraryOpen, setLibraryOpen] = useState(false);
@@ -177,11 +187,9 @@ export function App() {
     currentVersion: '',
   });
   const [updatePromptOpen, setUpdatePromptOpen] = useState(false);
-  const [analyzing, setAnalyzing] = useState(false);
   const [analysisError, setAnalysisError] = useState('');
   const [analysisSaveStatus, setAnalysisSaveStatus] = useState<AnalysisSaveStatus>('idle');
   const [analysisSaveError, setAnalysisSaveError] = useState('');
-  const [chatting, setChatting] = useState(false);
   const [chatError, setChatError] = useState('');
   const activeSessionIdRef = useRef<string | null>(null);
   const activeSessionRef = useRef<DivinationSession | null>(null);
@@ -189,7 +197,8 @@ export function App() {
   const deletedSessionIdsRef = useRef(new Set<string>());
   const sessionSaveQueuesRef = useRef(new Map<string, Promise<void>>());
   const analysisEpochsRef = useRef(new Map<string, symbol>());
-  const analysisRunRef = useRef<{ sessionId: string; token: symbol } | null>(null);
+  const pendingAnalysisIdsRef = useRef(new Set<string>());
+  const pendingFollowUpIdsRef = useRef(new Set<string>());
   const aiStatusRef = useRef<AIConfigStatus>(emptyAIStatus);
   const dismissedUpdateVersionRef = useRef('');
   const updateAIStatus = (next: AIConfigStatus) => {
@@ -295,11 +304,9 @@ export function App() {
   const activateSession = (next: DivinationSession | null) => {
     const nextId = next?.id ?? null;
     if (activeSessionIdRef.current !== nextId) {
-      analysisRunRef.current = null;
-      setAnalyzing(false);
-      setChatting(false);
       setChatError('');
       setEvidence([]);
+      setEvidenceState('idle');
       setRetrievalDiagnostics(null);
       setAnalysisError('');
       setAnalysisSaveStatus('idle');
@@ -371,8 +378,7 @@ export function App() {
     ) return;
     const ownsAnalysisUi = () => (
       isActiveSession(next.id)
-      && analysisRunRef.current?.sessionId === next.id
-      && analysisRunRef.current.token === runToken
+      && analysisEpochsRef.current.get(next.id) === runToken
     );
     const mergedNext = mergeCompleteSessionState(
       latestSessionsRef.current.get(next.id),
@@ -390,12 +396,14 @@ export function App() {
     try {
       const saved = await commitSession(mergedNext);
       if (saved && ownsAnalysisUi()) setAnalysisSaveStatus('saved');
+      return Boolean(saved);
     } catch (error) {
       console.error('Failed to persist analysis', error);
       if (ownsAnalysisUi()) {
         setAnalysisSaveStatus('error');
         setAnalysisSaveError(error instanceof Error ? error.message : '写入历史记录失败。');
       }
+      return false;
     }
   };
 
@@ -405,62 +413,85 @@ export function App() {
     return { evidence: result.evidence, diagnostics: result.diagnostics };
   };
 
+  const generationStopped = (task: GenerationTask) => generation.ref.current.get(task.sessionId)?.status === 'stopping';
+
+  const saveUnfinishedGeneration = async (task: GenerationTask, error: string) => {
+    if (deletedSessionIdsRef.current.has(task.sessionId)) return;
+    const currentTask = generation.ref.current.get(task.sessionId);
+    const current = latestSessionsRef.current.get(task.sessionId);
+    if (!currentTask || currentTask.requestId !== task.requestId || !current) return;
+    const status = currentTask.status === 'stopping' ? 'stopped' : 'failed';
+    const updatedAt = new Date().toISOString();
+    const next: DivinationSession = { ...current, updatedAt, generationDraft: { requestId: task.requestId, kind: task.kind, status, content: currentTask.content, question: task.question, updatedAt, ...(currentTask.evidence && currentTask.diagnostics ? { evidenceSnapshot: evidenceSnapshot(current.category, currentTask.evidence, currentTask.diagnostics) } : {}) } };
+    latestSessionsRef.current.set(current.id, next);
+    if (isActiveSession(current.id)) { activeSessionRef.current = next; setSession(next); }
+    try {
+      await commitSession(next);
+      generation.update(task.requestId, { status, error, content: '' });
+    } catch {
+      generation.update(task.requestId, { status: 'save-error', error: '未完成草稿还没有写入占簿，请重试保存。' });
+    }
+  };
+
+  const stopGeneration = async (sessionId: string) => {
+    const task = generation.ref.current.get(sessionId);
+    if (!task || task.status !== 'running') return;
+    generation.update(task.requestId, { status: 'stopping' });
+    try { await desktop.ai.cancel(task.requestId); }
+    catch { generation.update(task.requestId, { error: '停止请求尚未确认，正在等待当前连接结束。' }); }
+  };
+
+  const retryGenerationSave = async (sessionId: string) => {
+    const task = generation.ref.current.get(sessionId);
+    const current = latestSessionsRef.current.get(sessionId);
+    if (!task || !current || task.status !== 'save-error') return;
+    try {
+      await commitSession(current);
+      generation.update(task.requestId, { status: current.generationDraft?.requestId === task.requestId ? current.generationDraft.status : 'complete', error: '', content: '' });
+      if (isActiveSession(sessionId)) { setAnalysisSaveStatus(current.analysis ? 'saved' : 'idle'); setAnalysisSaveError(''); }
+    } catch { generation.update(task.requestId, { error: '仍未写入占簿，请检查本机可用空间后重试保存。' }); }
+  };
+
   const runAnalysis = async (target: DivinationSession, explicit = false, forceReady = false) => {
-    if (!target.plate || deletedSessionIdsRef.current.has(target.id)) return;
+    if (!target.plate || deletedSessionIdsRef.current.has(target.id) || taskIsRunning(generation.ref.current.get(target.id)) || generation.ref.current.get(target.id)?.status === 'save-error') return;
     if (!forceReady && !isAIUsable(aiStatusRef.current)) {
-      if (explicit) {
-        setAISetupIntent('analysis');
-        setAISetupOpen(true);
-      }
+      if (explicit) { setAISetupIntent('analysis'); setAISetupOpen(true); }
       return;
     }
     const runToken = Symbol(target.id);
+    const task = generation.begin(target.id, target.question, 'analysis');
+    pendingAnalysisIdsRef.current.add(target.id);
     analysisEpochsRef.current.set(target.id, runToken);
-    const ownsAnalysisUi = () => (
-      isActiveSession(target.id)
-      && analysisRunRef.current?.sessionId === target.id
-      && analysisRunRef.current.token === runToken
-    );
-    if (isActiveSession(target.id)) {
-      analysisRunRef.current = { sessionId: target.id, token: runToken };
-      setAnalyzing(true);
-      setAnalysisError('');
-      setAnalysisSaveStatus('idle');
-      setAnalysisSaveError('');
-      setEvidence([]);
-      setRetrievalDiagnostics(null);
+    const ownsAnalysisUi = () => isActiveSession(target.id) && analysisEpochsRef.current.get(target.id) === runToken;
+    if (ownsAnalysisUi()) {
+      setEvidenceState('loading'); setAnalysisError(''); setAnalysisSaveStatus('idle'); setAnalysisSaveError(''); setEvidence([]); setRetrievalDiagnostics(null);
     }
+    let retrievalCompleted = false;
     try {
       const found = await evidenceFor(target);
+      retrievalCompleted = true;
+      if (deletedSessionIdsRef.current.has(target.id)) return;
+      if (generationStopped(task)) { await saveUnfinishedGeneration(task, '已停止接收，本次解读未完成。'); return; }
+      generation.update(task.requestId, { stage: 'connecting', evidence: found.evidence, diagnostics: found.diagnostics });
       if (ownsAnalysisUi()) {
-        setEvidence(found.evidence);
-        setRetrievalDiagnostics(found.diagnostics);
+        setEvidence(found.evidence); setEvidenceState(found.evidence.length ? 'ready' : 'empty'); setRetrievalDiagnostics(found.diagnostics);
       }
-      const result = await desktop.ai.analyze({
-        question: target.question,
-        category: target.category,
-        castingMethod: target.castingMethod,
-        castingBasis: target.castingBasis,
-        plate: target.plate,
-        evidence: found.evidence,
-        retrievalDiagnostics: found.diagnostics || undefined,
-      });
+      const result = await desktop.ai.analyze({ requestId: task.requestId, question: target.question, category: target.category, castingMethod: target.castingMethod, castingBasis: target.castingBasis, plate: target.plate, evidence: found.evidence, retrievalDiagnostics: found.diagnostics || undefined }, (progress) => generation.progress(task.requestId, progress));
+      if (deletedSessionIdsRef.current.has(target.id)) return;
+      if (generationStopped(task)) { await saveUnfinishedGeneration(task, '已停止接收，本次解读未完成。'); return; }
       if (result.ok && result.report) {
-        const report = {
-          ...result.report,
-          analysisId: crypto.randomUUID(),
-          evidenceSnapshot: evidenceSnapshot(target.category, found.evidence, found.diagnostics!),
-        };
-        await persistAnalysis(withAnalysis(target, report), runToken);
-      } else if (ownsAnalysisUi()) {
-        setAnalysisError(`${result.error?.message || 'AI 分析失败'} ${result.error?.nextAction || ''}`.trim());
+        generation.update(task.requestId, { status: 'saving' });
+        const report = { ...result.report, analysisId: crypto.randomUUID(), evidenceSnapshot: evidenceSnapshot(target.category, found.evidence, found.diagnostics!) };
+        const saved = await persistAnalysis({ ...withAnalysis(latestSessionsRef.current.get(target.id) || target, report), generationDraft: null }, runToken);
+        generation.update(task.requestId, { status: saved ? 'complete' : 'save-error', content: '', error: saved ? '' : '完整解读已收到，尚未写入占簿。' });
+      } else {
+        await saveUnfinishedGeneration(task, `${result.error?.message || 'AI 分析失败'} ${result.error?.nextAction || ''}`.trim());
       }
     } catch (error) {
-      if (ownsAnalysisUi()) {
-        setAnalysisError(error instanceof Error ? error.message : '检索或分析服务暂时不可用。');
-      }
+      if (ownsAnalysisUi() && !retrievalCompleted) setEvidenceState('error');
+      await saveUnfinishedGeneration(task, error instanceof Error ? error.message : '检索或分析服务暂时不可用。');
     } finally {
-      if (ownsAnalysisUi()) setAnalyzing(false);
+      pendingAnalysisIdsRef.current.delete(target.id);
     }
   };
 
@@ -630,7 +661,7 @@ export function App() {
     if (physicalDraft?.lines.length && !window.confirm('线下起卦尚未保存，确定放弃并打开这条历史记录吗？')) {
       return;
     }
-    let next = normalizeSession(saved);
+    let next = normalizeSession(latestSessionsRef.current.get(saved.id) || saved);
     if (next.status === 'casting' && next.castingMethod !== 'digital') {
       console.error('Refused to resume an incomplete physical casting session');
       return;
@@ -647,12 +678,14 @@ export function App() {
     setHistoryOpen(false);
     setSessionSaveStatus('saved');
     setSessionSaveError('');
-    setAnalysisSaveStatus(next.analysis ? 'saved' : 'idle');
-    setAnalysisSaveError('');
+    const task = generation.ref.current.get(next.id);
+    setAnalysisSaveStatus(task?.kind === 'analysis' && task.status === 'save-error' ? 'error' : next.analysis ? 'saved' : 'idle');
+    setAnalysisSaveError(task?.status === 'save-error' ? task.error : '');
     if (next.status === 'complete') {
       setScreen('result');
       const snapshot = next.analysis?.evidenceSnapshot;
       setEvidence(snapshot?.evidence || []);
+      setEvidenceState(snapshot ? snapshot.evidence.length ? 'ready' : 'empty' : 'idle');
       setRetrievalDiagnostics(snapshot?.retrieval || null);
     } else {
       setScreen('casting');
@@ -660,13 +693,41 @@ export function App() {
     }
   };
 
+  const importSessions = async (payload: SessionImportRequest) => {
+    if (generation.tasks.some((task) => task.status === 'save-error') || pendingAnalysisIdsRef.current.size || pendingFollowUpIdsRef.current.size || sessionSaveQueuesRef.current.size || starting || physicalFinalizing) {
+      throw new Error('请等待当前生成或保存完成后再导入备份。');
+    }
+    if (analysisSaveStatus === 'error' || sessionSaveStatus === 'error' || pendingPhysicalSession || pendingStartSession) {
+      throw new Error('当前记录尚未保存，请先重试保存，再导入备份。');
+    }
+    const restored = (await desktop.sessions.import(payload)).map(normalizeSession);
+    latestSessionsRef.current = new Map(restored.map((item) => [item.id, item]));
+    restored.forEach((item) => deletedSessionIdsRef.current.delete(item.id));
+    setHistory(restored);
+    const active = restored.find((item) => item.id === activeSessionIdRef.current);
+    if (active) {
+      activeSessionRef.current = active;
+      setSession(active);
+      const snapshot = active.analysis?.evidenceSnapshot;
+      setEvidence(snapshot?.evidence || []);
+      setRetrievalDiagnostics(snapshot?.retrieval || null);
+      setEvidenceState(snapshot ? snapshot.evidence.length ? 'ready' : 'empty' : 'idle');
+      setAnalysisSaveStatus(active.analysis ? 'saved' : 'idle');
+      setAnalysisSaveError('');
+      setAnalysisError('');
+      setScreen(active.status === 'complete' ? 'result' : active.castingMethod === 'physical' ? active.lines.length === 6 ? 'physical-review' : 'physical-casting' : 'casting');
+    }
+  };
+
   const deleteSession = async (id: string) => {
+    void stopGeneration(id);
     deletedSessionIdsRef.current.add(id);
     try {
       await sessionSaveQueuesRef.current.get(id);
       await desktop.sessions.delete(id);
       analysisEpochsRef.current.delete(id);
       latestSessionsRef.current.delete(id);
+      generation.dismiss(id);
       setHistory((current) => current.filter((item) => item.id !== id));
       if (activeSessionIdRef.current === id) returnHome();
     } catch (error) {
@@ -676,8 +737,14 @@ export function App() {
     }
   };
 
+  const saveReview = async (id: string, review: import('./lib/session').SessionReview) => {
+    const current = latestSessionsRef.current.get(id);
+    if (!current || deletedSessionIdsRef.current.has(id)) throw new Error('这条占簿记录已被删除，请关闭后重新打开占簿。');
+    await commitSession({ ...current, review, updatedAt: review.updatedAt });
+  };
+
   const followUp = async (followQuestion: string) => {
-    if (!session || !session.plate) return;
+    if (!session || !session.plate || taskIsRunning(generation.ref.current.get(session.id)) || generation.ref.current.get(session.id)?.status === 'save-error') return;
     if (!isAIUsable(aiStatus)) {
       setAISetupIntent('analysis');
       setAISetupOpen(true);
@@ -685,7 +752,9 @@ export function App() {
       return;
     }
     const targetId = session.id;
-    setChatting(true);
+    const task = generation.begin(targetId, followQuestion, 'followUp');
+    let answerReceived = false;
+    pendingFollowUpIdsRef.current.add(targetId);
     setChatError('');
     try {
       let next = withMessage(session, { id: crypto.randomUUID(), role: 'user', content: followQuestion, createdAt: new Date().toISOString() });
@@ -719,10 +788,16 @@ export function App() {
         followEvidence = found.evidence;
         followDiagnostics = found.diagnostics;
       }
-      const result = await desktop.ai.followUp({ question: followQuestion, session: next, evidence: followEvidence });
-      const answer = result.ok && result.answer ? result.answer : {
-        content: desktop.runtime.kind === 'web' ? '浏览器预览不会发送 AI 请求；桌面应用会沿用本次排盘和古籍证据继续回答。' : `${result.error?.message || '追问失败'} ${result.error?.nextAction || ''}`,
-      };
+      if (generationStopped(task)) { await saveUnfinishedGeneration(task, '已停止接收，本次追问未完成。'); return; }
+      if (deletedSessionIdsRef.current.has(targetId)) return;
+      generation.update(task.requestId, { stage: 'connecting', evidence: followEvidence, diagnostics: followDiagnostics });
+      const result = await desktop.ai.followUp({ requestId: task.requestId, question: followQuestion, session: next, evidence: followEvidence }, (progress) => generation.progress(task.requestId, progress));
+      if (deletedSessionIdsRef.current.has(targetId)) return;
+      if (generationStopped(task)) { await saveUnfinishedGeneration(task, '已停止接收，本次追问未完成。'); return; }
+      if (!result.ok || !result.answer) { await saveUnfinishedGeneration(task, `${result.error?.message || '追问失败'} ${result.error?.nextAction || ''}`.trim()); return; }
+      answerReceived = true;
+      generation.update(task.requestId, { status: 'saving' });
+      const answer = result.answer;
       next = mergeCompleteSessionState(
         latestSessionsRef.current.get(targetId),
         withMessage(next, {
@@ -735,18 +810,16 @@ export function App() {
           ...(result.ok && result.answer?.provider ? { provider: result.answer.provider } : {}),
         }),
       );
+      next = { ...next, generationDraft: null };
       latestSessionsRef.current.set(targetId, next);
-      if (isActiveSession(targetId)) {
-        activeSessionRef.current = next;
-        setSession(next);
-      }
+      if (isActiveSession(targetId)) { activeSessionRef.current = next; setSession(next); }
       await commitSession(next);
+      generation.update(task.requestId, { status: 'complete', content: '', error: '' });
     } catch (error) {
-      if (activeSessionIdRef.current === targetId) {
-        setChatError(error instanceof Error ? error.message : '追问保存或发送失败，请重试。');
-      }
+      if (answerReceived) generation.update(task.requestId, { status: 'save-error', error: '完整追问已收到，尚未写入占簿。' });
+      else await saveUnfinishedGeneration(task, error instanceof Error ? error.message : '追问保存或发送失败。');
     } finally {
-      if (activeSessionIdRef.current === targetId) setChatting(false);
+      pendingFollowUpIdsRef.current.delete(targetId);
     }
   };
 
@@ -814,6 +887,11 @@ export function App() {
     setCalendarOpen(true);
   };
 
+  const visibleTask = generation.tasks.find((task) => task.sessionId === session?.id);
+  const visibleRunning = taskIsRunning(visibleTask);
+  const visibleSnapshot = session?.analysis?.evidenceSnapshot ?? session?.generationDraft?.evidenceSnapshot;
+  const visibleEvidence = visibleTask?.kind === 'analysis' && visibleRunning ? visibleTask.evidence ?? [] : visibleSnapshot?.evidence ?? evidence;
+  const visibleDiagnostics = visibleTask?.kind === 'analysis' && visibleRunning ? visibleTask.diagnostics ?? null : visibleSnapshot?.retrieval ?? retrievalDiagnostics;
   return (
     <div className="app-shell">
       <header className="app-chrome">
@@ -879,10 +957,11 @@ export function App() {
               onCancel={discardPhysicalDraft}
             />
           )}
-          {screen === 'result' && session?.plate && <ResultScreen session={session} evidence={evidence} retrievalDiagnostics={retrievalDiagnostics} aiStatus={aiStatus} aiAvailable={desktop.runtime.capabilities.ai} sessionSaveStatus={sessionSaveStatus} sessionSaveError={sessionSaveError} analyzing={analyzing} analysisError={analysisError} analysisSaveStatus={analysisSaveStatus} analysisSaveError={analysisSaveError} chatting={chatting} chatError={chatError} onRetrySessionSave={() => void retrySessionSave()} onAnalyze={() => void runAnalysis(session, true)} onRetryAnalysisSave={() => void retryAnalysisSave()} onFollowUp={followUp} onBack={returnHome} />}
+          {screen === 'result' && session?.plate && <ResultScreen session={session} evidence={visibleEvidence} evidenceState={visibleRunning && visibleTask?.stage === 'retrieving' ? 'loading' : visibleDiagnostics ? visibleEvidence.length ? 'ready' : 'empty' : evidenceState} retrievalDiagnostics={visibleDiagnostics} aiStatus={aiStatus} aiAvailable={desktop.runtime.capabilities.ai} sessionSaveStatus={sessionSaveStatus} sessionSaveError={sessionSaveError} analyzing={visibleRunning && visibleTask?.kind === 'analysis'} analysisProgress={visibleTask ? { stage: visibleTask.stage, startedAt: visibleTask.startedAt } : null} generationTask={visibleTask} onStopGeneration={() => void stopGeneration(session.id)} onRetryGenerationSave={() => void retryGenerationSave(session.id)} analysisError={analysisError} analysisSaveStatus={analysisSaveStatus} analysisSaveError={analysisSaveError} chatting={visibleRunning && visibleTask?.kind === 'followUp'} chatError={chatError} onRetrySessionSave={() => void retrySessionSave()} onAnalyze={() => void runAnalysis(session, true)} onRetryAnalysisSave={() => visibleTask?.status === 'save-error' ? void retryGenerationSave(session.id) : void retryAnalysisSave()} onFollowUp={followUp} onBack={returnHome} />}
         </>
       )}
-      {historyOpen && <HistoryPanel sessions={history} onClose={() => setHistoryOpen(false)} onOpen={(saved) => void openSession(saved)} onDelete={(id) => void deleteSession(id)} />}
+      <GenerationTasks tasks={generation.tasks} onOpen={(id) => { const saved = latestSessionsRef.current.get(id); if (saved) void openSession(saved); }} onStop={(id) => void stopGeneration(id)} onDismiss={(id) => generation.dismiss(id)} />
+      {historyOpen && <HistoryPanel onSaveReview={saveReview} onImport={importSessions} sessions={history} onClose={() => setHistoryOpen(false)} onOpen={(saved) => void openSession(saved)} onDelete={(id) => void deleteSession(id)} />}
       {feedbackOpen && <FeedbackPanel onClose={() => setFeedbackOpen(false)} />}
       {libraryOpen && <CorpusLibraryPanel aiStatus={aiStatus} onClose={() => setLibraryOpen(false)} />}
       {settingsOpen && (

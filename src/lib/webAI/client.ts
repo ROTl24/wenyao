@@ -1,4 +1,4 @@
-import type { AIConfigStatus, DesktopApi, DesktopError } from '../../types/desktop';
+import type { AIAnalysisProgress, AIConfigStatus, DesktopApi, DesktopError } from '../../types/desktop';
 import type { WebAIRequest, WebAIWorkerMessage } from './protocol';
 
 const unavailableError: DesktopError = {
@@ -31,6 +31,8 @@ function desktopError(error: unknown): DesktopError {
 export class WebAIClient {
   private worker: Worker | null = null;
   private pending = new Map<string, Pending>();
+  private generations = new Map<string, { stopped: boolean; dispatched: boolean }>();
+  private progressListeners = new Map<string, (progress: AIAnalysisProgress) => void>();
   private listeners = new Set<(status: AIConfigStatus) => void>();
   private status = structuredClone(emptyWebAIStatus);
 
@@ -47,6 +49,10 @@ export class WebAIClient {
     const worker = new Worker(new URL('./worker.ts', import.meta.url), { type: 'module', name: 'wenyao-web-ai' });
     worker.addEventListener('message', (event: MessageEvent<WebAIWorkerMessage>) => {
       const message = event.data;
+      if ('event' in message && message.event === 'generation') {
+        try { this.progressListeners.get(message.requestId)?.(message.progress); } catch { /* Observer only. */ }
+        return;
+      }
       if ('event' in message) {
         this.status = message.status;
         this.listeners.forEach((listener) => listener(structuredClone(message.status)));
@@ -78,7 +84,7 @@ export class WebAIClient {
     });
   }
 
-  private async paid<T>(label: string, command: WebAIRequest['command'], payload?: unknown): Promise<T> {
+  private async paid<T>(label: string, command: WebAIRequest['command'], payload?: unknown, beforeDispatch?: () => void): Promise<T> {
     if (!navigator.locks) {
       throw {
         code: 'WEB_AI_LOCKS_UNAVAILABLE',
@@ -96,6 +102,7 @@ export class WebAIClient {
           nextAction: `请等待另一页面完成${label}，避免重复请求和重复计费。`,
         } satisfies DesktopError;
       }
+      beforeDispatch?.();
       return this.call<T>(command, payload);
     });
   }
@@ -132,12 +139,29 @@ export class WebAIClient {
   resumeBuild: DesktopApi['aiConfig']['resumeBuild'] = async () => this.call('resumeBuild');
   cancelBuild: DesktopApi['aiConfig']['cancelBuild'] = async () => this.call('cancelBuild');
   search: DesktopApi['retrieval']['search'] = async (payload) => this.paid('古籍检索', 'search', payload);
-  analyze: DesktopApi['ai']['analyze'] = async (payload) => {
-    try { return await this.paid('AI 解读', 'analyze', payload); }
+  private async generate<T>(command: 'analyze' | 'followUp', payload: { requestId?: string }, onProgress?: (progress: AIAnalysisProgress) => void): Promise<T> {
+    const requestId = payload.requestId || crypto.randomUUID();
+    const control = { stopped: false, dispatched: false };
+    this.generations.set(requestId, control);
+    if (onProgress) this.progressListeners.set(requestId, onProgress);
+    try { return await this.paid<T>('生成', command, { ...payload, requestId }, () => {
+      if (control.stopped) throw { code: 'AI_GENERATION_STOPPED', message: '已停止接收，本次生成未发出。', dataSafe: true, nextAction: '' } satisfies DesktopError;
+      control.dispatched = true;
+    }); }
+    finally { this.progressListeners.delete(requestId); this.generations.delete(requestId); }
+  }
+  cancel: DesktopApi['ai']['cancel'] = async (requestId) => {
+    const control = this.generations.get(requestId);
+    if (!control) return { stopped: false };
+    control.stopped = true;
+    return control.dispatched ? this.call('cancelGeneration', requestId) : { stopped: true };
+  };
+  analyze: DesktopApi['ai']['analyze'] = async (payload, onProgress) => {
+    try { return await this.generate('analyze', payload, onProgress); }
     catch (error) { return { ok: false, error: desktopError(error) }; }
   };
-  followUp: DesktopApi['ai']['followUp'] = async (payload) => {
-    try { return await this.paid('AI 追问', 'followUp', payload); }
+  followUp: DesktopApi['ai']['followUp'] = async (payload, onProgress) => {
+    try { return await this.generate('followUp', payload, onProgress); }
     catch (error) { return { ok: false, error: desktopError(error) }; }
   };
 

@@ -1,6 +1,7 @@
 import { ArchiveRestore, ArrowLeft, BookOpen, CirclePause, CirclePlay, FilePlus2, Pencil, Save, Search, Trash2, X } from 'lucide-react';
 import { useCallback, useEffect, useMemo, useState, type DragEvent } from 'react';
 import { desktop } from '../lib/desktop';
+import { useModalDialog } from '../lib/useModalDialog';
 import type { AIConfigStatus, CorpusBookDetail, CorpusBookSummary, CorpusImportBatch, CorpusStatus } from '../types/desktop';
 import { CorpusImportDialog } from './CorpusImportDialog';
 import './CorpusLibraryPanel.css';
@@ -26,6 +27,7 @@ function indexLabel(book: CorpusBookSummary) {
 }
 
 export function CorpusLibraryPanel({ aiStatus, onClose }: Props) {
+  const dialogRef = useModalDialog<HTMLElement>(onClose);
   const [status, setStatus] = useState<CorpusStatus>(emptyStatus);
   const [books, setBooks] = useState<CorpusBookSummary[]>([]);
   const [bookTotal, setBookTotal] = useState(0);
@@ -163,7 +165,7 @@ export function CorpusLibraryPanel({ aiStatus, onClose }: Props) {
 
   return (
     <div className="overlay corpus-library-overlay" role="presentation">
-      <aside className="corpus-library-panel" aria-labelledby="corpus-library-title" aria-modal="true" role="dialog">
+      <aside ref={dialogRef} tabIndex={-1} className="corpus-library-panel" aria-labelledby="corpus-library-title" aria-modal="true" role="dialog">
         <header className="corpus-library-header">
           <div><span className="corpus-kicker">LOCAL ARCHIVE</span><h2 id="corpus-library-title">古籍书库</h2><p>{sourceSummary}</p></div>
           <div className="corpus-header-actions">{canManageCorpus ? <button type="button" className="corpus-primary-button" onClick={() => void previewSelection()}><FilePlus2 />导入古籍</button> : null}<button type="button" aria-label="关闭古籍书库" onClick={onClose}><X /></button></div>

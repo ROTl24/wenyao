@@ -116,6 +116,9 @@ export interface AIConfigStatus {
 
 export interface DesktopError { code: string; message: string; dataSafe: boolean; nextAction: string; technicalDetails?: string }
 
+export type AIAnalysisStage = 'retrieving' | 'connecting' | 'connected' | 'reasoning' | 'writing';
+export interface AIAnalysisProgress { stage: AIAnalysisStage; delta?: string }
+
 export type CorpusBookOrigin = 'builtin' | 'user';
 export type CorpusIndexState = 'local-only' | 'pending' | 'building' | 'paused' | 'ready' | 'error';
 export interface CorpusBookSummary {
@@ -206,6 +209,7 @@ export interface DesktopApi {
     get(id: string): Promise<DivinationSession | null>;
     save(session: DivinationSession): Promise<DivinationSession>;
     delete(id: string): Promise<boolean>;
+    import(payload: import('../lib/sessionArchive').SessionImportRequest): Promise<DivinationSession[]>;
   };
   feedback: FeedbackApi;
   aiConfig: {
@@ -244,8 +248,9 @@ export interface DesktopApi {
     search(payload: { query: string; domainTerms: string[]; limit?: number }): Promise<{ evidence: EvidenceEntry[]; diagnostics: RetrievalDiagnostics }>;
   };
   ai: {
-    analyze(payload: { question: string; category: string; castingMethod: DivinationSession['castingMethod']; castingBasis: DivinationSession['castingBasis']; plate: DivinationSession['plate']; evidence: EvidenceEntry[]; retrievalDiagnostics?: RetrievalDiagnostics }): Promise<{ ok: boolean; report?: AnalysisReport; error?: DesktopError }>;
-    followUp(payload: { question: string; session: DivinationSession; evidence: EvidenceEntry[] }): Promise<{ ok: boolean; answer?: { content: string; provider?: AnalysisReport['provider'] }; error?: DesktopError }>;
+    cancel(requestId: string): Promise<{ stopped: boolean }>;
+    analyze(payload: { requestId?: string; question: string; category: string; castingMethod: DivinationSession['castingMethod']; castingBasis: DivinationSession['castingBasis']; plate: DivinationSession['plate']; evidence: EvidenceEntry[]; retrievalDiagnostics?: RetrievalDiagnostics }, onProgress?: (progress: AIAnalysisProgress) => void): Promise<{ ok: boolean; report?: AnalysisReport; error?: DesktopError }>;
+    followUp(payload: { requestId?: string; question: string; session: DivinationSession; evidence: EvidenceEntry[] }, onProgress?: (progress: AIAnalysisProgress) => void): Promise<{ ok: boolean; answer?: { content: string; provider?: AnalysisReport['provider'] }; error?: DesktopError }>;
   };
 }
 

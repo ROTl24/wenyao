@@ -80,6 +80,44 @@ function createStore() {
   return new JsonStore(path.join(dir, 'app-data.json'));
 }
 
+test('archive import validates all records before writing and rejects stale conflict previews', () => {
+  const store = createStore();
+  store.saveSession(sessionFixture());
+  const before = fs.readFileSync(store.filePath, 'utf8');
+  assert.throws(() => store.importSessions({ sessions: [sessionFixture({ id: 'new' }), sessionFixture({ id: 'bad', category: 'invalid' })], resolutions: {} }));
+  assert.equal(fs.readFileSync(store.filePath, 'utf8'), before);
+  assert.equal(store.getSession('new'), null);
+  assert.throws(() => store.importSessions({ sessions: [sessionFixture()], resolutions: { 'session-1': { action: 'replace', expectedUpdatedAt: CAST_AT } } }), /预览后/);
+  assert.equal(fs.readFileSync(store.filePath, 'utf8'), before);
+});
+
+test('archive copy isolates feedback target IDs and preserves review without changing original', () => {
+  const store = createStore();
+  const original = sessionFixture({ analysis: { mode: 'cloud', analysisId: 'report-1', markdown: '原报告' }, messages: [{ id: 'message-1', role: 'assistant', content: '追问回答' }], review: { status: 'happened', observedAt: '2026-08-30', note: '实际结果', tags: ['项目'], updatedAt: UPDATED_AT } });
+  store.saveSession(original);
+  store.importSessions({ sessions: [original], resolutions: { 'session-1': { action: 'copy', expectedUpdatedAt: UPDATED_AT, newId: 'copy-1' } } });
+  assert.deepEqual(store.getSession('session-1'), original);
+  const copy = store.getSession('copy-1');
+  assert.notEqual(copy.analysis.analysisId, original.analysis.analysisId);
+  assert.notEqual(copy.messages[0].id, original.messages[0].id);
+  assert.deepEqual(copy.review, original.review);
+});
+
+test('archive write failure rolls back memory and disk including unrelated settings', (t) => {
+  const store = createStore();
+  store.saveSession(sessionFixture());
+  const before = fs.readFileSync(store.filePath, 'utf8');
+  const rename = fs.renameSync;
+  t.mock.method(fs, 'renameSync', (source, destination) => {
+    if (destination === store.filePath) throw Object.assign(new Error('disk full'), { code: 'ENOSPC' });
+    return rename(source, destination);
+  });
+  assert.throws(() => store.importSessions({ sessions: [sessionFixture({ id: 'new' })], resolutions: {} }), /disk full/);
+  assert.equal(store.getSession('new'), null);
+  assert.equal(fs.readFileSync(store.filePath, 'utf8'), before);
+  assert.equal(fs.readdirSync(path.dirname(store.filePath)).filter((file) => file.endsWith('.tmp')).length, 0);
+});
+
 test('JsonStore persists, orders and deletes valid sessions atomically', () => {
   const store = createStore();
   store.saveSession(sessionFixture({
