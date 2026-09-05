@@ -21,9 +21,16 @@ function parsedUrl(value) {
   return url;
 }
 
-function normalizeCapabilityLocation(capability, value) {
+function normalizeCapabilityLocation(capability, value, addressMode = 'auto') {
   if (!CAPABILITIES.includes(capability)) throw new Error(`未知 AI 能力：${capability}`);
+  if (!['auto', 'exact'].includes(addressMode)) throw new Error('请选择自动补全或完整接口地址');
   const url = parsedUrl(value);
+  if (addressMode === 'exact') {
+    const match = url.pathname.match(ENDPOINT_SUFFIX[capability]);
+    const basePath = match ? url.pathname.slice(0, match.index) : '';
+    const path = `${url.pathname.slice(basePath.length)}${url.search}`;
+    return { baseUrl: `${url.origin}${basePath}`, path, displayUrl: url.href, canonicalUrl: url.href };
+  }
   const pathname = url.pathname.replace(/\/+$/, '') || '/';
   const suffix = ENDPOINT_SUFFIX[capability];
   const match = pathname.match(suffix);
@@ -67,8 +74,8 @@ function protocolFor(capability, baseUrl, path) {
     : 'cohere-rerank';
 }
 
-function capabilityConnection({ capability, apiUrl, model, id, createdAt, dimensions }) {
-  const location = normalizeCapabilityLocation(capability, apiUrl);
+function capabilityConnection({ capability, apiUrl, addressMode, model, id, createdAt, dimensions }) {
+  const location = normalizeCapabilityLocation(capability, apiUrl, addressMode);
   const identity = providerIdentity(location.baseUrl);
   const now = new Date().toISOString();
   const definition = {
@@ -112,13 +119,32 @@ function isNonChatModel(model) {
     || /(?:^|[\/_-])(?:image|flux|kolors|stable-diffusion|wan\d*|whisper|tts|speech|audio|ocr|moderation)(?:$|[\/_-])/i.test(model);
 }
 
-function filterModels(capability, values) {
+function rankModels(capability, values) {
   const models = [...new Set((Array.isArray(values) ? values : [])
     .map((value) => String(value || '').trim())
     .filter(Boolean))].slice(0, 500);
-  if (capability === 'embedding') return models.filter(isEmbeddingModel);
-  if (capability === 'rerank') return models.filter(isRerankModel);
-  return models.filter((model) => !isNonChatModel(model));
+  const preferred = capability === 'embedding' ? isEmbeddingModel
+    : capability === 'rerank' ? isRerankModel : (model) => !isNonChatModel(model);
+  // 名称只能用于排序；代理别名和私有模型不一定包含能力关键词。
+  return [...models.filter(preferred), ...models.filter((model) => !preferred(model))];
+}
+
+function normalizeApiKey(value) {
+  const key = String(value || '').trim().replace(/^Bearer\s+/i, '').trim();
+  if (/\s/.test(key)) throw new Error('API Key 中包含空格或换行，请重新复制完整密钥');
+  return key;
+}
+
+function isLocalApiUrl(value) {
+  try { return ['localhost', '127.0.0.1', '[::1]'].includes(new URL(value).hostname); }
+  catch { return false; }
+}
+
+function capabilityUrl(connection, capability) {
+  const definition = connection.capabilities[capability];
+  const path = definition?.url || definition?.path
+    || (capability === 'generation' ? '/chat/completions' : capability === 'embedding' ? '/embeddings' : '/rerank');
+  return /^https?:\/\//i.test(path) ? path : `${connection.baseUrl.replace(/\/$/, '')}/${path.replace(/^\//, '')}`;
 }
 
 function generationProbeOptions(connection) {
@@ -131,8 +157,11 @@ function generationProbeOptions(connection) {
 module.exports = {
   CAPABILITIES,
   capabilityConnection,
-  filterModels,
+  rankModels,
   generationProbeOptions,
   normalizeCapabilityLocation,
+  normalizeApiKey,
+  isLocalApiUrl,
+  capabilityUrl,
   providerIdentity,
 };

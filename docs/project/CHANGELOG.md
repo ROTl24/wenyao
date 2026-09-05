@@ -12,6 +12,16 @@ last_reviewed: 2026-09-04
 
 ## Entries
 
+### CHG-20260905-ai-configuration-consistency
+
+- 日期：2026-09-05
+- 结果：AI 地址支持完整接口原样调用并显示实际目标；手填模型与代理别名保留，目录仅作提示。修改地址、模型或密钥后重新测试，主模型可直接完成配置，本机服务支持免密钥。
+- 原因：模型发现覆盖手填值、编辑后沿用旧测试结果、跨服务隐式取旧密钥及向量维度和路径身份不一致会让用户配置与实际请求脱节。
+- 验证：向导交互、共享地址与密钥契约、Runtime/Worker 测试到正式调用及向量配置切换回归通过；全量测试、类型构建、PWA 产物检查和本地浏览器检查通过。使用模拟服务，未执行真实付费调用。
+- Git：实现、回归与知识记录同属本地提交，未推送或部署。
+- Agent Note：[AI 能力采用逐项配置与可选检索链路](../../.agents/notes/implemented/architecture/2026-08-26-optional-ai-capability-pipeline.md)、[自定义 AI 地址规范化](../../.agents/notes/implemented/bug-fix/2026-08-27-openai-base-url-default.md)。
+- 文档影响：PROJECT、PROJECT_CONTEXT、CHANGELOG、DECISIONS 与已有能力配置、地址规范化 Note。
+
 ### CHG-20260904-desktop-formal-generation-deadline
 
 - 日期：2026-09-04

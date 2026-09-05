@@ -22,6 +22,15 @@ last_reviewed: 2026-09-04
 
 ## Active Decisions
 
+### ADR-20260905-ai-configuration-identity
+
+- Status: `accepted`
+- Source: `user-confirmed` / `code-verified`
+- 主题：用户配置与测试、实际调用保持一致；目录只提示模型候选，密钥通过同域显式引用沿用，向量能力身份包含实际端点。
+- 权威 Note：[AI 能力采用逐项配置与可选检索链路](../../.agents/notes/implemented/architecture/2026-08-26-optional-ai-capability-pipeline.md)。
+- 重新考虑：引入另一种生成协议、服务端模型能力协商或跨服务凭据授权模型时。
+- Supersedes：无。
+
 ### ADR-20260826-structured-plate-copy
 
 - Status: `accepted`

@@ -303,6 +303,7 @@ function pipelineFingerprint({ connection, capability = 'embedding', corpusHash 
     protocol: definition.protocol,
     model: definition.model,
     dimensions: definition.dimensions || null,
+    ...(definition.url || (definition.path && definition.path !== '/embeddings') ? { endpoint: definition.url || definition.path } : {}),
     corpusHash,
   });
   return crypto.createHash('sha256').update(identity).digest('hex');
@@ -317,6 +318,7 @@ function embeddingFingerprint({ connection, capability = 'embedding' }) {
     protocol: definition.protocol,
     model: definition.model,
     dimensions: definition.dimensions || null,
+    ...(definition.url || (definition.path && definition.path !== '/embeddings') ? { endpoint: definition.url || definition.path } : {}),
   });
   return crypto.createHash('sha256').update(identity).digest('hex');
 }

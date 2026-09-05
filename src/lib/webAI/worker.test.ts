@@ -103,6 +103,49 @@ describe('PWA 隔离 Worker 的可选能力链路', () => {
     expect(result).toEqual({ ok: true, modelIds: ['chat-test'] });
   });
 
+  it('完整接口与任意模型通过测试后按相同目标正式调用，密钥只清理一次 Bearer', async () => {
+    const url = 'https://gateway.example.com/tenant/invoke?api-version=2026-01';
+    const request = vi.mocked(fetch);
+    request.mockResolvedValueOnce(providerResponse({ choices: [{ message: { content: '连接成功' } }] }));
+    const tested = await call<{ ok: boolean }>('testCapability', { capability: 'generation', apiUrl: url, addressMode: 'exact', model: 'private-alias', apiKey: ' Bearer arbitrary-key ', consentAccepted: true, webSecurity: { confirmedOrigins: ['https://gateway.example.com'] } });
+    expect(tested.ok).toBe(true);
+    const [target, options] = request.mock.calls.at(-1)!;
+    expect(target).toBe(url);
+    expect(new Headers(options?.headers).get('authorization')).toBe('Bearer arbitrary-key');
+    expect(JSON.parse(String(options?.body)).model).toBe('private-alias');
+    expect((await call<{ ok: boolean }>('completeSetup', { capabilities: ['generation'] })).ok).toBe(true);
+    request.mockResolvedValueOnce(providerResponse({ choices: [{ message: { content: '完整解读' } }] }));
+    await call('analyze', { question: '事业', category: '事业工作', plate: {}, evidence: [] });
+    expect(request.mock.calls.at(-1)![0]).toBe(url);
+    expect(JSON.parse(String(request.mock.calls.at(-1)![1]?.body)).model).toBe('private-alias');
+  });
+
+  it('服务切换不自动取用旧密钥，显式密钥引用也不能跨域', async () => {
+    await testCapability('generation');
+    await call('completeSetup', { capabilities: ['generation'] });
+    const count = vi.mocked(fetch).mock.calls.length;
+    const payload = { capability: 'generation', apiUrl: 'https://other.example.com/v1', model: 'private-alias', consentAccepted: true, webSecurity: { confirmedOrigins: ['https://other.example.com'] } };
+    await expect(call('testCapability', payload)).rejects.toMatchObject({ code: 'WEB_AI_KEY_REQUIRED' });
+    await expect(call('testCapability', { ...payload, credentialSource: 'generation' })).rejects.toMatchObject({ code: 'WEB_AI_CREDENTIAL_ORIGIN_CHANGED' });
+    expect(vi.mocked(fetch).mock.calls.length).toBe(count);
+  });
+
+  it('向量模型更换后不沿用原模型维度', async () => {
+    await testCapability('generation');
+    await testCapability('embedding', 'generation');
+    await testCapability('embedding', 'generation', 'custom-embedding');
+    expect(embeddingBodies.at(-1)).not.toHaveProperty('dimensions');
+  });
+
+  it('同一域名下不同向量接口分别识别缓存', async () => {
+    await testCapability('generation');
+    await testCapability('embedding', 'generation');
+    const first = await call<{ status: { activeFingerprint: string } }>('completeSetup', { capabilities: ['generation', 'embedding'] });
+    await call('testCapability', { capability: 'embedding', apiUrl: 'https://api.example.com/tenant/embeddings', addressMode: 'exact', model: 'text-embedding-v4', credentialSource: 'embedding', consentAccepted: true, webSecurity: { confirmedOrigins: ['https://api.example.com'] } });
+    const second = await call<{ status: { activeFingerprint: string } }>('completeSetup', { capabilities: ['generation', 'embedding'] });
+    expect(first.status.activeFingerprint).not.toBe(second.status.activeFingerprint);
+  });
+
   it('仅主模型、向量融合和完整重排三种模式都按实际能力发请求', async () => {
     await testCapability('generation');
     const mainOnly = await call<{ ok: boolean; status: { activeCapabilities: Record<string, unknown> } }>('completeSetup', { capabilities: ['generation'] });

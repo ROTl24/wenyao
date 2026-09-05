@@ -121,6 +121,9 @@ test('embedding fingerprint is stable across corpus shards', () => {
     embeddingFingerprint({ connection }),
     embeddingFingerprint({ connection: { ...connection, baseUrl: 'https://api.other.com/v1' } }),
   );
+  for (const fingerprint of [embeddingFingerprint, pipelineFingerprint]) {
+    assert.notEqual(fingerprint({ connection }), fingerprint({ connection: { ...connection, capabilities: { embedding: { ...connection.capabilities.embedding, path: '/tenant/vector' } } } }));
+  }
   const legacyIdentity = JSON.stringify({
     providerId: connection.providerId,
     baseUrl: connection.baseUrl,

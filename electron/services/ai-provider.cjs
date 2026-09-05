@@ -1,4 +1,5 @@
 const crypto = require('node:crypto');
+const { isLocalApiUrl } = require('../../shared/ai-setup-core.cjs');
 const { inspectChatCompletion } = require('../../shared/chat-completion-core.cjs');
 const { classifyProviderFailure } = require('../../shared/provider-response-core.cjs');
 
@@ -6,7 +7,7 @@ function validateBaseUrl(value) {
   let url;
   try { url = new URL(String(value || '').trim()); }
   catch { throw new Error('AI 服务地址不是有效 URL'); }
-  const local = ['localhost', '127.0.0.1'].includes(url.hostname);
+  const local = isLocalApiUrl(url.href);
   if (url.protocol !== 'https:' && !(local && url.protocol === 'http:')) {
     throw new Error('AI 服务地址必须使用 HTTPS；仅本机 localhost 可以使用 HTTP');
   }

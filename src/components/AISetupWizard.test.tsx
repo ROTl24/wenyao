@@ -93,6 +93,90 @@ function fillMain() {
 describe('AI 能力三步向导', () => {
   beforeEach(() => vi.restoreAllMocks());
 
+  it('刷新目录保留手填别名，列表选择与模型输入保持一致', async () => {
+    vi.spyOn(desktop.aiConfig, 'listModels').mockResolvedValue({ ok: true, modelIds: ['catalog-model'] });
+    render(<Harness />);
+    fillMain();
+    fireEvent.change(screen.getByLabelText('模型名称'), { target: { value: 'my-private-alias' } });
+    fireEvent.click(screen.getByRole('button', { name: '获取模型列表' }));
+    await waitFor(() => expect(screen.getByLabelText('选择模型')).toHaveValue('my-private-alias'));
+    expect(screen.getByLabelText('模型名称')).toHaveValue('my-private-alias');
+    fireEvent.change(screen.getByLabelText('选择模型'), { target: { value: 'catalog-model' } });
+    expect(screen.getByLabelText('模型名称')).toHaveValue('catalog-model');
+  });
+
+  it.each(['API 调用地址', 'API Key', '模型名称', '地址用法'])('修改 %s 后不能使用旧测试结果完成配置', async (label) => {
+    vi.spyOn(desktop.aiConfig, 'testCapability').mockResolvedValue({ ok: true, status: draftStatus(['generation']) });
+    render(<Harness />);
+    fillMain();
+    fireEvent.click(screen.getByRole('button', { name: '最小测试' }));
+    await waitFor(() => expect(screen.getByRole('button', { name: '下一步' })).toBeEnabled());
+    const values: Record<string, string> = { 'API 调用地址': 'https://api.siliconflow.cn/other', 'API Key': 'replacement-key', '模型名称': 'other-model', '地址用法': 'exact' };
+    fireEvent.change(screen.getByLabelText(label), { target: { value: values[label] } });
+    expect(screen.getByRole('button', { name: '下一步' })).toBeDisabled();
+    expect(screen.getByRole('button', { name: '仅用主模型并完成' })).toBeDisabled();
+  });
+
+  it('主模型可直接完成配置，提交完整地址与手填模型且不先请求目录', async () => {
+    const testCapability = vi.spyOn(desktop.aiConfig, 'testCapability').mockResolvedValue({ ok: true, status: draftStatus(['generation']) });
+    const listModels = vi.spyOn(desktop.aiConfig, 'listModels');
+    const completeSetup = vi.spyOn(desktop.aiConfig, 'completeSetup').mockResolvedValue({ ok: true, status: readyStatus(['generation']) });
+    render(<Harness />);
+    fillMain();
+    fireEvent.change(screen.getByLabelText('地址用法'), { target: { value: 'exact' } });
+    fireEvent.change(screen.getByLabelText('API 调用地址'), { target: { value: 'https://gateway.example.com/tenant/invoke?api-version=2026-01' } });
+    fireEvent.change(screen.getByLabelText('API Key'), { target: { value: ' Bearer arbitrary-key ' } });
+    fireEvent.change(screen.getByLabelText('模型名称'), { target: { value: 'my-alias' } });
+    fireEvent.click(screen.getByRole('button', { name: '最小测试' }));
+    await waitFor(() => expect(screen.getByRole('button', { name: '仅用主模型并完成' })).toBeEnabled());
+    expect(testCapability).toHaveBeenCalledWith(expect.objectContaining({ apiUrl: 'https://gateway.example.com/tenant/invoke?api-version=2026-01', addressMode: 'exact', apiKey: 'arbitrary-key', model: 'my-alias' }));
+    fireEvent.click(screen.getByRole('button', { name: '仅用主模型并完成' }));
+    await waitFor(() => expect(completeSetup).toHaveBeenCalledWith({ capabilities: ['generation'], bulkEmbeddingAccepted: false }));
+    expect(listModels).not.toHaveBeenCalled();
+  });
+
+  it('切换服务域名清除旧密钥引用，同域名更改路径仍可复用', () => {
+    render(<Harness initial={readyStatus(['generation'])} />);
+    fireEvent.change(screen.getByLabelText('API 调用地址'), { target: { value: 'https://api.siliconflow.cn/tenant/chat/completions' } });
+    expect(screen.getByRole('button', { name: '最小测试' })).toBeEnabled();
+    fireEvent.change(screen.getByLabelText('API 调用地址'), { target: { value: 'https://other.example.com/v1' } });
+    expect(screen.getByRole('button', { name: '最小测试' })).toBeDisabled();
+    expect(screen.getByLabelText('API Key')).not.toHaveAttribute('placeholder', expect.stringContaining('已引用安全存储'));
+  });
+
+  it('恢复配置以草稿引用为准，旧活动连接排在前面时也不覆盖新模型', () => {
+    const active = readyStatus(['generation']);
+    const candidate = { ...generation, id: 'generation-candidate', capabilities: { generation: { ...generation.capabilities.generation!, model: 'new-model' } } };
+    const draft = draftStatus(['generation']).draft!;
+    draft.connections = [generation, candidate];
+    draft.pipeline.generation = { connectionId: candidate.id };
+    render(<Harness initial={{ ...active, draft }} />);
+    expect(screen.getByLabelText('模型名称')).toHaveValue('new-model');
+  });
+
+  it('目录请求期间锁定输入和导航，避免迟到响应覆盖新配置', async () => {
+    let resolve!: (result: { ok: boolean; modelIds: string[] }) => void;
+    vi.spyOn(desktop.aiConfig, 'listModels').mockImplementation(() => new Promise((done) => { resolve = done; }));
+    render(<Harness />);
+    fillMain();
+    fireEvent.click(screen.getByRole('button', { name: '获取模型列表' }));
+    expect(screen.getByLabelText('API 调用地址')).toBeDisabled();
+    expect(screen.getByLabelText('模型名称')).toBeDisabled();
+    expect(screen.getByRole('button', { name: '关闭 AI 连接向导' })).toBeDisabled();
+    resolve({ ok: true, modelIds: ['catalog-model'] });
+    await waitFor(() => expect(screen.getByLabelText('模型名称')).toBeEnabled());
+  });
+
+  it('桌面本机免密钥连接可直接测试，包括 IPv6 回环地址', () => {
+    vi.spyOn(desktop, 'runtime', 'get').mockReturnValue({ ...desktop.runtime, kind: 'electron' });
+    render(<Harness />);
+    fireEvent.change(screen.getByLabelText('API 调用地址'), { target: { value: 'http://[::1]:11434/v1' } });
+    fireEvent.change(screen.getByLabelText('模型名称'), { target: { value: 'local-model' } });
+    fireEvent.click(screen.getByRole('checkbox'));
+    expect(screen.getByRole('button', { name: '最小测试' })).toBeEnabled();
+    expect(screen.getByRole('button', { name: '获取模型列表' })).toBeEnabled();
+  });
+
   it('按主模型、向量和重排三页展示厂商示例与手动模型入口', () => {
     render(<Harness />);
     expect(screen.getByRole('heading', { name: 'AI 解读主模型' })).toBeVisible();

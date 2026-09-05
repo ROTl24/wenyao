@@ -120,6 +120,69 @@ async function configure(runtime, selected) {
   return result.status;
 }
 
+test('非标准接口、任意模型和 Bearer 密钥从测试到正式调用保持一致', async () => {
+  const requests = [];
+  const { runtime, store } = runtimeFixture({
+    secretStore: testSecretStore(),
+    fetchImpl: async (url, options) => {
+      requests.push({ url, body: JSON.parse(options.body), key: options.headers.authorization });
+      return json(200, { choices: [{ message: { content: '连接成功' } }] });
+    },
+  });
+  const url = 'https://gateway.example.com/tenant/invoke?api-version=2026-01';
+  const result = await runtime.testCapability({ capability: 'generation', apiUrl: url, addressMode: 'exact', model: 'my-private-alias', apiKey: ' Bearer arbitrary-key ', consentAccepted: true });
+  assert.equal(result.ok, true);
+  assert.equal((await runtime.completeSetup({ capabilities: ['generation'] })).ok, true);
+  await runtime.analyze({ question: '事业', category: 'career', castingMethod: 'manual', castingBasis: {}, plate: studyPlate(), evidence: [], retrievalDiagnostics: {} });
+  assert.equal(requests.length, 2);
+  for (const request of requests) {
+    assert.equal(request.url, url);
+    assert.equal(request.key, 'Bearer arbitrary-key');
+    assert.equal(request.body.model, 'my-private-alias');
+  }
+  const restarted = runtimeFixture({ store, secretStore: testSecretStore() }).runtime;
+  assert.equal(restarted.getStatus().activeCapabilities.generation.model, 'my-private-alias');
+});
+
+test('更换服务时不隐式复用旧密钥，同域显式引用仍可更换模型', async () => {
+  const requests = [];
+  const { runtime } = runtimeFixture({ secretStore: testSecretStore(), fetchImpl: async (url, options) => {
+    requests.push({ url, key: options.headers.authorization });
+    return json(200, { choices: [{ message: { content: '连接成功' } }] });
+  } });
+  const input = { capability: 'generation', apiUrl: 'https://one.example.com/v1', model: 'a', apiKey: 'key-a', consentAccepted: true };
+  assert.equal((await runtime.testCapability(input)).ok, true);
+  assert.equal((await runtime.completeSetup({ capabilities: ['generation'] })).ok, true);
+  await assert.rejects(runtime.testCapability({ ...input, apiUrl: 'https://two.example.com/v1', apiKey: '' }), /填写 API Key/);
+  await assert.rejects(runtime.testCapability({ ...input, apiUrl: 'https://two.example.com/v1', apiKey: '', credentialSource: 'generation' }), /地址已变更/);
+  assert.equal(requests.length, 1);
+  assert.equal((await runtime.testCapability({ ...input, apiKey: '', model: 'b', credentialSource: 'generation' })).ok, true);
+  assert.equal(requests[1].key, 'Bearer key-a');
+});
+
+test('IPv6 本机服务可以空密钥完成设置且不发送 Authorization', async () => {
+  const { runtime } = runtimeFixture({ fetchImpl: async (url, options) => {
+    assert.equal(url, 'http://[::1]:11434/v1/chat/completions');
+    assert.equal(options.headers.authorization, undefined);
+    return json(200, { choices: [{ message: { content: '连接成功' } }] });
+  } });
+  assert.equal((await runtime.testCapability({ capability: 'generation', apiUrl: 'http://[::1]:11434/v1', model: 'local-model', consentAccepted: true })).ok, true);
+  assert.equal((await runtime.completeSetup({ capabilities: ['generation'] })).ok, true);
+});
+
+test('更换向量模型或调用路径后重新探测维度，不携带旧模型维度', async () => {
+  const dimensions = [];
+  const { runtime } = runtimeFixture({ fetchImpl: async (_url, options) => {
+    const body = JSON.parse(options.body);
+    dimensions.push(body.dimensions);
+    return json(200, { data: [{ index: 0, embedding: body.model === 'model-a' ? [1, 0] : [1, 0, 0] }] });
+  } });
+  for (const [model, path] of [['model-a', '/v1'], ['model-b', '/v1'], ['model-b', '/tenant']]) {
+    assert.equal((await runtime.testCapability({ capability: 'embedding', apiUrl: `http://localhost:11434${path}`, model })).ok, true);
+  }
+  assert.deepEqual(dimensions, [undefined, undefined, undefined]);
+});
+
 test('仅主模型使用 BM25 检索并能生成报告，不调用向量或重排', async () => {
   const { runtime, calls } = runtimeFixture();
   const status = await configure(runtime, ['generation']);
@@ -259,7 +322,7 @@ test('模型目录与最小测试严格分离，失败只请求一次且不覆�
   const oldModel = runtime.getStatus().activeCapabilities.generation.model;
 
   const catalog = await runtime.listModels({ capability: 'embedding', apiUrl: 'http://localhost:11434/v1' });
-  assert.deepEqual(catalog.modelIds, ['text-embedding-test']);
+  assert.deepEqual(catalog.modelIds, ['text-embedding-test', 'chat-test', 'rerank-test']);
   assert.equal(calls.models, 1);
   assert.equal(calls.embedding, 0);
 

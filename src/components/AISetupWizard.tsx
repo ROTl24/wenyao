@@ -15,10 +15,12 @@ interface Props {
 
 interface CapabilityForm {
   apiUrl: string;
+  addressMode: 'auto' | 'exact';
   apiKey: string;
   model: string;
   models: string[];
   credentialSource?: AICapability;
+  dirty: boolean;
 }
 
 const capabilityOrder = ['generation', 'embedding', 'rerank'] as const;
@@ -28,31 +30,31 @@ const descriptions: Record<AICapability, string> = {
   embedding: '从古籍中找出语义相关的证据，提高召回精度；没有也可以继续使用本地关键词检索。',
   rerank: '对关键词与向量召回的候选做第二次排序，进一步提高证据精度。',
 };
-const { capabilityConnection, normalizeCapabilityLocation } = setupCore as {
-  capabilityConnection(input: { capability: AICapability; apiUrl: string; model: string; id?: string; createdAt?: string; dimensions?: number }): AIConnection;
-  normalizeCapabilityLocation(capability: AICapability, apiUrl: string): { baseUrl: string; canonicalUrl: string };
+const { capabilityConnection, normalizeCapabilityLocation, normalizeApiKey, isLocalApiUrl, capabilityUrl } = setupCore as {
+  capabilityConnection(input: { capability: AICapability; apiUrl: string; addressMode?: 'auto' | 'exact'; model: string; id?: string; createdAt?: string; dimensions?: number }): AIConnection;
+  normalizeCapabilityLocation(capability: AICapability, apiUrl: string, addressMode?: 'auto' | 'exact'): { baseUrl: string; canonicalUrl: string; displayUrl: string };
+  normalizeApiKey(value: string): string;
+  isLocalApiUrl(value: string): boolean;
+  capabilityUrl(connection: AIConnection, capability: AICapability): string;
 };
-
-function apiUrlFor(connection: AIConnection, capability: AICapability): string {
-  const definition = connection.capabilities[capability];
-  return definition?.url || `${connection.baseUrl}${definition?.path || ''}`;
-}
 
 function savedConnection(status: AIConfigStatus, capability: AICapability): AIConnection | null {
   const draftId = status.draft?.pipeline[capability]?.connectionId;
   const activeId = status.activePipeline?.[capability]?.connectionId;
-  return [...(status.draft?.connections || []), ...status.connections]
-    .find((connection) => connection.id === draftId || connection.id === activeId) || null;
+  const connections = [...(status.draft?.connections || []), ...status.connections];
+  return connections.find((connection) => connection.id === (draftId || activeId)) || null;
 }
 
 function initialForms(status: AIConfigStatus): Record<AICapability, CapabilityForm> {
   return Object.fromEntries(capabilityOrder.map((capability) => {
     const connection = savedConnection(status, capability);
     return [capability, {
-      apiUrl: connection ? apiUrlFor(connection, capability) : '',
+      apiUrl: connection ? capabilityUrl(connection, capability) : '',
+      addressMode: connection ? 'exact' : 'auto',
       apiKey: '',
       model: connection?.capabilities[capability]?.model || '',
       models: [],
+      dirty: false,
       ...(connection?.hasApiKey ? { credentialSource: capability } : {}),
     }];
   })) as unknown as Record<AICapability, CapabilityForm>;
@@ -78,33 +80,53 @@ export function AISetupWizard({ catalog, status, onStatus, onReady, onClose }: P
   const needsBulk = Boolean(embeddingConnection && !usesBundledVectorPack(embeddingConnection));
   const batchSize = Math.max(1, Number(embeddingConnection?.capabilities.embedding?.batchSize || 10));
   const batchRequests = Math.ceil(status.corpusCount / batchSize);
+  const location = useMemo(() => {
+    try { return { ...normalizeCapabilityLocation(currentCapability, form.apiUrl, form.addressMode), error: '' }; }
+    catch (error) { return { baseUrl: '', canonicalUrl: '', displayUrl: '', error: form.apiUrl.trim() ? (error as Error).message : '' }; }
+  }, [currentCapability, form.apiUrl, form.addressMode]);
 
   const webOrigins = useMemo(() => {
     if (!isWeb || step > 2 || !form.apiUrl.trim()) return [];
     try {
-      const location = normalizeCapabilityLocation(currentCapability, form.apiUrl);
       const catalogOrigins = validateWebModelCatalog(location.baseUrl).origins;
       if (!form.model.trim()) return catalogOrigins;
-      const capabilityOrigins = validateWebConnection(capabilityConnection({ capability: currentCapability, apiUrl: form.apiUrl, model: form.model })).origins;
+      const capabilityOrigins = validateWebConnection(capabilityConnection({ capability: currentCapability, ...form })).origins;
       return [...new Set([...catalogOrigins, ...capabilityOrigins])].sort();
     } catch { return []; }
-  }, [currentCapability, form.apiUrl, form.model, isWeb, step]);
+  }, [currentCapability, form, isWeb, step, location.baseUrl]);
 
   const updateForm = (capability: AICapability, update: Partial<CapabilityForm>) => {
-    setForms((current) => ({ ...current, [capability]: { ...current[capability], ...update } }));
+    setForms((current) => {
+      const previous = current[capability];
+      const next = { ...previous, ...update };
+      if (update.apiUrl !== undefined && previous.apiUrl !== update.apiUrl) {
+        let sameOrigin = false;
+        try { sameOrigin = new URL(previous.apiUrl).origin === new URL(update.apiUrl).origin; } catch { /* 地址尚未完整。 */ }
+        if (!sameOrigin && previous.apiUrl) {
+          next.apiKey = ''; next.credentialSource = undefined;
+        }
+      }
+      const changed = (['apiUrl', 'addressMode', 'apiKey', 'model', 'credentialSource'] as const)
+        .some((field) => previous[field] !== next[field]);
+      return { ...current, [capability]: { ...next, dirty: previous.dirty || changed } };
+    });
+    if (capability === 'embedding') setBulkConsent(false);
     setNotice('');
   };
 
   const chooseExample = (providerId: string) => {
     const example = catalog.capabilityExamples[currentCapability].find((item) => item.providerId === providerId);
-    if (example) updateForm(currentCapability, { apiUrl: example.apiUrl, model: example.model, models: [] });
+    if (example) updateForm(currentCapability, { apiUrl: example.apiUrl, addressMode: 'auto', model: example.model, models: [] });
   };
 
   const reuseConnection = (source: AICapability) => {
     try {
       const sourceForm = forms[source];
-      const baseUrl = normalizeCapabilityLocation(source, sourceForm.apiUrl).baseUrl;
-      updateForm(currentCapability, { apiUrl: baseUrl, apiKey: '', credentialSource: source });
+      const baseUrl = normalizeCapabilityLocation(source, sourceForm.apiUrl, sourceForm.addressMode).baseUrl;
+      // 沿用操作会明确选择来源；先清除目标密钥，避免保留另一服务的引用。
+      setForms((current) => ({ ...current, [currentCapability]: { ...current[currentCapability], apiUrl: baseUrl, addressMode: 'auto', apiKey: '', credentialSource: source, models: [], dirty: true } }));
+      if (currentCapability === 'embedding') setBulkConsent(false);
+      setNotice('');
     } catch (error) {
       setNotice(error instanceof Error ? error.message : '无法沿用上一项连接。');
     }
@@ -112,7 +134,7 @@ export function AISetupWizard({ catalog, status, onStatus, onReady, onClose }: P
 
   const normalizeApiUrl = () => {
     try {
-      const canonicalUrl = normalizeCapabilityLocation(currentCapability, form.apiUrl).canonicalUrl;
+      const canonicalUrl = normalizeCapabilityLocation(currentCapability, form.apiUrl, form.addressMode).canonicalUrl;
       if (canonicalUrl !== form.apiUrl.trim()) updateForm(currentCapability, { apiUrl: canonicalUrl, models: [] });
     } catch { /* 输入过程中保留原值，由操作入口提供完整校验信息。 */ }
   };
@@ -120,18 +142,20 @@ export function AISetupWizard({ catalog, status, onStatus, onReady, onClose }: P
   const security = () => (isWeb ? { confirmedOrigins: webOrigins } : undefined);
 
   const listModels = async () => {
+    if (busy) return;
     setBusy(true); setNotice('');
     try {
       const result = await desktop.aiConfig.listModels({
         capability: currentCapability,
         apiUrl: form.apiUrl,
-        apiKey: form.apiKey.trim().replace(/^Bearer\s+/i, ''),
+        addressMode: form.addressMode,
+        apiKey: normalizeApiKey(form.apiKey),
         credentialSource: form.credentialSource,
         webSecurity: security(),
       });
       if (!result.ok) setNotice(`${errorText(result.error)} 你仍可手动填写模型名称继续。`);
       else {
-        updateForm(currentCapability, { models: result.modelIds || [], model: result.modelIds?.[0] || form.model });
+        updateForm(currentCapability, { models: result.modelIds || [], model: form.model.trim() ? form.model : result.modelIds?.[0] || '' });
         setNotice(result.warning || `已获取 ${result.modelIds?.length || 0} 个可选模型。`);
       }
     } catch (error) {
@@ -140,14 +164,16 @@ export function AISetupWizard({ catalog, status, onStatus, onReady, onClose }: P
   };
 
   const testCapability = async () => {
+    if (busy) return;
     if (!consent) { setNotice('请先确认数据发送和第三方计费边界。'); return; }
     setBusy(true); setNotice('');
     try {
       const result = await desktop.aiConfig.testCapability({
         capability: currentCapability,
         apiUrl: form.apiUrl,
+        addressMode: form.addressMode,
         model: form.model,
-        apiKey: form.apiKey.trim().replace(/^Bearer\s+/i, ''),
+        apiKey: normalizeApiKey(form.apiKey),
         credentialSource: form.credentialSource,
         consentAccepted: consent,
         webSecurity: security(),
@@ -155,7 +181,7 @@ export function AISetupWizard({ catalog, status, onStatus, onReady, onClose }: P
       if (result.status) onStatus(result.status);
       if (!result.ok) setNotice(errorText(result.error));
       else {
-        updateForm(currentCapability, { apiKey: '', credentialSource: currentCapability });
+        setForms((current) => ({ ...current, [currentCapability]: { ...current[currentCapability], apiKey: '', credentialSource: currentCapability, dirty: false } }));
         setNotice(currentCapability === 'embedding'
           ? `最小测试通过，已读取真实向量维度 ${savedConnection(result.status || status, 'embedding')?.capabilities.embedding?.dimensions || ''}。`
           : '最小测试通过；本次只发送了一次对应能力请求。');
@@ -166,6 +192,11 @@ export function AISetupWizard({ catalog, status, onStatus, onReady, onClose }: P
   };
 
   const complete = async (selected: AICapability[]) => {
+    if (busy) return;
+    if (selected.some((capability) => forms[capability].dirty)) {
+      setNotice('配置已修改，请先完成对应能力的最小测试。');
+      return;
+    }
     if (selected.includes('embedding') && needsBulk && !bulkConsent) {
       setNotice('请先确认古籍段数、预计批次数和服务商费用边界。');
       return;
@@ -189,19 +220,20 @@ export function AISetupWizard({ catalog, status, onStatus, onReady, onClose }: P
   const progress = status.draft?.indexTask?.progress || 0;
   const indexTask = status.draft?.indexTask;
   const indexError = indexTask?.error || undefined;
-  const testPassed = test?.status === 'passed';
-  const canTest = Boolean(form.apiUrl.trim() && form.model.trim() && (form.apiKey.trim() || form.credentialSource));
+  const testPassed = test?.status === 'passed' && !form.dirty;
+  const hasCredential = Boolean(form.apiKey.trim() || form.credentialSource || (!isWeb && isLocalApiUrl(form.apiUrl)));
+  const canTest = Boolean(location.displayUrl && form.model.trim() && hasCredential);
   const pageExamples = catalog.capabilityExamples[currentCapability];
 
   return (
     <div className="ai-setup-overlay" role="presentation">
       <section className="ai-setup-dialog" role="dialog" aria-modal="true" aria-labelledby="ai-setup-title">
-        <button className="ai-setup-close" type="button" aria-label="关闭 AI 连接向导" onClick={onClose}><X /></button>
+        <button className="ai-setup-close" type="button" disabled={busy} aria-label="关闭 AI 连接向导" onClick={onClose}><X /></button>
         <div className="ai-setup-steps" aria-label="配置步骤">
           {['主模型', '向量模型', '重排模型', '完成'].map((label, index) => <span key={label} className={index <= step ? 'is-active' : ''}>{index + 1}<small>{label}</small></span>)}
         </div>
 
-        {step < 3 ? <>
+        {step < 3 ? <fieldset className="ai-setup-fields" disabled={busy}>
           <header>
             <p>{step === 0 ? '必填' : '可选'}</p>
             <h2 id="ai-setup-title">{labels[currentCapability]}{step ? '（可选）' : ''}</h2>
@@ -223,17 +255,27 @@ export function AISetupWizard({ catalog, status, onStatus, onReady, onClose }: P
           <label className="ai-setup-field">API 调用地址
             <input value={form.apiUrl} onChange={(event) => updateForm(currentCapability, { apiUrl: event.target.value, models: [] })} onBlur={normalizeApiUrl} placeholder="https://api.example.com/v1" />
           </label>
-          <small className="ai-field-help">可填写 Base URL，也可填写该能力的完整接口地址；自定义服务仅填写域名时自动补全 /v1。</small>
+          <label className="ai-setup-field">地址用法
+            <select value={form.addressMode} onChange={(event) => updateForm(currentCapability, { addressMode: event.target.value as CapabilityForm['addressMode'], models: [] })}>
+              <option value="auto">自动补全（Base URL 或标准接口）</option>
+              <option value="exact">完整接口地址（原样调用）</option>
+            </select>
+          </label>
+          <small className="ai-field-help">自动模式下，自定义服务仅填写域名时自动补全 /v1。非标准路径请选择“完整接口地址”。主模型需兼容 OpenAI Chat Completions 协议。</small>
+          {location.displayUrl ? <small className="ai-field-help ai-endpoint-preview">实际调用地址：<code>{location.displayUrl}</code></small> : null}
+          {location.error ? <p className="ai-setup-error">{location.error}</p> : null}
           <label className="ai-setup-field">API Key
             <input type="password" autoComplete="off" value={form.apiKey} onChange={(event) => updateForm(currentCapability, { apiKey: event.target.value, credentialSource: undefined })} placeholder={form.credentialSource ? '已引用安全存储中的密钥；如需更换可直接粘贴' : isWeb ? '仅保留在当前页面的隔离 Worker 内存' : '由系统安全存储加密保存'} />
           </label>
+          <small className="ai-field-help">支持直接粘贴密钥或 Bearer 密钥。{isWeb ? '网页版需要服务商允许浏览器跨域访问（CORS），密钥仅在本次页面会话保留。' : '本机服务不需要密钥时可留空。'}</small>
           <div className="ai-model-picker">
-            <button type="button" disabled={busy || !form.apiUrl.trim() || (!form.apiKey.trim() && !form.credentialSource)} onClick={() => void listModels()}><Search size={15} />获取模型列表</button>
-            {form.models.length ? <select aria-label="选择模型" value={form.model} onChange={(event) => updateForm(currentCapability, { model: event.target.value })}>{form.models.map((model) => <option key={model}>{model}</option>)}</select> : null}
+            <button type="button" disabled={busy || !location.displayUrl || !hasCredential} onClick={() => void listModels()}><Search size={15} />获取模型列表</button>
+            {form.models.length ? <select aria-label="选择模型" value={form.model} onChange={(event) => updateForm(currentCapability, { model: event.target.value })}>{!form.models.includes(form.model) ? <option value={form.model}>{form.model || '选择模型'}（手动填写）</option> : null}{form.models.map((model) => <option key={model}>{model}</option>)}</select> : null}
           </div>
           <label className="ai-setup-field">模型名称
             <input value={form.model} onChange={(event) => updateForm(currentCapability, { model: event.target.value })} placeholder="目录不可用时可手动填写" />
           </label>
+          <small className="ai-field-help">可直接填写服务商提供的任意模型 ID，包括代理别名；无需先获取列表。列表仅供选择，实际能力由最小测试确认。</small>
 
           {step === 0 ? <>
             <div className="ai-data-boundary"><ShieldCheck /><div><strong>数据与费用边界</strong><p>最小测试只发送一次极短请求，不自动重试。正式解读只发送当前问题、排盘和最终选中的少量古籍证据。第三方服务商可能收费；超时也可能已经计费。</p>{isWeb && webOrigins.length ? <ul>{webOrigins.map((origin) => <li key={origin}><code>{origin}</code></li>)}</ul> : null}</div></div>
@@ -250,12 +292,12 @@ export function AISetupWizard({ catalog, status, onStatus, onReady, onClose }: P
             {step === 1 ? <button type="button" disabled={busy} onClick={() => void complete(['generation'])}>跳过向量并完成</button> : null}
             {step === 2 ? <button type="button" disabled={busy} onClick={() => void complete(['generation', 'embedding'])}>跳过重排并完成</button> : null}
             <button type="button" disabled={busy || !canTest || !consent} onClick={() => void testCapability()}><KeyRound size={15} />{busy ? '测试中…' : testPassed ? '重新最小测试' : '最小测试'}</button>
-            {step === 0 ? <button className="primary" type="button" disabled={!testPassed} onClick={() => { setNotice(''); setStep(1); }}>下一步</button> : null}
+            {step === 0 ? <><button type="button" disabled={!testPassed} onClick={() => void complete(['generation'])}>仅用主模型并完成</button><button className="primary" type="button" disabled={!testPassed} onClick={() => { setNotice(''); setStep(1); }}>下一步</button></> : null}
             {step === 1 ? <button className="primary" type="button" disabled={!testPassed || (needsBulk && !bulkConsent)} onClick={() => { setNotice(''); setStep(2); }}>下一步</button> : null}
             {step === 2 ? <button className="primary" type="button" disabled={!testPassed} onClick={() => void complete(['generation', 'embedding', 'rerank'])}>完成配置</button> : null}
           </div>
           <button className="ai-abandon-setup" type="button" onClick={() => void abandon()}>放弃本次配置</button>
-        </> : null}
+        </fieldset> : null}
 
         {step === 3 && !finished ? <>
           <header><p>索引准备</p><h2 id="ai-setup-title">{status.draft?.pipeline.embedding ? '正在准备向量检索' : '正在切换配置'}</h2><span>新配置完全准备成功前，旧的活动方案不会被覆盖。暂停后可手动继续；失败后需重新检测或改用关键词检索，不会自动重试远程请求。</span></header>

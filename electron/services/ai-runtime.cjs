@@ -11,9 +11,12 @@ const {
 } = require('./ai-config.cjs');
 const {
   capabilityConnection,
-  filterModels,
+  capabilityUrl,
+  rankModels,
   generationProbeOptions,
   normalizeCapabilityLocation,
+  normalizeApiKey,
+  isLocalApiUrl: isLocalUrl,
 } = require('../../shared/ai-setup-core.cjs');
 const {
   createProviderClient,
@@ -29,11 +32,6 @@ function runtimeError(message, code, nextAction) {
   error.publicCode = code;
   error.publicNextAction = nextAction;
   return error;
-}
-
-function isLocalUrl(value) {
-  try { return ['localhost', '127.0.0.1'].includes(new URL(value).hostname); }
-  catch { return false; }
 }
 
 function hasConfiguredEndpoint(definition) {
@@ -217,10 +215,13 @@ class AIRuntime {
     return this.#connectionsFor(state, state.draft.connections).get(id) || null;
   }
 
-  #credentialFor(state, capability) {
+  #credentialFor(state, capability, targetUrl) {
     const connection = this.#draftConnectionFor(state, capability)
       || this.#connectionsFor(state).get(state.activePipeline?.[capability]?.connectionId);
     if (!connection) throw runtimeError('无法沿用上一项连接', 'AI_CREDENTIAL_SOURCE_MISSING', '请重新填写 API Key。');
+    if (targetUrl && new URL(targetUrl).origin !== new URL(connection.baseUrl).origin) {
+      throw runtimeError('服务地址已变更，请重新填写 API Key', 'AI_CREDENTIAL_ORIGIN_CHANGED', '已保存的密钥只能沿用于同一服务地址。');
+    }
     const apiKey = this.#decryptSecret(connection);
     if (!apiKey && !isLocalUrl(connection.baseUrl)) {
       throw runtimeError(`${connection.label}尚未保存访问密钥`, 'AI_KEY_REQUIRED', '请重新填写 API Key。');
@@ -349,11 +350,11 @@ class AIRuntime {
   async listModels(payload) {
     const capability = String(payload?.capability || '');
     if (!CAPABILITIES.includes(capability)) throw new Error('未知的 AI 能力');
-    const location = normalizeCapabilityLocation(capability, payload?.apiUrl);
+    const location = normalizeCapabilityLocation(capability, payload?.apiUrl, payload?.addressMode);
     const baseUrl = validateBaseUrl(location.baseUrl);
     const state = this.store.getRawAIState();
-    const apiKey = String(payload?.apiKey || '').trim()
-      || (payload?.credentialSource ? this.#credentialFor(state, payload.credentialSource) : '');
+    const apiKey = normalizeApiKey(payload?.apiKey)
+      || (payload?.credentialSource ? this.#credentialFor(state, payload.credentialSource, baseUrl) : '');
     if (!apiKey && !isLocalUrl(baseUrl)) {
       throw runtimeError('请粘贴 API Key', 'AI_KEY_REQUIRED', 'API Key 可在服务商控制台的 API Keys 或密钥管理页面创建。');
     }
@@ -364,7 +365,7 @@ class AIRuntime {
       signal: AbortSignal.timeout(30000),
       fetchImpl: this.fetchImpl,
     });
-    const modelIds = filterModels(capability, discovered);
+    const modelIds = rankModels(capability, discovered);
     return {
       modelIds,
       ...(modelIds.length ? {} : { warning: '模型目录未标注该类能力，请手动填写服务商文档中的模型名称。' }),
@@ -386,19 +387,18 @@ class AIRuntime {
     const connection = capabilityConnection({
       capability,
       apiUrl: payload?.apiUrl,
+      addressMode: payload?.addressMode,
       model: payload?.model,
       id: previousIsShared ? undefined : previous?.id,
       createdAt: previousIsShared ? undefined : previous?.createdAt,
-      dimensions: previous?.capabilities?.embedding?.dimensions,
     });
-    validateBaseUrl(connection.baseUrl);
-    const submitted = String(payload?.apiKey || '').trim();
-    let apiKey = submitted
-      || (payload?.credentialSource ? this.#credentialFor(state, payload.credentialSource) : '')
-      || (previous ? this.#decryptSecret(previous) : '');
-    if (!apiKey && state.activePipeline?.[capability]) {
-      apiKey = this.#credentialFor({ ...state, draft: null }, capability);
+    if (capability === 'embedding' && previous?.capabilities.embedding?.model === connection.capabilities.embedding.model
+      && capabilityUrl(previous, capability) === capabilityUrl(connection, capability)) {
+      connection.capabilities.embedding.dimensions = previous.capabilities.embedding.dimensions;
     }
+    validateBaseUrl(connection.baseUrl);
+    const apiKey = normalizeApiKey(payload?.apiKey)
+      || (payload?.credentialSource ? this.#credentialFor(state, payload.credentialSource, connection.baseUrl) : '');
     connection.encryptedApiKey = apiKey ? this.#encryptSecret(apiKey) : '';
     if (!connection.encryptedApiKey && !isLocalUrl(connection.baseUrl)) {
       throw runtimeError('请填写 API Key', 'AI_KEY_REQUIRED', 'API Key 可在服务商控制台的密钥管理页面创建。');
@@ -462,7 +462,7 @@ class AIRuntime {
   stagePreset(presetId, apiKey, consentAccepted = false) {
     const state = this.store.getRawAIState();
     const expanded = expandPreset(presetId);
-    const encryptedApiKey = this.#encryptSecret(String(apiKey || '').trim());
+    const encryptedApiKey = this.#encryptSecret(normalizeApiKey(apiKey));
     const connections = [];
     const pipeline = emptyPipeline();
     for (const capability of CAPABILITIES) {
@@ -507,6 +507,8 @@ class AIRuntime {
         capability,
         apiUrl: definition?.url || `${connection?.baseUrl || ''}${definition?.path || ''}`,
         model: definition?.model,
+        credentialSource: capability,
+        addressMode: 'exact',
       });
       if (!result.ok) return result;
     }

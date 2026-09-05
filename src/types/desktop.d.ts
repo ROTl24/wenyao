@@ -211,8 +211,8 @@ export interface DesktopApi {
   aiConfig: {
     getCatalog(): Promise<AIProviderCatalog>;
     getStatus(): Promise<AIConfigStatus>;
-    listModels(payload: { capability: AICapability; apiUrl: string; apiKey?: string; credentialSource?: AICapability; webSecurity?: { confirmedOrigins: string[] } }): Promise<{ ok: boolean; modelIds?: string[]; warning?: string; error?: DesktopError }>;
-    testCapability(payload: { capability: AICapability; apiUrl: string; model: string; apiKey?: string; credentialSource?: AICapability; consentAccepted?: boolean; webSecurity?: { confirmedOrigins: string[] } }): Promise<{ ok: boolean; status?: AIConfigStatus; error?: DesktopError }>;
+    listModels(payload: { capability: AICapability; apiUrl: string; addressMode?: 'auto' | 'exact'; apiKey?: string; credentialSource?: AICapability; webSecurity?: { confirmedOrigins: string[] } }): Promise<{ ok: boolean; modelIds?: string[]; warning?: string; error?: DesktopError }>;
+    testCapability(payload: { capability: AICapability; apiUrl: string; addressMode?: 'auto' | 'exact'; model: string; apiKey?: string; credentialSource?: AICapability; consentAccepted?: boolean; webSecurity?: { confirmedOrigins: string[] } }): Promise<{ ok: boolean; status?: AIConfigStatus; error?: DesktopError }>;
     completeSetup(payload: { capabilities: AICapability[]; bulkEmbeddingAccepted?: boolean }): Promise<{ ok: boolean; status?: AIConfigStatus; error?: DesktopError }>;
     cancelSetup(): Promise<AIConfigStatus>;
     pauseBuild(): Promise<AIConfigStatus>;

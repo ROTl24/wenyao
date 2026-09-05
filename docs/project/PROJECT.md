@@ -20,9 +20,9 @@ last_reviewed: 2026-09-04
 
 ## Current Goal
 
-- 目标版本：`G-013`
-- 目标：Electron 正式 AI 解读与追问不设置应用侧固定总时限，避免长推理在仍可完成时被客户端中止；短时探测和检索继续使用有限时限，远程失败不自动重试。
-- 来源：`user-confirmed` / `code-verified`，依据 2026-09-04 DeepSeek 正式解读在 180 秒处出现的本地 `TimeoutError`、调用账本和故障注入回归。
+- 目标版本：`G-015`
+- 目标：自定义 AI 配置允许完整接口与任意兼容模型 ID，密钥引用清晰，测试与实际生效配置一致。
+- 来源：`user-confirmed` / `code-verified`，依据 API 地址、密钥与模型配置体验问题及跨运行时回归。
 
 ## Scope
 
@@ -43,6 +43,7 @@ last_reviewed: 2026-09-04
 
 | 里程碑 | 状态 | 验收标准 | 证据 |
 |---|---|---|---|
+| 自定义 AI 配置一致性 | `verified` | 完整路径、任意模型 ID、密钥引用、修改后重新测试及向量配置切换在桌面与 PWA 中保持一致 | 共享核心、向导、Runtime 与 Worker 回归 |
 | 跨平台本地优先应用 | `verified` | Electron 与 PWA 构建入口存在，四种起卦和排盘具备自动化测试 | `package.json`、`vite.config.ts`、`src/lib/*.test.ts` |
 | 五书混合检索 | `verified` | 1263 条语料可经共享检索核心检索，分类索引覆盖全部语料 ID | `resources/corpus.json`、`resources/knowledge-index.json`、`shared/retrieval-core.cjs` |
 | 网页古籍分类一致性 | `verified` | 网页统计、书内条目和 AI 检索均使用 495 规则、190 占例、578 义理分类 | 浏览器与 Worker 回归测试、全量测试、PWA 构建验证 |
@@ -60,6 +61,8 @@ last_reviewed: 2026-09-04
 | `0.5.6` 跨渠道发布 | `verified` | GitHub 最新稳定 Release、Windows 更新资产、macOS 通用 DMG 与 Cloudflare Pages 运行资源均来自 `v0.5.6` 实现 | `v0.5.6`、GitHub Actions `33490650166`、远端资产与线上摘要校验 |
 
 ## Current State
+
+- 自定义 AI 接口支持自动补全和完整地址两种用法，并预览实际请求目标；模型列表保留手填值，修改后的配置必须重新测试，主模型可直接完成配置。
 
 - `package.json` 当前版本为 `0.5.6`；桌面正式构建从同一提交打包当前 Renderer、Electron 服务、共享 AI 核心与古籍数据。
 - Electron 主进程、PWA 渲染适配器和 Web AI Worker 均通过 `shared/corpus-knowledge.cjs` 合并正文与分类索引。
@@ -102,3 +105,4 @@ last_reviewed: 2026-09-04
 | `G-011` | `verified` | 2026-09-04 | 阿里云重排端点在最小测试、索引激活和实际调用间使用同一表示契约，缺失端点继续失败关闭 |
 | `G-012` | `verified` | 2026-09-04 | 正式生成请求移除应用侧输入与输出 Token 上限，探测请求继续保持有限单次预算 |
 | `G-013` | `verified` | 2026-09-04 | Electron 正式生成移除 180 秒固定总时限，响应正文超时统一归类且远程请求不自动重试 |
+| `G-015` | `verified` | 2026-09-05 | 完整接口、自定义模型、密钥与测试状态实现一致，跨运行时离线回归及本地浏览器检查通过 |

@@ -17,11 +17,13 @@ import { assertConfirmedOrigins, toDesktopError, usesBundledVectorPack, validate
 
 const workerScope = self as unknown as DedicatedWorkerGlobalScope;
 const capabilities = ['generation', 'embedding', 'rerank'] as const;
-const { capabilityConnection, filterModels, generationProbeOptions, normalizeCapabilityLocation } = setupCore as {
-  capabilityConnection(input: { capability: AICapability; apiUrl: string; model: string; id?: string; createdAt?: string; dimensions?: number }): AIConnection;
-  filterModels(capability: AICapability, models: string[]): string[];
+const { capabilityConnection, capabilityUrl, rankModels, generationProbeOptions, normalizeCapabilityLocation, normalizeApiKey } = setupCore as {
+  capabilityUrl(connection: AIConnection, capability: AICapability): string;
+  capabilityConnection(input: { capability: AICapability; apiUrl: string; addressMode?: 'auto' | 'exact'; model: string; id?: string; createdAt?: string; dimensions?: number }): AIConnection;
+  rankModels(capability: AICapability, models: string[]): string[];
   generationProbeOptions(connection: AIConnection): { maxTokens: number; thinking?: boolean };
-  normalizeCapabilityLocation(capability: AICapability, apiUrl: string): { baseUrl: string };
+  normalizeCapabilityLocation(capability: AICapability, apiUrl: string, addressMode?: 'auto' | 'exact'): { baseUrl: string };
+  normalizeApiKey(value?: string): string;
 };
 const { EMBEDDING_DOCUMENT_VERSION, composeEmbeddingDocument } = embeddingCore as {
   EMBEDDING_DOCUMENT_VERSION: string;
@@ -131,21 +133,24 @@ function ensureDraft() {
   return status.draft;
 }
 
-function keyForCapability(capability: AICapability): string {
+function keyForCapability(capability: AICapability, targetUrl: string): string {
   const connection = connectionFor(status.draft?.pipeline || status.activePipeline, capability) || connectionFor(status.activePipeline, capability);
+  if (connection && new URL(targetUrl).origin !== new URL(connection.baseUrl).origin) {
+    throw new WebAIError({ code: 'WEB_AI_CREDENTIAL_ORIGIN_CHANGED', message: '服务地址已变更，请重新填写 API Key。', dataSafe: true, nextAction: '已保存的密钥只能沿用于同一服务地址。' });
+  }
   const key = connection && keys.get(connection.id);
   if (!key) throw new WebAIError({ code: 'WEB_AI_KEY_REQUIRED', message: '无法沿用该连接的访问密钥。', dataSafe: true, nextAction: '请重新填写 API Key。' });
   return key;
 }
 
 async function listModels(payload: Parameters<DesktopApi['aiConfig']['listModels']>[0]) {
-  const location = normalizeCapabilityLocation(payload.capability, payload.apiUrl);
+  const location = normalizeCapabilityLocation(payload.capability, payload.apiUrl, payload.addressMode);
   const catalog = validateWebModelCatalog(location.baseUrl);
   assertConfirmedOrigins(catalog.origins, payload.webSecurity as WebSecurityConfirmation | undefined);
-  const apiKey = String(payload.apiKey || '').trim() || (payload.credentialSource ? keyForCapability(payload.credentialSource) : '');
+  const apiKey = normalizeApiKey(payload.apiKey) || (payload.credentialSource ? keyForCapability(payload.credentialSource, catalog.baseUrl) : '');
   if (!apiKey) throw new WebAIError({ code: 'WEB_AI_KEY_REQUIRED', message: '请填写 API Key。', dataSafe: true, nextAction: '密钥只会保留在当前页面的隔离 Worker 内存。' });
   const discovered = await discoverWebModels(catalog.baseUrl, apiKey, payload.capability);
-  const modelIds = filterModels(payload.capability, discovered);
+  const modelIds = rankModels(payload.capability, discovered);
   return { ok: true, modelIds, ...(modelIds.length ? {} : { warning: '模型目录未标注该类能力，请手动填写模型名称。' }) };
 }
 
@@ -159,17 +164,19 @@ async function testCapability(payload: TestCapabilityPayload): Promise<{ ok: boo
     const requested = capabilityConnection({
       capability: payload.capability,
       apiUrl: payload.apiUrl,
+      addressMode: payload.addressMode,
       model: payload.model,
       id: shared || activeOnly ? undefined : previous?.id,
       createdAt: shared || activeOnly ? undefined : previous?.createdAt,
-      dimensions: previous?.capabilities.embedding?.dimensions,
     });
+    if (payload.capability === 'embedding' && previous && previous.capabilities.embedding?.model === requested.capabilities.embedding?.model
+      && capabilityUrl(previous, 'embedding') === capabilityUrl(requested, 'embedding')) {
+      requested.capabilities.embedding!.dimensions = previous.capabilities.embedding!.dimensions;
+    }
     const validated = validateWebConnection(requested);
     assertConfirmedOrigins(validated.origins, payload.webSecurity as WebSecurityConfirmation | undefined);
-    const apiKey = String(payload.apiKey || '').trim()
-      || (payload.credentialSource ? keyForCapability(payload.credentialSource) : '')
-      || (previous ? keys.get(previous.id) : '')
-      || (connectionFor(status.activePipeline, payload.capability) ? keyForCapability(payload.capability) : '');
+    const apiKey = normalizeApiKey(payload.apiKey)
+      || (payload.credentialSource ? keyForCapability(payload.credentialSource, validated.connection.baseUrl) : '');
     if (!apiKey) throw new WebAIError({ code: 'WEB_AI_KEY_REQUIRED', message: '请填写 API Key。', dataSafe: true, nextAction: '密钥只会保留在当前页面的隔离 Worker 内存。' });
     keys.set(validated.connection.id, apiKey);
     confirmedOrigins.set(validated.connection.id, validated.origins);
@@ -208,7 +215,7 @@ async function testCapability(payload: TestCapabilityPayload): Promise<{ ok: boo
 
 function fingerprint(connection: AIConnection): string {
   const embedding = connection.capabilities.embedding!;
-  return [new URL(connection.baseUrl).origin, embedding.model, embedding.dimensions, vectorMetadata.corpusHash, EMBEDDING_DOCUMENT_VERSION].join('|');
+  return [capabilityUrl(connection, 'embedding'), embedding.model, embedding.dimensions, vectorMetadata.corpusHash, EMBEDDING_DOCUMENT_VERSION].join('|');
 }
 
 function openVectorDatabase(): Promise<IDBDatabase> {
