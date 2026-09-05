@@ -105,7 +105,7 @@
 - 🖥️ **Windows** x64 桌面版
 - 🍎 **macOS** 13+ Intel / Apple Silicon
 - 📱 **手机 PWA** 安装到主屏幕
-- 🔄 应用内自动更新
+- 🔄 Windows 应用内更新；macOS 手动覆盖安装
 
 </td>
 </tr>

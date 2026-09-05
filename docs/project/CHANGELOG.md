@@ -12,6 +12,17 @@ last_reviewed: 2026-09-06
 
 ## Entries
 
+### CHG-20260906-release-057
+
+- 日期：2026-09-06（Asia/Singapore）。
+- 结果：`0.5.7` 将长文流式阅读、停止及草稿、结果导航、占簿备份恢复与复盘、新手模板和 AI 配置改进同步发布到 GitHub 源码、Cloudflare Pages、Windows 安装包与 macOS 通用 DMG。
+- 验证：本地 306 项 Renderer、165 项 Electron 回归通过；Windows 安装包、类型、Renderer 构建与 PWA 产物通过校验。GitHub Actions `33990404576` 的 Windows、macOS Apple Silicon、Intel 与 publish 四项任务成功；最新稳定 Release 五项文件已下载，逐项大小及 SHA-256 与 GitHub 摘要一致，Windows SHA-512 更新元数据和 DMG 校验清单均匹配。
+- 网站：主 JS、CSS、AI Worker、manifest 与本地构建字节一致。HTML 除构建换行与托管分析脚本外一致；Service Worker 预缓存 URL、资源版本和行为一致。关闭旧缓存控制的验收标签后重开，实际加载新主 Bundle，并验证事项模板、备份入口和三种复盘状态，控制台无错误。
+- Git：发布源码 `b22c0c8`，标签 `v0.5.7`；后续提交只补发布记录与更新说明，不改变桌面产物。
+- 边界：Windows 更新需用户确认下载，macOS 手动覆盖安装；没有静默安装本机软件，没有执行真实付费模型调用。
+- Agent Note：[桌面更新与发布契约](../../.agents/notes/implemented/architecture/2026-08-27-desktop-update-release-contract.md)。
+- 文档影响：README、PROJECT、PROJECT_CONTEXT、CHANGELOG，更新既有发布与生成任务 Note；无新增架构决策或事故教训。
+
 ### CHG-20260906-long-report-reading
 
 - 日期：2026-09-06

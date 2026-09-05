@@ -30,3 +30,5 @@ Windows `0.5.3` 及后续正式安装版能够发现更高版本的最新稳定 
 - `0.5.4` 本地验收通过 245 项 Renderer 测试和 134 项 Electron 测试；Windows 安装包为 151,282,377 字节，打包后的主 Bundle、AI 地址核心、Chat 响应核心、古籍分类核心与 Electron Provider 均和当前源码构建逐字节一致。
 - `0.5.6` 通过 266 项 Renderer 测试和 140 项 Electron 测试；GitHub Actions `33490650166` 完成 Windows、macOS Apple Silicon、Intel 运行时与发布任务，最新稳定 Release 的五项资产、`latest.yml` 和 DMG SHA-256 清单均有效。
 - 正式发布验收比较远端 `latest.yml` 与 Release 资产，并从旧版本号验证稳定通道选择新版本。
+
+- `0.5.7` 发布源码 `b22c0c8`，GitHub Actions `33990404576` 的 Windows、Apple Silicon、Intel 和 publish 全部成功；最新稳定 Release 的五项公开资产下载后大小与 SHA-256 一致，Windows `latest.yml` SHA-512 和 DMG 清单匹配。网站运行资产与发布构建一致，旧 Worker 控制的验收页关闭重开后实际载入新版。
